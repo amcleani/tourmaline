@@ -1,8 +1,9 @@
 //! SQLite storage. The schema is versioned with `PRAGMA user_version`; each
 //! entry in `MIGRATIONS` moves the database up one version.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -39,10 +40,14 @@ pub struct Db {
 
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+        let dir = path.parent().unwrap_or(Path::new("."));
+        std::fs::create_dir_all(dir)?;
+        let conn = Connection::open(path)?;
+        // Snapshot before migrating, so a bad migration can be undone by hand.
+        if let Err(e) = backup_daily(&conn, &dir.join("backups"), &today(), BACKUPS_KEPT) {
+            eprintln!("Tourmaline: could not back up the library database: {e}");
         }
-        Self::init(Connection::open(path)?)
+        Self::init(conn)
     }
 
     #[cfg(test)]
@@ -140,6 +145,67 @@ impl Db {
     }
 }
 
+const BACKUPS_KEPT: usize = 14;
+
+/// Writes `library-<date>.sqlite3` into `dir` unless today's snapshot exists,
+/// then deletes all but the newest `keep` snapshots. Does nothing for a new,
+/// empty database. Returns the snapshot written, if any.
+fn backup_daily(conn: &Connection, dir: &Path, date: &str, keep: usize) -> Result<Option<PathBuf>> {
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version == 0 {
+        return Ok(None);
+    }
+    std::fs::create_dir_all(dir)?;
+    let target = dir.join(format!("library-{date}.sqlite3"));
+    let written = if target.exists() {
+        None
+    } else {
+        // VACUUM INTO produces a consistent copy that includes the WAL.
+        conn.execute("VACUUM INTO ?1", [target.to_string_lossy()])?;
+        Some(target)
+    };
+
+    let mut snapshots: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("library-") && n.ends_with(".sqlite3"))
+        })
+        .collect();
+    // ISO dates sort chronologically as strings.
+    snapshots.sort();
+    let excess = snapshots.len().saturating_sub(keep);
+    for old in &snapshots[..excess] {
+        std::fs::remove_file(old)?;
+    }
+    Ok(written)
+}
+
+/// Today's UTC date as YYYY-MM-DD.
+fn today() -> String {
+    let days = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() / 86_400)
+        .unwrap_or(0) as i64;
+    let (y, m, d) = civil_from_days(days);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Days since 1970-01-01 to a Gregorian date (Howard Hinnant's algorithm).
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    (y, m, d)
+}
+
 fn migrate(conn: &mut Connection) -> Result<()> {
     let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
@@ -218,5 +284,59 @@ mod tests {
         db.set_state("tabs", "[1]").unwrap();
         db.set_state("tabs", "[2]").unwrap();
         assert_eq!(db.get_state("tabs").unwrap().as_deref(), Some("[2]"));
+    }
+
+    #[test]
+    fn converts_days_to_dates() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(11_016), (2000, 2, 29));
+        assert_eq!(civil_from_days(20_725), (2026, 9, 29));
+    }
+
+    #[test]
+    fn backs_up_once_a_day_and_prunes_old_snapshots() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        let backups = dir.path().join("backups");
+
+        // A brand-new database is not worth a backup.
+        let fresh = Connection::open(&path).unwrap();
+        assert_eq!(backup_daily(&fresh, &backups, "2026-01-01", 2).unwrap(), None);
+        drop(fresh);
+
+        let db = Db::open(&path).unwrap();
+        db.record_open(&doc("a", "/p/a.pdf", 1)).unwrap();
+        drop(db);
+
+        let conn = Connection::open(&path).unwrap();
+        let first = backup_daily(&conn, &backups, "2026-01-01", 2).unwrap().unwrap();
+        assert_eq!(backup_daily(&conn, &backups, "2026-01-01", 2).unwrap(), None);
+        backup_daily(&conn, &backups, "2026-01-02", 2).unwrap();
+        backup_daily(&conn, &backups, "2026-01-03", 2).unwrap();
+
+        let mut names: Vec<_> = std::fs::read_dir(&backups)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["library-2026-01-02.sqlite3", "library-2026-01-03.sqlite3"]);
+        assert!(!first.exists());
+
+        // Snapshots are complete databases, including rows still in the WAL.
+        let copy = Connection::open(backups.join("library-2026-01-03.sqlite3")).unwrap();
+        let n: i64 = copy.query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn two_connections_see_each_others_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        let a = Db::open(&path).unwrap();
+        let b = Db::open(&path).unwrap();
+        a.record_open(&doc("a", "/p/a.pdf", 1)).unwrap();
+        b.record_open(&doc("b", "/p/b.pdf", 2)).unwrap();
+        assert_eq!(a.document_count().unwrap(), 2);
+        assert_eq!(b.document_count().unwrap(), 2);
     }
 }

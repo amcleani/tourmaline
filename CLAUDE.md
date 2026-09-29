@@ -60,7 +60,10 @@ hashing run in `spawn_blocking`. PDF bytes return as a binary
 annotations survive renames/moves (`src-tauri/src/documents.rs`). SQLite lives
 in the app data dir (`library.sqlite3`), accessed through `Db` in `db.rs`.
 Schema changes are appended to `MIGRATIONS` (applied by `PRAGMA user_version`);
-never edit an existing migration.
+never edit an existing migration. On startup, before migrating, a daily
+snapshot goes to `backups/library-<date>.sqlite3` next to the database (14
+kept). The app is single-instance (tauri-plugin-single-instance) so only one
+process writes the library; it logs the database path at startup.
 
 **Viewer.** `src/pdf/PdfViewer.tsx` renders pages lazily with an
 IntersectionObserver; sizes use CSS px = PDF pt × 96/72 × zoom, canvases are
