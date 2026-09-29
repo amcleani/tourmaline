@@ -1,6 +1,6 @@
 import { useRef, useSyncExternalStore } from "react";
 import type { CommandRegistry } from "../commands/registry";
-import { formatShortcut } from "../commands/shortcuts";
+import { formatShortcut, toAriaShortcut } from "../commands/shortcuts";
 import { Icon } from "./icons";
 
 // ARIA toolbar: one Tab stop, arrow keys move between buttons. Disabled
@@ -42,7 +42,7 @@ export function Toolbar({ registry, children }: { registry: CommandRegistry; chi
             className="toolbar-button"
             tabIndex={i === 0 ? 0 : -1}
             aria-label={c.title}
-            aria-keyshortcuts={c.shortcut}
+            aria-keyshortcuts={c.shortcut ? toAriaShortcut(c.shortcut) : undefined}
             aria-disabled={!enabled}
             title={label}
             onClick={() => enabled && registry.execute(c.id, "toolbar")}

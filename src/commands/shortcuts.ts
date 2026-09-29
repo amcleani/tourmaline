@@ -66,20 +66,51 @@ export function normaliseShortcut(shortcut: string): string {
     else key = normaliseKey(part);
   }
   if (!key) throw new Error(`Shortcut "${shortcut}" has no key`);
+  // Symbols are matched by the character typed, and Shift is ignored for them
+  // (see eventToShortcut), so a definition can't meaningfully include it.
+  if (isSymbolKey(key)) mods.delete("Shift");
   return [...MODIFIER_ORDER.filter((m) => mods.has(m)), key].join("+");
 }
 
-/** Canonical form of a keyboard event, comparable with normaliseShortcut output. */
-export function eventToShortcut(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey">): string | null {
+/** Punctuation such as "/", "=", "-", "[": a single character that isn't a letter, digit or space. */
+function isSymbolKey(key: string): boolean {
+  return /^[^\p{L}\p{N}\s]$/u.test(key);
+}
+
+export type ShortcutEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey"> &
+  Partial<Pick<KeyboardEvent, "code">>;
+
+/**
+ * Canonical form of a keyboard event, comparable with normaliseShortcut output.
+ *
+ * Keyboard layouts disagree about which characters need Shift ("/" is Shift+7
+ * on Italian and German layouts, digits need Shift on French ones), so:
+ * - symbols use the character typed, and Shift is ignored, since the
+ *   character already reflects it;
+ * - otherwise keys on the digit row or numpad use the physical digit (so
+ *   French "à" on the 0 key is still Ctrl+0), and Shift counts;
+ * - letters and named keys use the key typed, and Shift counts.
+ */
+export function eventToShortcut(e: ShortcutEvent): string | null {
   if (["Control", "Alt", "Shift", "Meta", "OS"].includes(e.key)) return null;
+  const typed = normaliseKey(e.key);
+  const digit = e.code?.match(/^(?:Digit|Numpad)(\d)$/)?.[1];
+  const key = isSymbolKey(typed) ? typed : (digit ?? typed);
   const mods: Modifier[] = [];
   if (e.ctrlKey) mods.push("Ctrl");
   if (e.altKey) mods.push("Alt");
-  if (e.shiftKey) mods.push("Shift");
+  if (e.shiftKey && !isSymbolKey(key)) mods.push("Shift");
   if (e.metaKey) mods.push("Meta");
-  // "+" is typed as Shift+= on most layouts; treat it as the "=" key.
-  const key = e.key === "+" ? "=" : normaliseKey(e.key);
   return [...mods, key].join("+");
+}
+
+/** Value for the aria-keyshortcuts attribute, which uses KeyboardEvent.key names. */
+export function toAriaShortcut(shortcut: string): string {
+  const names: Record<string, string> = { Ctrl: "Control", Space: "Space" };
+  return normaliseShortcut(shortcut)
+    .split(/\+(?!$)/)
+    .map((p) => names[p] ?? p)
+    .join("+");
 }
 
 /** Human-readable label for menus, tooltips and the palette. */

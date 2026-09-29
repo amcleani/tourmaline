@@ -1,4 +1,4 @@
-import { eventToShortcut, normaliseShortcut } from "./shortcuts";
+import { eventToShortcut, normaliseShortcut, type ShortcutEvent } from "./shortcuts";
 
 // Every user-facing action is a Command. Menus, the toolbar, the command
 // palette, context menus and keyboard shortcuts are all generated from this one
@@ -48,6 +48,7 @@ export class CommandRegistry {
   private listeners = new Set<Listener>();
   private lastRun: { id: string; source: ExecutionSource; at: number } | null = null;
   private version = 0;
+  private structureVersion = 0;
 
   constructor(
     private getContext: () => CommandContext,
@@ -63,6 +64,7 @@ export class CommandRegistry {
       this.byShortcut.set(key, command.id);
     }
     this.commands.set(command.id, command);
+    this.structureVersion++;
     this.emit();
     return () => this.unregister(command.id);
   }
@@ -72,6 +74,7 @@ export class CommandRegistry {
     if (!command) return;
     if (command.shortcut) this.byShortcut.delete(normaliseShortcut(command.shortcut));
     this.commands.delete(id);
+    this.structureVersion++;
     this.emit();
   }
 
@@ -120,7 +123,7 @@ export class CommandRegistry {
   }
 
   /** Finds the command bound to a key event, if any. */
-  commandForEvent(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey">): Command | undefined {
+  commandForEvent(e: ShortcutEvent): Command | undefined {
     const shortcut = eventToShortcut(e);
     if (!shortcut) return undefined;
     const id = this.byShortcut.get(shortcut);
@@ -147,6 +150,11 @@ export class CommandRegistry {
   /** Changes whenever commands or their context change; for useSyncExternalStore. */
   getVersion(): number {
     return this.version;
+  }
+
+  /** Changes only when commands are added or removed; menus rebuild when it does. */
+  getStructureVersion(): number {
+    return this.structureVersion;
   }
 
   subscribe(listener: Listener): () => void {

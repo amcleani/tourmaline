@@ -10,13 +10,11 @@ use db::Db;
 use documents::DocumentInfo;
 use error::Result;
 
-/// Fingerprints a PDF and records it in the library. Hashing runs off the
-/// async runtime so large books don't stall other commands.
+/// Records that a document was opened. The id is the SHA-256 the frontend
+/// computed from the bytes returned by `read_document`.
 #[tauri::command]
-async fn open_document(path: PathBuf, db: State<'_, Db>) -> Result<DocumentInfo> {
-    let info = tauri::async_runtime::spawn_blocking(move || documents::describe(&path))
-        .await
-        .map_err(|e| error::Error::Message(e.to_string()))??;
+fn record_open(path: PathBuf, id: String, size: u64, db: State<'_, Db>) -> Result<DocumentInfo> {
+    let info = documents::describe(&path, id, size)?;
     db.record_open(&info)?;
     Ok(info)
 }
@@ -52,7 +50,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            open_document,
+            record_open,
             read_document,
             recent_documents
         ])

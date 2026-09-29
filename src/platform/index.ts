@@ -26,9 +26,11 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 }
 
 export async function openPdfAtPath(path: string): Promise<OpenedDocument> {
-  const info = await invoke<DocumentInfo>("open_document", { path });
-  const buffer = await invoke<ArrayBuffer>("read_document", { path });
-  return { info, bytes: new Uint8Array(buffer) };
+  const bytes = new Uint8Array(await invoke<ArrayBuffer>("read_document", { path }));
+  // Fingerprint the bytes actually shown, so the id always matches them.
+  const id = await sha256Hex(bytes);
+  const info = await invoke<DocumentInfo>("record_open", { path, id, size: bytes.byteLength });
+  return { info, bytes };
 }
 
 /** Shows a file picker. Resolves to null if the user cancels. */
@@ -88,7 +90,7 @@ function pickInBrowser(): Promise<OpenedDocument | null> {
   });
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

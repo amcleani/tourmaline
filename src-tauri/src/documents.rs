@@ -1,12 +1,9 @@
-//! Opening documents: fingerprinting file contents and reading bytes.
+//! Reading documents and describing them for the library.
 
-use std::fs::File;
-use std::io::Read;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
 
@@ -14,7 +11,8 @@ use crate::error::{Error, Result};
 #[serde(rename_all = "camelCase")]
 pub struct DocumentInfo {
     /// SHA-256 of the file contents, so a paper keeps its identity (and later
-    /// its annotations) when it is renamed or moved.
+    /// its annotations) when it is renamed or moved. Computed by the frontend
+    /// from the same bytes it displays.
     pub id: String,
     pub path: String,
     pub name: String,
@@ -23,26 +21,20 @@ pub struct DocumentInfo {
     pub last_opened: i64,
 }
 
-/// Hex-encoded SHA-256 of a file, read in chunks so large books stay cheap on memory.
-pub fn fingerprint(path: &Path) -> Result<String> {
-    let mut file = File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 1 << 20];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+pub fn read(path: &Path) -> Result<Vec<u8>> {
+    ensure_pdf(path)?;
+    Ok(std::fs::read(path)?)
 }
 
-pub fn describe(path: &Path) -> Result<DocumentInfo> {
+/// Builds the library entry for a document the frontend has just opened.
+pub fn describe(path: &Path, id: String, size: u64) -> Result<DocumentInfo> {
     ensure_pdf(path)?;
-    let size = std::fs::metadata(path)?.len();
+    let is_sha256 = id.len() == 64 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    if !is_sha256 {
+        return Err(Error::Message(format!("invalid document id {id:?}")));
+    }
     Ok(DocumentInfo {
-        id: fingerprint(path)?,
+        id,
         path: path.to_string_lossy().into_owned(),
         name: path
             .file_name()
@@ -51,11 +43,6 @@ pub fn describe(path: &Path) -> Result<DocumentInfo> {
         size,
         last_opened: now_millis(),
     })
-}
-
-pub fn read(path: &Path) -> Result<Vec<u8>> {
-    ensure_pdf(path)?;
-    Ok(std::fs::read(path)?)
 }
 
 /// The reader only ever needs PDFs; refusing anything else keeps the file
@@ -81,24 +68,9 @@ fn now_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::fs::File;
 
-    #[test]
-    fn fingerprint_depends_only_on_contents() {
-        let dir = tempfile::tempdir().unwrap();
-        let a = dir.path().join("a.pdf");
-        let b = dir.path().join("b.pdf");
-        File::create(&a).unwrap().write_all(b"%PDF-1.7 same").unwrap();
-        File::create(&b).unwrap().write_all(b"%PDF-1.7 same").unwrap();
-        assert_eq!(fingerprint(&a).unwrap(), fingerprint(&b).unwrap());
-        // Known SHA-256 of the empty string, as a sanity check of the encoding.
-        let empty = dir.path().join("empty.pdf");
-        File::create(&empty).unwrap();
-        assert_eq!(
-            fingerprint(&empty).unwrap(),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-    }
+    const HASH: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
     #[test]
     fn refuses_non_pdf_files() {
@@ -106,6 +78,21 @@ mod tests {
         let txt = dir.path().join("notes.txt");
         File::create(&txt).unwrap();
         assert!(read(&txt).is_err());
-        assert!(describe(&txt).is_err());
+        assert!(describe(&txt, HASH.into(), 0).is_err());
+    }
+
+    #[test]
+    fn describes_with_file_name() {
+        let info = describe(Path::new("/lib/Paper 2023.PDF"), HASH.into(), 42).unwrap();
+        assert_eq!(info.name, "Paper 2023.PDF");
+        assert_eq!(info.size, 42);
+    }
+
+    #[test]
+    fn rejects_ids_that_are_not_sha256_hex() {
+        let p = Path::new("/lib/a.pdf");
+        assert!(describe(p, "abc".into(), 0).is_err());
+        assert!(describe(p, HASH.to_uppercase(), 0).is_err());
+        assert!(describe(p, format!("{}/", &HASH[..63]), 0).is_err());
     }
 }

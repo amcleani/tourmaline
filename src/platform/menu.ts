@@ -2,15 +2,48 @@ import { MENU_ORDER, type CommandRegistry } from "../commands/registry";
 import { toAccelerator } from "../commands/shortcuts";
 import { isTauri } from "./index";
 
-// Builds the native menu bar from the command registry and keeps each item's
-// enabled state in sync with the current context.
+// Builds the native menu bar from the command registry. When commands are
+// added or removed the whole menu is rebuilt; otherwise only each item's
+// enabled state is updated.
+
+type MenuItemHandle = Awaited<ReturnType<typeof import("@tauri-apps/api/menu").MenuItem.new>>;
 
 export async function installNativeMenu(registry: CommandRegistry): Promise<() => void> {
   if (!isTauri()) return () => {};
-  const { Menu, Submenu, MenuItem, PredefinedMenuItem } = await import("@tauri-apps/api/menu");
 
-  const items = new Map<string, Awaited<ReturnType<typeof MenuItem.new>>>();
-  const submenus: Awaited<ReturnType<typeof Submenu.new>>[] = [];
+  let items = new Map<string, MenuItemHandle>();
+  let builtFor = -1;
+  // Rebuilds and syncs are async; chaining them keeps them from interleaving.
+  let queue: Promise<void> = Promise.resolve();
+  let disposed = false;
+
+  const update = () => {
+    queue = queue
+      .then(async () => {
+        if (disposed) return;
+        if (builtFor !== registry.getStructureVersion()) {
+          builtFor = registry.getStructureVersion();
+          items = await buildMenu(registry);
+        } else {
+          const ctx = registry.context();
+          await Promise.all([...items].map(([id, item]) => item.setEnabled(registry.isEnabled(id, ctx))));
+        }
+      })
+      .catch((e) => console.error("Could not update the menu", e));
+  };
+
+  update();
+  const unsubscribe = registry.subscribe(update);
+  return () => {
+    disposed = true;
+    unsubscribe();
+  };
+}
+
+async function buildMenu(registry: CommandRegistry): Promise<Map<string, MenuItemHandle>> {
+  const { Menu, Submenu, MenuItem, PredefinedMenuItem } = await import("@tauri-apps/api/menu");
+  const items = new Map<string, MenuItemHandle>();
+  const submenus = [];
 
   for (const menuId of MENU_ORDER) {
     const groups = registry.menuGroups(menuId);
@@ -21,7 +54,6 @@ export async function installNativeMenu(registry: CommandRegistry): Promise<() =
       if (i > 0) entries.push(await PredefinedMenuItem.new({ item: "Separator" }));
       for (const command of group) {
         const item = await MenuItem.new({
-          id: command.id,
           text: command.title,
           accelerator: command.shortcut ? toAccelerator(command.shortcut) : undefined,
           enabled: registry.isEnabled(command.id),
@@ -37,12 +69,5 @@ export async function installNativeMenu(registry: CommandRegistry): Promise<() =
 
   const menu = await Menu.new({ items: submenus });
   await menu.setAsAppMenu();
-
-  const sync = () => {
-    const ctx = registry.context();
-    for (const [id, item] of items) {
-      item.setEnabled(registry.isEnabled(id, ctx)).catch(() => {});
-    }
-  };
-  return registry.subscribe(sync);
+  return items;
 }

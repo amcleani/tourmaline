@@ -41,10 +41,7 @@ export function App() {
   const showDocument = useCallback(
     async (opened: OpenedDocument) => {
       const pdf = await loadPdf(opened.bytes);
-      setCurrent((prev) => {
-        void prev?.pdf.loadingTask.destroy();
-        return { info: opened.info, pdf };
-      });
+      setCurrent({ info: opened.info, pdf });
       setError(null);
       refreshRecent();
     },
@@ -85,16 +82,18 @@ export function App() {
 
   useEffect(refreshRecent, [refreshRecent]);
 
+  // Free the pdf.js document (and its worker memory) once it is replaced or closed.
+  useEffect(() => {
+    if (!current) return;
+    return () => void current.pdf.loadingTask.destroy();
+  }, [current]);
+
   // Register commands once. Actions read state through setState callbacks, so
   // they never go stale.
   useEffect(() => {
     const unregister = appCommands({
       openFile,
-      closeDocument: () =>
-        setCurrent((prev) => {
-          void prev?.pdf.loadingTask.destroy();
-          return null;
-        }),
+      closeDocument: () => setCurrent(null),
       quit: quitApp,
       zoomIn: () => setZoom((z) => nextZoom(z, 1)),
       zoomOut: () => setZoom((z) => nextZoom(z, -1)),
@@ -157,7 +156,7 @@ export function App() {
       {current ? (
         <PdfViewer key={current.info.id} doc={current.pdf} name={current.info.name} zoom={zoom} />
       ) : (
-        <Welcome recent={recent} onOpen={openFile} onOpenRecent={openRecent} />
+        <Welcome recent={recent} onOpen={() => registry.execute("file.open", "other")} onOpenRecent={openRecent} />
       )}
       {paletteOpen && <CommandPalette registry={registry} onClose={() => setPaletteOpen(false)} />}
       {shortcutsOpen && <ShortcutsDialog registry={registry} onClose={() => setShortcutsOpen(false)} />}
