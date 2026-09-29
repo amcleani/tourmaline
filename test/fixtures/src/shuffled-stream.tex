@@ -1,0 +1,72 @@
+% Fixture: shuffled-stream
+% Pages whose content-stream order is deliberately NOT the reading order.
+% In ordinary LaTeX output the order in which text is drawn (and therefore the
+% order of pdf.js text items) usually matches reading order, so an algorithm
+% can look correct just by keeping item order. Here every block is placed at
+% an absolute position with textpos and the blocks are emitted in a scrambled
+% order, so only geometry can recover the reading order.
+%
+% US Letter. Page 1: two columns under a full-width title and abstract.
+% Page 2: one column. Positions are in inches from the top-left corner.
+\documentclass[10pt]{article}
+\input{fixture-common}
+\usepackage[letterpaper,margin=0.75in]{geometry}
+\usepackage[absolute]{textpos}
+\setlength{\TPHorizModule}{1in}
+\setlength{\TPVertModule}{1in}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+
+% Left column x = 0.75in, right column x = 4.45in, width 3.3in each.
+\newcommand{\leftcol}[2]{\begin{textblock*}{3.3in}(0.75in,#1in)#2\end{textblock*}}
+\newcommand{\rightcol}[2]{\begin{textblock*}{3.3in}(4.45in,#1in)#2\end{textblock*}}
+\newcommand{\fullwidth}[2]{\begin{textblock*}{7in}(0.75in,#1in)#2\end{textblock*}}
+
+\begin{document}
+\null
+% ------------------------------------------------------------------- page 1
+% Emission order: right-2, left-1, right-1, abstract, left-2, title.
+\rightcol{4.2}{%
+  In the second paragraph of the right column we note that the drawing order
+  inside a file is an accident of the software that wrote it. Two files that
+  look identical on screen can store their text in completely different
+  orders.}
+\leftcol{2.9}{%
+  \textbf{1\quad Introduction}\par\medskip
+  The first paragraph of the left column is where reading begins below the
+  abstract. In this file it is stored after the second paragraph of the right
+  column, so a reader that trusts the storage order will start in the wrong
+  place.}
+\rightcol{2.9}{%
+  \textbf{2\quad Storage order}\par\medskip
+  The right column opens with a new section. It is read only after both
+  paragraphs of the left column, even though it sits at the same height as
+  the first of them.}
+\fullwidth{1.6}{%
+  \centerline{\textbf{Abstract}}\par\smallskip
+  This page stores its paragraphs in a scrambled order. The title is drawn
+  last, the abstract in the middle, and the columns out of sequence, so the
+  order of the extracted text items says nothing about the order in which a
+  person reads the page.}
+\leftcol{4.2}{%
+  The second paragraph of the left column continues the introduction. After
+  it the reader moves to the top of the right column, not to the paragraph
+  that happens to be stored next.}
+\fullwidth{0.9}{%
+  \centerline{\Large Reading Order Without Storage Order}}
+\clearpage
+
+% ------------------------------------------------------------------- page 2
+% Emission order: third, first, second.
+\null
+\fullwidth{4.0}{%
+  The third paragraph closes the page. It is stored first of the three, so it
+  is the first text item that pdf.js returns for this page.}
+\fullwidth{1.0}{%
+  \textbf{3\quad A single column}\par\medskip
+  The first paragraph on this page sits at the top. Even a single column can
+  be stored out of order when a document has been edited by several tools.}
+\fullwidth{2.5}{%
+  The second paragraph lies between the other two and is stored last. Sorting
+  the blocks from top to bottom is enough to read this page correctly.}
+\end{document}

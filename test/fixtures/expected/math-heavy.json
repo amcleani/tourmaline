@@ -1,0 +1,74 @@
+{
+  "fixture": "math-heavy",
+  "file": "math-heavy.pdf",
+  "source": "src/math-heavy.tex",
+  "description": "A4, one column: dense inline math, numbered displays (equation, a three-line align, cases), matrices, and definition/theorem/lemma/proof environments. Anchors avoid math; displays are represented by their equation numbers.",
+  "hasTextLayer": true,
+  "hasLinks": false,
+  "pageCount": 2,
+  "pages": [
+    {
+      "page": 1,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "A Note on Contractive Update Rules", "kind": "title" },
+        { "text": "Emil Stand-In", "kind": "author" },
+        { "text": "Setting", "kind": "heading" },
+        { "text": "Throughout this note we work in a finite dimensional real vector space", "kind": "paragraph" },
+        { "text": "Definition 1.", "kind": "theorem" },
+        { "text": "The simplest contractive maps are linear.", "kind": "paragraph" },
+        { "text": "(1)", "kind": "equation" },
+        { "text": "so the iteration converges whenever the operator norm", "kind": "paragraph" },
+        { "text": "(2)", "kind": "equation" },
+        { "text": "Theorem 2.", "kind": "theorem" }
+      ]
+    },
+    {
+      "page": 2,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "Proofs", "kind": "heading" },
+        { "text": "The proof of the main theorem rests on a simple estimate", "kind": "paragraph" },
+        { "text": "Lemma 3.", "kind": "theorem" },
+        { "text": "Under the assumptions of Theorem 2", "kind": "theorem" },
+        { "text": "(3)", "kind": "equation" },
+        { "text": "(4)", "kind": "equation" },
+        { "text": "(5)", "kind": "equation" },
+        { "text": "Proof.", "kind": "proof" },
+        { "text": "the second is the contraction property on", "kind": "proof" },
+        { "text": "Proof of Theorem 2.", "kind": "proof" },
+        { "text": "the operator norm satisfies", "kind": "paragraph" },
+        { "text": "(6)", "kind": "equation" },
+        { "text": "A piecewise rule", "kind": "heading" },
+        { "text": "Consider now the piecewise definition", "kind": "paragraph" },
+        { "text": "(7)", "kind": "equation" },
+        { "text": "Inside the unit ball this map halves every vector", "kind": "paragraph" }
+      ]
+    }
+  ],
+  "outline": [],
+  "equations": [
+    { "number": "1", "page": 1, "env": "equation" },
+    { "number": "2", "page": 1, "env": "equation", "note": "two matrices (pmatrix)" },
+    { "number": "3", "page": 2, "env": "align", "note": "first of three numbered align lines" },
+    { "number": "4", "page": 2, "env": "align" },
+    { "number": "5", "page": 2, "env": "align" },
+    { "number": "6", "page": 2, "env": "equation", "note": "contains a displayed sum with limits" },
+    { "number": "7", "page": 2, "env": "equation", "note": "cases" }
+  ],
+  "theorems": [
+    { "label": "Definition 1", "page": 1 },
+    { "label": "Theorem 2", "page": 1 },
+    { "label": "Lemma 3", "page": 2 }
+  ],
+  "references": [
+    { "text": "Theorem 2", "page": 2, "target": { "kind": "theorem", "label": "Theorem 2.", "page": 1 } },
+    { "text": "Lemma 3", "page": 2, "target": { "kind": "theorem", "label": "Lemma 3.", "page": 2 } },
+    { "text": "(2)", "page": 2, "target": { "kind": "equation", "label": "(2)", "page": 1 } },
+    { "text": "(1)", "page": 2, "target": { "kind": "equation", "label": "(1)", "page": 1 } }
+  ]
+}

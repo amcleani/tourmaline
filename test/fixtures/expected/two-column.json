@@ -1,0 +1,72 @@
+{
+  "fixture": "two-column",
+  "file": "two-column.pdf",
+  "source": "src/two-column.tex",
+  "description": "Two-column US Letter conference-style paper: full-width title block and abstract, a full-width figure* at the top of page 2, a single-column figure in the left column, headings inside columns, a column footnote and a short reference list. Column breaks are forced in the source.",
+  "hasTextLayer": true,
+  "hasLinks": false,
+  "pageCount": 3,
+  "pages": [
+    {
+      "page": 1,
+      "size": [612, 792],
+      "rotate": 0,
+      "columns": 2,
+      "readingOrder": [
+        { "text": "Column-Aware Reading Order for Scholarly Documents", "kind": "title", "fullWidth": true },
+        { "text": "Bea Placeholder", "kind": "author", "fullWidth": true },
+        { "text": "Cyril Sample", "kind": "author", "fullWidth": true },
+        { "text": "Institute for Illustrative Research", "kind": "author", "fullWidth": true },
+        { "text": "Abstract", "kind": "heading", "fullWidth": true },
+        { "text": "Readers of scholarly documents expect text to flow down the left column", "kind": "abstract", "fullWidth": true },
+        { "text": "Introduction", "kind": "heading", "fullWidth": false, "column": "left" },
+        { "text": "A two-column page is read as two narrow pages", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "Extraction tools that sort text purely by vertical", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "This failure is common enough that many readers", "kind": "footnote", "fullWidth": false, "column": "left" },
+        { "text": "Related Work", "kind": "heading", "fullWidth": false, "column": "right" },
+        { "text": "Document layout analysis has a long history in the", "kind": "paragraph", "fullWidth": false, "column": "right" },
+        { "text": "Layout analysis", "kind": "heading", "fullWidth": false, "column": "right" },
+        { "text": "Most methods look for a vertical band of white space", "kind": "paragraph", "fullWidth": false, "column": "right" }
+      ]
+    },
+    {
+      "page": 2,
+      "size": [612, 792],
+      "rotate": 0,
+      "columns": 2,
+      "readingOrder": [
+        { "text": "The reading path on a two-column page runs down the left column", "kind": "caption", "fullWidth": true },
+        { "text": "Approach", "kind": "heading", "fullWidth": false, "column": "left" },
+        { "text": "We first group text items into lines by their baselines", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "Lines are split at the gap between the columns", "kind": "caption", "fullWidth": false, "column": "left" },
+        { "text": "Within a region the left column is emitted before", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "Handling floats", "kind": "heading", "fullWidth": false, "column": "right" },
+        { "text": "Figures and tables are treated as blocks rather than", "kind": "paragraph", "fullWidth": false, "column": "right" },
+        { "text": "Footnotes and page furniture", "kind": "heading", "fullWidth": false, "column": "right" },
+        { "text": "Footnotes are read at the end of the column", "kind": "paragraph", "fullWidth": false, "column": "right" }
+      ]
+    },
+    {
+      "page": 3,
+      "size": [612, 792],
+      "rotate": 0,
+      "columns": 2,
+      "readingOrder": [
+        { "text": "Evaluation", "kind": "heading", "fullWidth": false, "column": "left" },
+        { "text": "We checked the model against a handful of papers", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "Most remaining errors involved short lines, such as", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "Conclusion", "kind": "heading", "fullWidth": false, "column": "right" },
+        { "text": "Treating a page as a stack of regions", "kind": "paragraph", "fullWidth": false, "column": "right" },
+        { "text": "References", "kind": "heading", "fullWidth": false, "column": "right" },
+        { "text": "Reading order in structured documents.", "kind": "reference", "fullWidth": false, "column": "right" },
+        { "text": "White space as a layout cue.", "kind": "reference", "fullWidth": false, "column": "right" },
+        { "text": "A Primer on Page Segmentation.", "kind": "reference", "fullWidth": false, "column": "right" }
+      ]
+    }
+  ],
+  "outline": [],
+  "figures": [
+    { "label": "Figure 1", "page": 2, "fullWidth": true },
+    { "label": "Figure 2", "page": 2, "fullWidth": false, "column": "left" }
+  ]
+}

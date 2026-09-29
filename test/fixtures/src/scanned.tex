@@ -1,0 +1,25 @@
+% Fixture: scanned
+% An image-only PDF with no text layer, like a scan of a printed paper.
+% scripts/build-fixtures.mjs first rasterises pages 1-2 of one-column.pdf to
+% 1-bit PNGs at 150 dpi (scan-p1.png, scan-p2.png in the build directory);
+% this document places each image on an A4 page, rotated by a fraction of a
+% degree to imitate a slightly skewed scan. No fonts, no text.
+\documentclass{article}
+\input{fixture-common}
+\usepackage[a4paper,margin=0pt]{geometry}
+\usepackage{graphicx}
+\usepackage{tikz}
+\pagestyle{empty}
+
+\newcommand{\scanpage}[2]{%
+  \null
+  \begin{tikzpicture}[remember picture,overlay]
+    \node[inner sep=0pt,rotate=#2] at (current page.center)
+      {\includegraphics[width=\paperwidth,height=\paperheight]{#1}};
+  \end{tikzpicture}%
+  \clearpage}
+
+\begin{document}
+\scanpage{scan-p1}{0.4}
+\scanpage{scan-p2}{-0.3}
+\end{document}

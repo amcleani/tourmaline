@@ -1,0 +1,81 @@
+{
+  "fixture": "unlinked",
+  "file": "unlinked.pdf",
+  "source": "src/unlinked.tex + src/paper-body.tex",
+  "description": "A4, one column, three pages: citations (single and multiple), figure, equation and section references, and an 8-entry numbered bibliography on page 3. Built WITHOUT hyperref: same text and pagination as `linked`, but no link annotations and no outline; references exist only as text.",
+  "hasTextLayer": true,
+  "hasLinks": false,
+  "pageCount": 3,
+  "pages": [
+    {
+      "page": 1,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "Citation Previews in a Research Reader", "kind": "title" },
+        { "text": "Fay Instance", "kind": "author" },
+        { "text": "School of Worked Examples", "kind": "author" },
+        { "text": "Abstract", "kind": "heading" },
+        { "text": "Following a citation or a figure reference in a PDF", "kind": "abstract" },
+        { "text": "Introduction", "kind": "heading" },
+        { "text": "Reference previews are an old idea in hypertext systems", "kind": "paragraph" },
+        { "text": "The model we use is summarised in Section 2", "kind": "paragraph" },
+        { "text": "Model", "kind": "heading" },
+        { "text": "We score a candidate target", "kind": "paragraph" },
+        { "text": "(1)", "kind": "equation" },
+        { "text": "The textual match is one when the label", "kind": "paragraph" },
+        { "text": "(2)", "kind": "equation" }
+      ]
+    },
+    {
+      "page": 2,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "The preview pipeline: detect the reference, locate its target", "kind": "caption" },
+        { "text": "Experiments", "kind": "heading" },
+        { "text": "We ran the scoring rule of Eq. (1)", "kind": "paragraph" },
+        { "text": "Accuracy of target detection for linked papers", "kind": "caption" },
+        { "text": "Discussion", "kind": "heading" },
+        { "text": "The bound in Eq. (2) matters most for unlinked papers", "kind": "paragraph" }
+      ]
+    },
+    {
+      "page": 3,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "References", "kind": "heading" },
+        { "text": "Links that show their targets.", "kind": "reference" },
+        { "text": "Hover previews in collaborative encyclopedias.", "kind": "reference" },
+        { "text": "Measuring the cost of a click.", "kind": "reference" },
+        { "text": "A survey of link annotations in scholarly files.", "kind": "reference" },
+        { "text": "Old papers as images.", "kind": "reference" },
+        { "text": "Recognising text in degraded page images.", "kind": "reference" },
+        { "text": "Reference managers and the PDF.", "kind": "reference" },
+        { "text": "Accessible navigation of long documents.", "kind": "reference" }
+      ]
+    }
+  ],
+  "outline": [],
+  "references": [
+    { "text": "[1]", "page": 1, "target": { "kind": "bibliography", "label": "[1]", "page": 3 } },
+    { "text": "[2, 3]", "page": 1, "target": { "kind": "bibliography", "label": "[2]", "page": 3 } },
+    { "text": "[2, 3]", "page": 1, "target": { "kind": "bibliography", "label": "[3]", "page": 3 } },
+    { "text": "Section 2", "page": 1, "target": { "kind": "section", "label": "2 Model", "page": 1 } },
+    { "text": "Figure 1", "page": 1, "target": { "kind": "figure", "label": "Figure 1", "page": 2 } },
+    { "text": "Eq. (1)", "page": 2, "target": { "kind": "equation", "label": "(1)", "page": 1 } },
+    { "text": "[4]", "page": 2, "target": { "kind": "bibliography", "label": "[4]", "page": 3 } },
+    { "text": "[5, 6]", "page": 2, "target": { "kind": "bibliography", "label": "[5]", "page": 3 } },
+    { "text": "[5, 6]", "page": 2, "target": { "kind": "bibliography", "label": "[6]", "page": 3 } },
+    { "text": "Figure 2", "page": 2, "target": { "kind": "figure", "label": "Figure 2", "page": 2 } },
+    { "text": "Eq. (2)", "page": 2, "target": { "kind": "equation", "label": "(2)", "page": 1 } },
+    { "text": "Section 1", "page": 2, "target": { "kind": "section", "label": "1 Introduction", "page": 1 } },
+    { "text": "Fig. 1", "page": 2, "target": { "kind": "figure", "label": "Figure 1", "page": 2 } },
+    { "text": "[7]", "page": 2, "target": { "kind": "bibliography", "label": "[7]", "page": 3 } },
+    { "text": "[8]", "page": 2, "target": { "kind": "bibliography", "label": "[8]", "page": 3 } }
+  ]
+}

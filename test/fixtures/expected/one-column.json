@@ -1,0 +1,92 @@
+{
+  "fixture": "one-column",
+  "file": "one-column.pdf",
+  "source": "src/one-column.tex",
+  "description": "Single-column A4 article: hyperref outline, footnote, numbered display equation, figure with caption, ligatures and a hyphenated line break.",
+  "hasTextLayer": true,
+  "hasLinks": true,
+  "pageCount": 3,
+  "pages": [
+    {
+      "page": 1,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "Measuring Drift in Long Reading Sessions", "kind": "title" },
+        { "text": "Ada N. Example", "kind": "author" },
+        { "text": "Department of Examples, Fixture University", "kind": "author" },
+        { "text": "Abstract", "kind": "heading" },
+        { "text": "We describe a small observational study of attention drift", "kind": "abstract" },
+        { "text": "Introduction", "kind": "heading" },
+        { "text": "Reading a research paper is rarely a linear activity.", "kind": "paragraph" },
+        { "text": "Earlier work on reading interfaces has mostly measured speed", "kind": "paragraph" },
+        { "text": "Scope of this study", "kind": "heading" },
+        { "text": "We restrict attention to papers typeset in a single column", "kind": "paragraph" },
+        { "text": "We use the word session for one uninterrupted sitting", "kind": "footnote" }
+      ]
+    },
+    {
+      "page": 2,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "Method", "kind": "heading" },
+        { "text": "Each participant read one paper of about twenty pages", "kind": "paragraph" },
+        { "text": "(1)", "kind": "equation" },
+        { "text": "Here the sum runs over all jumps in a session", "kind": "paragraph" },
+        { "text": "Drift score over time for one representative session.", "kind": "caption" },
+        { "text": "Participants and materials", "kind": "heading" },
+        { "text": "Twelve graduate students took part. Each chose a paper", "kind": "paragraph" }
+      ]
+    },
+    {
+      "page": 3,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "Discussion", "kind": "heading" },
+        { "text": "The most striking finding is how little the difficulty", "kind": "paragraph" },
+        { "text": "Limitations", "kind": "heading" },
+        { "text": "The sample is small and self-selected, and a single observer", "kind": "paragraph" },
+        { "text": "Future work", "kind": "heading" },
+        { "text": "We plan to repeat the study with an instrumented reader", "kind": "paragraph" },
+        { "text": "Conclusion", "kind": "heading" },
+        { "text": "Drift during long reading sessions is driven more by layout", "kind": "paragraph" }
+      ]
+    }
+  ],
+  "outline": [
+    { "title": "1 Introduction", "level": 1, "page": 1 },
+    { "title": "1.1 Scope of this study", "level": 2, "page": 1 },
+    { "title": "2 Method", "level": 1, "page": 2 },
+    { "title": "2.1 Participants and materials", "level": 2, "page": 2 },
+    { "title": "3 Discussion", "level": 1, "page": 3 },
+    { "title": "3.1 Limitations", "level": 2, "page": 3 },
+    { "title": "3.2 Future work", "level": 2, "page": 3 },
+    { "title": "4 Conclusion", "level": 1, "page": 3 }
+  ],
+  "linksComplete": true,
+  "links": [
+    { "text": "1", "page": 1, "target": { "kind": "footnote", "label": "We use the word session", "page": 1 } }
+  ],
+  "equations": [
+    { "number": "1", "page": 2 }
+  ],
+  "figures": [
+    { "label": "Figure 1", "page": 2 }
+  ],
+  "hyphenated": [
+    { "word": "representational", "page": 3, "parts": ["represen-", "tational"] }
+  ],
+  "search": [
+    { "query": "efficient", "pages": [3], "note": "ffi ligature" },
+    { "query": "difficulty", "pages": [3], "note": "ffi ligature" },
+    { "query": "office", "pages": [2], "note": "ffi ligature" },
+    { "query": "flipped", "pages": [1], "note": "fl ligature" },
+    { "query": "representational", "pages": [3], "acrossLineBreak": true, "note": "hyphenated as represen- | tational" },
+    { "query": "drift score", "pages": [2] }
+  ]
+}

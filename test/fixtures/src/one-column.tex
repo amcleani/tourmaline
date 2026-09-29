@@ -1,0 +1,127 @@
+% Fixture: one-column
+% Single-column article on A4: outline (hyperref bookmarks), footnotes, a
+% numbered displayed equation, a figure with caption, ligatures and hyphenated
+% line breaks. Every page ends with an explicit \clearpage so the page on which
+% each paragraph appears is fixed by this source.
+\documentclass[11pt]{article}
+\input{fixture-common}
+\usepackage[a4paper,margin=25mm]{geometry}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{tikz}
+\usepackage[hidelinks,bookmarksnumbered]{hyperref}
+
+\title{Measuring Drift in Long Reading Sessions}
+\author{Ada N. Example\\ Department of Examples, Fixture University}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We describe a small observational study of attention drift while reading
+technical papers on screen. Readers were asked to follow a single argument
+across several pages while we recorded where they paused, where they went back,
+and where they gave up. The results suggest that interruptions cluster around
+page turns and figure references rather than around difficult passages.
+\end{abstract}
+
+\section{Introduction}
+
+Reading a research paper is rarely a linear activity. A reader moves back to
+an earlier definition, jumps ahead to a figure, and returns to the paragraph
+that cited it, often several times per page. Each of these moves carries a
+small cost, and the costs add up over a long session in ways that are easy to
+overlook when a tool is designed around single page views.\footnote{We use the
+word session for one uninterrupted sitting with a single document.}
+
+Earlier work on reading interfaces has mostly measured speed and recall on
+short passages. Those measures are useful, but they do not capture what happens
+in the fortieth minute of a dense proof, when the reader has already flipped
+between the same two pages a dozen times and the thread of the argument has
+started to fray.
+
+\subsection{Scope of this study}
+
+We restrict attention to papers typeset in a single column with numbered
+sections, because that layout makes page turns the dominant kind of
+interruption. Two-column layouts introduce a second kind of jump, from the
+bottom of one column to the top of the next, which we leave for a separate
+report.
+
+\clearpage
+
+\section{Method}
+
+Each participant read one paper of about twenty pages while an observer
+logged every backward jump. We summarise a session by its drift score, which
+weights each jump by the distance travelled and discounts jumps that end on a
+figure or table:
+\begin{equation}
+  D = \frac{1}{T}\sum_{k=1}^{n} w_k \,\lvert p_k - p_{k-1}\rvert .
+  \label{eq:drift}
+\end{equation}
+Here the sum runs over all jumps in a session of length $T$ minutes, and the
+weight is smaller for jumps that land on a float.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[x=10mm,y=10mm]
+    \draw (0,0) rectangle (10,4);
+    \draw[thick] (1,0.5) -- (3,2.5) -- (5,1.5) -- (7,2.8) -- (9,0.8);
+    \foreach \x in {1,3,5,7,9} \fill (\x,0.5) circle (0.08);
+  \end{tikzpicture}
+  \caption{Drift score over time for one representative session. The score
+  rises sharply after each page turn and decays slowly afterwards.}
+  \label{fig:drift}
+\end{figure}
+
+\subsection{Participants and materials}
+
+Twelve graduate students took part. Each chose a paper from their own field
+that they had not read before, so that the material was neither trivial nor
+entirely unfamiliar. Sessions were held in a quiet office with the same
+monitor and the same reader software for everyone.
+
+\clearpage
+
+\section{Discussion}
+
+The most striking finding is how little the difficulty of a passage predicted
+drift. Readers stayed with a hard derivation for a long time and moved on
+smoothly once it was done. The flow broke instead at points that look trivial
+on paper: a figure placed two pages after its first mention, a definition that
+was only given in a footnote, or an efficient but terse notation introduced
+without warning. We think these are exactly the places where a reader
+benefits from a quick preview rather than a full jump to another part of the
+document, because the represen-\linebreak tational cost of leaving the current page is paid whether
+the detour takes one second or one minute. The effect was sufficiently
+consistent across participants that we regard it as the main result.
+
+\subsection{Limitations}
+
+The sample is small and self-selected, and a single observer logged all of
+the sessions, so some jumps were probably missed. We also cannot separate the
+influence of the paper from the influence of the field, since every
+participant chose a paper from their own discipline. A controlled follow-up
+with a fixed reading list would resolve this, at the price of less natural
+reading behaviour and a somewhat artificial task.
+
+\subsection{Future work}
+
+We plan to repeat the study with an instrumented reader that records jumps
+automatically and offers inline previews of figures, equations and cited
+works. Comparing drift with and without previews would tell us whether the
+cost we measured is intrinsic to the material or an artefact of the
+interface, and whether the benefit persists once the novelty wears off. We
+also intend to examine whether the effect changes for readers who are
+unfamiliar with the notational conventions of the field, since for them even
+a short detour may involve a chain of further look-ups.
+
+\section{Conclusion}
+
+Drift during long reading sessions is driven more by layout than by
+difficulty. Tools that shorten the round trip between a reference and its
+target should help most where the layout forces the reader to leave the page.
+
+\end{document}

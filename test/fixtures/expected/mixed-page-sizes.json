@@ -1,0 +1,56 @@
+{
+  "fixture": "mixed-page-sizes",
+  "file": "mixed-page-sizes.pdf",
+  "source": "src/mixed-page-sizes.tex",
+  "description": "Four pages with different sizes and orientations: A4 portrait, A4 landscape (landscape MediaBox), US Letter portrait, and a portrait Letter MediaBox with /Rotate 90 that displays as landscape.",
+  "hasTextLayer": true,
+  "hasLinks": false,
+  "pageCount": 4,
+  "pages": [
+    {
+      "page": 1,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "A portrait A4 page", "kind": "heading" },
+        { "text": "This first page uses the international A4 size", "kind": "paragraph" },
+        { "text": "A reader that computes page offsets from the first page", "kind": "paragraph" }
+      ]
+    },
+    {
+      "page": 2,
+      "size": [841.89, 595.28],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "A landscape A4 page", "kind": "heading" },
+        { "text": "This second page is wider than it is tall.", "kind": "paragraph" },
+        { "text": "The page keeps its landscape shape in the file itself", "kind": "paragraph" }
+      ]
+    },
+    {
+      "page": 3,
+      "size": [612, 792],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "A portrait US Letter page", "kind": "heading" },
+        { "text": "This third page uses the North American letter size", "kind": "paragraph" }
+      ]
+    },
+    {
+      "page": 4,
+      "size": [612, 792],
+      "rotate": 90,
+      "displaySize": [792, 612],
+      "columns": 1,
+      "readingOrder": [
+        { "text": "A rotated letter page", "kind": "heading" },
+        { "text": "This fourth page is stored as a portrait letter page", "kind": "paragraph" },
+        { "text": "The width and height reported for this page", "kind": "paragraph" }
+      ]
+    }
+  ],
+  "outline": []
+}

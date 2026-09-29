@@ -1,0 +1,42 @@
+{
+  "fixture": "shuffled-stream",
+  "file": "shuffled-stream.pdf",
+  "source": "src/shuffled-stream.tex",
+  "description": "US Letter pages whose content-stream (text item) order is deliberately scrambled relative to reading order; only geometry recovers it. Page 1: full-width title and abstract over two columns. Page 2: one column stored as third, first, second paragraph.",
+  "hasTextLayer": true,
+  "hasLinks": false,
+  "pageCount": 2,
+  "streamOrderIsReadingOrder": false,
+  "pages": [
+    {
+      "page": 1,
+      "size": [612, 792],
+      "rotate": 0,
+      "columns": 2,
+      "readingOrder": [
+        { "text": "Reading Order Without Storage Order", "kind": "title", "fullWidth": true },
+        { "text": "Abstract", "kind": "heading", "fullWidth": true },
+        { "text": "This page stores its paragraphs in a scrambled order.", "kind": "abstract", "fullWidth": true },
+        { "text": "Introduction", "kind": "heading", "fullWidth": false, "column": "left" },
+        { "text": "The first paragraph of the left column is where reading begins", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "The second paragraph of the left column continues the introduction.", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "Storage order", "kind": "heading", "fullWidth": false, "column": "right" },
+        { "text": "The right column opens with a new section.", "kind": "paragraph", "fullWidth": false, "column": "right" },
+        { "text": "In the second paragraph of the right column we note", "kind": "paragraph", "fullWidth": false, "column": "right" }
+      ]
+    },
+    {
+      "page": 2,
+      "size": [612, 792],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "A single column", "kind": "heading" },
+        { "text": "The first paragraph on this page sits at the top.", "kind": "paragraph" },
+        { "text": "The second paragraph lies between the other two", "kind": "paragraph" },
+        { "text": "The third paragraph closes the page.", "kind": "paragraph" }
+      ]
+    }
+  ],
+  "outline": []
+}

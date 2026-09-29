@@ -1,0 +1,112 @@
+% Fixture: math-heavy
+% Dense inline mathematics, numbered displays (equation, align, cases), a
+% matrix, and definition/theorem/lemma/proof environments, on A4. Each page
+% ends with an explicit \clearpage so page contents are fixed by this source.
+\documentclass[10pt]{article}
+\input{fixture-common}
+\usepackage[a4paper,margin=25mm]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+
+\title{A Note on Contractive Update Rules}
+\author{Emil Stand-In}
+\date{}
+
+\begin{document}
+\maketitle
+
+% ------------------------------------------------------------------- page 1
+\section{Setting}
+
+Throughout this note we work in a finite dimensional real vector space with
+the usual inner product. Let $V=\mathbb{R}^n$ with norm $\|x\|=\sqrt{\langle
+x,x\rangle}$, and let $f\colon V\to V$ be a map with $f(0)=0$. For
+$x_0\in V$ we define the sequence $x_{k+1}=f(x_k)$ for $k\ge 0$, and we ask
+when $x_k\to 0$ as $k\to\infty$ for every choice of $x_0$ with
+$\|x_0\|\le r$ and some fixed $r>0$.
+
+\begin{definition}
+A map $f$ is called contractive on a set $S\subseteq V$ if there is a
+constant $0\le q<1$ such that $\|f(x)-f(y)\|\le q\,\|x-y\|$ for all
+$x,y\in S$.
+\end{definition}
+
+The simplest contractive maps are linear. If $f(x)=Ax$ for a matrix $A$
+then
+\begin{equation}
+  \|x_k\| = \|A^k x_0\| \le \|A\|^k\,\|x_0\| ,
+  \label{eq:linear}
+\end{equation}
+so the iteration converges whenever the operator norm of the matrix is
+smaller than one. A concrete example in two dimensions is the matrix
+\begin{equation}
+  A = \begin{pmatrix} \tfrac12 & \tfrac14 \\[2pt] 0 & \tfrac13 \end{pmatrix},
+  \qquad
+  A^k = \begin{pmatrix} 2^{-k} & c_k \\ 0 & 3^{-k} \end{pmatrix},
+  \label{eq:matrix}
+\end{equation}
+where $c_k = \tfrac32\,(2^{-k}-3^{-k})$ for all $k\ge 0$.
+
+\begin{theorem}\label{thm:main}
+Let $f$ be contractive on the closed ball $B_r=\{x:\|x\|\le r\}$ with
+constant $q$, and suppose $f(B_r)\subseteq B_r$. Then for every $x_0\in B_r$
+the sequence of iterates satisfies $\|x_k\|\le q^k r$, and in particular it
+converges to the origin.
+\end{theorem}
+
+\clearpage
+% ------------------------------------------------------------------- page 2
+\section{Proofs}
+
+The proof of the main theorem rests on a simple estimate that we record
+separately, because it is used again in the next section.
+
+\begin{lemma}\label{lem:step}
+Under the assumptions of Theorem~\ref{thm:main}, for all $k\ge 0$ we have
+\begin{align}
+  \|x_{k+1}\| &= \|f(x_k)-f(0)\|   \label{eq:step1}\\
+              &\le q\,\|x_k-0\|    \label{eq:step2}\\
+              &= q\,\|x_k\| .      \label{eq:step3}
+\end{align}
+\end{lemma}
+
+\begin{proof}
+The first line uses $f(0)=0$, the second is the contraction property on
+$B_r$, which applies because both $x_k$ and $0$ lie in the ball, and the
+third is immediate.
+\end{proof}
+
+\begin{proof}[Proof of Theorem~\ref{thm:main}]
+By induction on $k$ and Lemma~\ref{lem:step}, $\|x_k\|\le q^k\|x_0\|\le
+q^k r$. Since $0\le q<1$ we have $q^k\to 0$, hence $x_k\to 0$.
+\end{proof}
+
+For the example in \eqref{eq:matrix}, the operator norm satisfies
+$\|A\|_2\approx 0.557$, which gives the explicit rate
+\begin{equation}
+  \|x_k\| \le (0.557)^k\,\|x_0\|
+  \quad\text{and}\quad
+  \sum_{k=0}^{\infty}\|x_k\| \le \frac{\|x_0\|}{1-0.557} .
+  \label{eq:rate}
+\end{equation}
+
+\section{A piecewise rule}
+
+Consider now the piecewise definition
+\begin{equation}
+  g(x) =
+  \begin{cases}
+    \tfrac12 x & \text{if } \|x\|\le 1,\\[2pt]
+    \dfrac{x}{2\|x\|^2} & \text{otherwise.}
+  \end{cases}
+  \label{eq:piecewise}
+\end{equation}
+Inside the unit ball this map halves every vector, and outside it the image
+lies strictly inside the ball, so every orbit enters the ball after one step
+and then converges at the rate given by \eqref{eq:linear} with $q=\tfrac12$.
+
+\end{document}

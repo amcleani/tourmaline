@@ -1,0 +1,47 @@
+{
+  "fixture": "scanned",
+  "file": "scanned.pdf",
+  "source": "src/scanned.tex (images rasterised from pages 1-2 of one-column.pdf)",
+  "description": "Image-only A4 PDF: pages 1-2 of one-column.pdf rasterised to 1-bit PNG at 150 dpi and placed slightly skewed (+0.4 and -0.3 degrees). No fonts and no text layer. readingOrder lists what text recognition should find (same as one-column pages 1-2); it is not checked against a text layer.",
+  "hasTextLayer": false,
+  "hasLinks": false,
+  "derivedFrom": { "fixture": "one-column", "pages": [1, 2], "dpi": 150, "skewDegrees": [0.4, -0.3] },
+  "pageCount": 2,
+  "pages": [
+    {
+      "page": 1,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "Measuring Drift in Long Reading Sessions", "kind": "title" },
+        { "text": "Ada N. Example", "kind": "author" },
+        { "text": "Department of Examples, Fixture University", "kind": "author" },
+        { "text": "Abstract", "kind": "heading" },
+        { "text": "We describe a small observational study of attention drift", "kind": "abstract" },
+        { "text": "Introduction", "kind": "heading" },
+        { "text": "Reading a research paper is rarely a linear activity.", "kind": "paragraph" },
+        { "text": "Earlier work on reading interfaces has mostly measured speed", "kind": "paragraph" },
+        { "text": "Scope of this study", "kind": "heading" },
+        { "text": "We restrict attention to papers typeset in a single column", "kind": "paragraph" },
+        { "text": "We use the word session for one uninterrupted sitting", "kind": "footnote" }
+      ]
+    },
+    {
+      "page": 2,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 1,
+      "readingOrder": [
+        { "text": "Method", "kind": "heading" },
+        { "text": "Each participant read one paper of about twenty pages", "kind": "paragraph" },
+        { "text": "(1)", "kind": "equation" },
+        { "text": "Here the sum runs over all jumps in a session", "kind": "paragraph" },
+        { "text": "Drift score over time for one representative session.", "kind": "caption" },
+        { "text": "Participants and materials", "kind": "heading" },
+        { "text": "Twelve graduate students took part. Each chose a paper", "kind": "paragraph" }
+      ]
+    }
+  ],
+  "outline": []
+}

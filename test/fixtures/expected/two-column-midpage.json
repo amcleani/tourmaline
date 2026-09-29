@@ -1,0 +1,54 @@
+{
+  "fixture": "two-column-midpage",
+  "file": "two-column-midpage.pdf",
+  "source": "src/two-column-midpage.tex",
+  "description": "A4, multicol: full-width elements in the MIDDLE of a page between two bands of columns (a wide figure on page 1, a wide display equation on page 2) and a full-width paragraph closing page 2. Reading order: band 1 left, band 1 right, wide element, band 2 left, band 2 right.",
+  "hasTextLayer": true,
+  "hasLinks": false,
+  "pageCount": 2,
+  "pages": [
+    {
+      "page": 1,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 2,
+      "readingOrder": [
+        { "text": "Wide Elements Between Column Bands", "kind": "title", "fullWidth": true },
+        { "text": "Dana Filler", "kind": "author", "fullWidth": true },
+        { "text": "Laboratory of Sample Layouts", "kind": "author", "fullWidth": true },
+        { "text": "Abstract", "kind": "heading", "fullWidth": true },
+        { "text": "Some journals place wide figures, tables and equations in the middle", "kind": "abstract", "fullWidth": true },
+        { "text": "Background", "kind": "heading", "fullWidth": false, "column": "left" },
+        { "text": "Columns in the upper band are short, because the", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "The right column of the upper band continues", "kind": "paragraph", "fullWidth": false, "column": "right" },
+        { "text": "A wide figure placed between two bands of columns.", "kind": "caption", "fullWidth": true },
+        { "text": "Observations", "kind": "heading", "fullWidth": false, "column": "left" },
+        { "text": "The lower band starts again in the left column", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "The right column of the lower band is the last", "kind": "paragraph", "fullWidth": false, "column": "right" }
+      ]
+    },
+    {
+      "page": 2,
+      "size": [595.28, 841.89],
+      "rotate": 0,
+      "columns": 2,
+      "readingOrder": [
+        { "text": "A wide equation", "kind": "heading", "fullWidth": false, "column": "left" },
+        { "text": "Displayed material that is too long for one column", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "The same rule applies: finish both columns above the display", "kind": "paragraph", "fullWidth": false, "column": "right" },
+        { "text": "(1)", "kind": "equation", "fullWidth": true },
+        { "text": "Closing remarks", "kind": "heading", "fullWidth": false, "column": "left" },
+        { "text": "Mid-page wide elements are less common than wide", "kind": "paragraph", "fullWidth": false, "column": "left" },
+        { "text": "A full-width paragraph may also close the page", "kind": "paragraph", "fullWidth": false, "column": "right" },
+        { "text": "Acknowledgements. This full-width paragraph follows both columns", "kind": "paragraph", "fullWidth": true }
+      ]
+    }
+  ],
+  "outline": [],
+  "figures": [
+    { "label": "Figure 1", "page": 1, "fullWidth": true }
+  ],
+  "equations": [
+    { "number": "1", "page": 2, "fullWidth": true }
+  ]
+}
