@@ -9,6 +9,8 @@ export const MENU_ORDER: MenuId[] = ["File", "Edit", "View", "Navigate", "Annota
 
 export interface CommandContext {
   hasDocument: boolean;
+  tabCount: number;
+  findOpen: boolean;
 }
 
 export interface MenuPlacement {

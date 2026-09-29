@@ -9,6 +9,8 @@ export interface DocumentInfo {
   size: number;
   /** Unix milliseconds. */
   lastOpened: number;
+  /** Reading position JSON saved by savePosition, if any. */
+  lastPosition?: string | null;
 }
 
 export interface OpenedDocument {
@@ -50,6 +52,29 @@ export async function pickAndOpenPdf(): Promise<OpenedDocument | null> {
 export async function recentDocuments(limit = 10): Promise<DocumentInfo[]> {
   if (!isTauri()) return [];
   return invoke<DocumentInfo[]>("recent_documents", { limit });
+}
+
+export async function savePosition(id: string, position: string): Promise<void> {
+  if (isTauri()) await invoke("save_position", { id, position });
+}
+
+/** Small persistent app state (open tabs, layout). Falls back to localStorage in a browser. */
+export async function getState(key: string): Promise<string | null> {
+  if (isTauri()) return invoke<string | null>("get_state", { key });
+  try {
+    return localStorage.getItem(`tourmaline:${key}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function setState(key: string, value: string): Promise<void> {
+  if (isTauri()) return invoke("set_state", { key, value });
+  try {
+    localStorage.setItem(`tourmaline:${key}`, value);
+  } catch {
+    // Storage unavailable (private mode); state just isn't remembered.
+  }
 }
 
 export async function quitApp(): Promise<void> {

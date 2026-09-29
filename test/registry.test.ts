@@ -1,6 +1,6 @@
 import { CommandRegistry, type Command, type CommandContext } from "../src/commands/registry";
 
-function setup(ctx: CommandContext = { hasDocument: false }) {
+function setup(ctx: CommandContext = { hasDocument: false, tabCount: 0, findOpen: false }) {
   let time = 0;
   const context = { current: ctx };
   const registry = new CommandRegistry(() => context.current, () => time);
@@ -23,7 +23,7 @@ describe("CommandRegistry", () => {
     expect(registry.execute("test.cmd")).toBe(false);
     expect(run).not.toHaveBeenCalled();
 
-    context.current = { hasDocument: true };
+    context.current = { hasDocument: true, tabCount: 1, findOpen: false };
     expect(registry.execute("test.cmd")).toBe(true);
     expect(run).toHaveBeenCalledOnce();
   });

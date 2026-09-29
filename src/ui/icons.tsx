@@ -1,4 +1,4 @@
-import { Command, FileText, FolderOpen, Keyboard, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react";
+import { Command, FileText, FolderOpen, Keyboard, MoveHorizontal, PanelLeft, Search, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react";
 
 // Commands refer to icons by name so the registry stays free of UI imports.
 const ICONS: Record<string, LucideIcon> = {
@@ -9,6 +9,9 @@ const ICONS: Record<string, LucideIcon> = {
   palette: Command,
   keyboard: Keyboard,
   file: FileText,
+  outline: PanelLeft,
+  "fit-width": MoveHorizontal,
+  search: Search,
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

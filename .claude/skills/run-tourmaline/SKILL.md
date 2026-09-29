@@ -20,6 +20,12 @@ PATH="$HOME/.cargo/bin:$PATH" npx tauri dev 2>&1
 - Frontend edits hot-reload; Rust edits trigger a rebuild and restart.
 - Only one instance: if the task ends with exit 0 and no error, the window was
   closed (often by the user) - relaunch.
+- A Rust compile error mid-edit makes the task exit 101 but the `tauri dev`
+  watcher can stay alive and relaunch the app once the code compiles again, so
+  a "failed" task may still own a running window. Before relaunching, list
+  processes with PowerShell
+  `Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='tourmaline.exe'"`
+  and stop the old `tauri.js dev` / `vite.js` / `tourmaline.exe` ones.
 - Running `cargo test`/`clippy` meanwhile: use `CARGO_TARGET_DIR=target/clippy`
   or it waits on the dev build lock.
 - UI-only checks without Rust: `npm run dev` and the Browser pane at
@@ -30,9 +36,14 @@ PATH="$HOME/.cargo/bin:$PATH" npx tauri dev 2>&1
 1. `request_access` with `["tourmaline.exe"]` (the dev exe; resolves to
    `src-tauri\target\debug\tourmaline.exe`). Do NOT request "Tourmaline PDF" -
    that is an unrelated app installed on this machine.
-2. `open_application` "Tourmaline" to bring the window forward. The user's
-   Terminal often takes focus; if a click fails with "not in the allowed
-   applications", call `open_application` again, then retry.
+2. `open_application` "Tourmaline" to bring the window forward. CAUTION: if
+   it can't match the running window it launches a *second* copy of the exe
+   (outside `tauri dev`, so no hot reload). After using it, check with
+   `tasklist //FI "IMAGENAME eq tourmaline.exe"`; a copy whose command line is
+   the full path (not `target\debug	ourmaline.exe` under cargo) is the stray
+   one - `taskkill //PID <pid> //F`. The user's Terminal often takes focus; if a
+   click fails with "not in the allowed applications", bring the window
+   forward again, then retry.
 3. If the window isn't visible, it may be on the other monitor
    (`switch_display`), then `switch_display auto`.
 4. Use `screenshot` with `scale: 0.6` - enough to read the UI.

@@ -6,8 +6,7 @@ GlobalWorkerOptions.workerSrc = workerUrl;
 // Copied into public/pdfjs by scripts/copy-pdfjs-assets.mjs.
 const assetBase = () => new URL(`${import.meta.env.BASE_URL}pdfjs/`, window.location.href).toString();
 
-/** CSS pixels per PDF point (PDF uses 72 units per inch, CSS uses 96). */
-export const PDF_TO_CSS = 96 / 72;
+export { PDF_TO_CSS } from "./units";
 
 export function loadPdf(bytes: Uint8Array): Promise<PDFDocumentProxy> {
   const base = assetBase();

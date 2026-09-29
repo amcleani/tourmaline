@@ -24,6 +24,13 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX documents_last_opened ON documents(last_opened DESC);
     CREATE INDEX documents_path ON documents(path);
     "#,
+    // v2: small key/value store for app state (open tabs, window layout).
+    r#"
+    CREATE TABLE app_state (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    "#,
 ];
 
 pub struct Db {
@@ -70,7 +77,7 @@ impl Db {
     pub fn recent(&self, limit: u32) -> Result<Vec<DocumentInfo>> {
         let conn = self.conn.lock().expect("database lock poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, path, name, size, last_opened FROM documents d
+            "SELECT id, path, name, size, last_opened, last_position FROM documents d
              WHERE last_opened = (SELECT MAX(last_opened) FROM documents WHERE path = d.path)
              ORDER BY last_opened DESC
              LIMIT ?1",
@@ -82,9 +89,42 @@ impl Db {
                 name: row.get(2)?,
                 size: row.get::<_, i64>(3)? as u64,
                 last_opened: row.get(4)?,
+                last_position: row.get(5)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Reading position saved for a document (opaque JSON owned by the frontend).
+    pub fn last_position(&self, id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("database lock poisoned");
+        Ok(conn
+            .query_row("SELECT last_position FROM documents WHERE id = ?1", [id], |r| r.get(0))
+            .optional()?
+            .flatten())
+    }
+
+    pub fn save_position(&self, id: &str, position: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("database lock poisoned");
+        conn.execute("UPDATE documents SET last_position = ?2 WHERE id = ?1", params![id, position])?;
+        Ok(())
+    }
+
+    pub fn get_state(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("database lock poisoned");
+        Ok(conn
+            .query_row("SELECT value FROM app_state WHERE key = ?1", [key], |r| r.get(0))
+            .optional()?)
+    }
+
+    pub fn set_state(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("database lock poisoned");
+        conn.execute(
+            "INSERT INTO app_state (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -123,7 +163,14 @@ mod tests {
     use super::*;
 
     fn doc(id: &str, path: &str, t: i64) -> DocumentInfo {
-        DocumentInfo { id: id.into(), path: path.into(), name: "x.pdf".into(), size: 10, last_opened: t }
+        DocumentInfo {
+            id: id.into(),
+            path: path.into(),
+            name: "x.pdf".into(),
+            size: 10,
+            last_opened: t,
+            last_position: None,
+        }
     }
 
     #[test]
@@ -151,5 +198,25 @@ mod tests {
         db.record_open(&doc("a2", "/p/a.pdf", 3)).unwrap();
         let ids: Vec<_> = db.recent(10).unwrap().into_iter().map(|d| d.id).collect();
         assert_eq!(ids, ["a2", "b"]);
+    }
+
+    #[test]
+    fn reading_position_survives_reopening() {
+        let db = Db::in_memory().unwrap();
+        db.record_open(&doc("a", "/p/a.pdf", 1)).unwrap();
+        assert_eq!(db.last_position("a").unwrap(), None);
+        db.save_position("a", r#"{"page":3}"#).unwrap();
+        db.record_open(&doc("a", "/p/a.pdf", 2)).unwrap();
+        assert_eq!(db.last_position("a").unwrap().as_deref(), Some(r#"{"page":3}"#));
+        assert_eq!(db.recent(1).unwrap()[0].last_position.as_deref(), Some(r#"{"page":3}"#));
+    }
+
+    #[test]
+    fn app_state_round_trips() {
+        let db = Db::in_memory().unwrap();
+        assert_eq!(db.get_state("tabs").unwrap(), None);
+        db.set_state("tabs", "[1]").unwrap();
+        db.set_state("tabs", "[2]").unwrap();
+        assert_eq!(db.get_state("tabs").unwrap().as_deref(), Some("[2]"));
     }
 }

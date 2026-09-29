@@ -19,6 +19,8 @@ pub struct DocumentInfo {
     pub size: u64,
     /// Unix milliseconds.
     pub last_opened: i64,
+    /// Reading position as JSON written by the frontend.
+    pub last_position: Option<String>,
 }
 
 pub fn read(path: &Path) -> Result<Vec<u8>> {
@@ -42,6 +44,7 @@ pub fn describe(path: &Path, id: String, size: u64) -> Result<DocumentInfo> {
             .unwrap_or_default(),
         size,
         last_opened: now_millis(),
+        last_position: None,
     })
 }
 
