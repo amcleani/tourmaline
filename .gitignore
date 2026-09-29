@@ -7,3 +7,4 @@ src-tauri/gen/schemas/
 public/pdfjs/
 *.tsbuildinfo
 .claude/worktrees/
+.dev-data/

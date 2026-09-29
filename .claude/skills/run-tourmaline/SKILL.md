@@ -12,8 +12,18 @@ Verified on the user's Windows 11 machine (two monitors).
 Run in the background (Bash tool, `run_in_background: true`) from the repo root:
 
 ```bash
-PATH="$HOME/.cargo/bin:$PATH" npx tauri dev 2>&1
+TOURMALINE_DATA_DIR="$PWD/.dev-data" PATH="$HOME/.cargo/bin:$PATH" npx tauri dev > /tmp/tauri-dev.log 2>&1
 ```
+
+Always set `TOURMALINE_DATA_DIR`. Processes started from Claude Code inherit
+the Claude desktop app's MSIX package context, so their writes to %APPDATA% are
+silently redirected to
+`%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\...`, while
+copies of the app started any other way use the real folder: two different
+libraries. `.dev-data/` (gitignored) sidesteps that and keeps test data out of
+the user's real library. Wait for startup with
+`until grep -q "library database" /tmp/tauri-dev.log; do sleep 2; done` - the
+log line shows which database is in use.
 
 - First build after a Cargo change takes 1-3 min; afterwards ~1 s. The log line
   `Running target\debug\tourmaline.exe` means the window is up.

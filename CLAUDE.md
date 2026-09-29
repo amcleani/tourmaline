@@ -13,7 +13,7 @@ Rust is installed via rustup but `~/.cargo/bin` may not be on PATH in the Bash
 tool — call `~/.cargo/bin/cargo` directly, or prefix `PATH="$HOME/.cargo/bin:$PATH"`.
 
 ```bash
-npm run tauri dev                      # desktop app with hot reload (needs cargo on PATH)
+TOURMALINE_DATA_DIR="$PWD/.dev-data" npm run tauri dev   # desktop app with hot reload (needs cargo on PATH)
 npm run dev                            # UI only in a browser at :1420 (browser file picker, no library/DB)
 npm test                               # all Vitest tests
 npx vitest run test/registry.test.ts   # one file;  add  -t "name"  for one test
@@ -22,6 +22,12 @@ npm run build                          # also required before any cargo command:
 cd src-tauri && ~/.cargo/bin/cargo test [name]
 cd src-tauri && CARGO_TARGET_DIR=target/clippy ~/.cargo/bin/cargo clippy --all-targets -- -D warnings
 ```
+
+Always set `TOURMALINE_DATA_DIR` when launching the app from Claude Code:
+processes started from the Claude desktop app inherit its MSIX package, so
+their %APPDATA% writes are redirected to a private copy under
+`%LOCALAPPDATA%\Packages\Claude_*\LocalCache`, splitting the library in two
+(see the run-tourmaline skill).
 
 Use a separate `CARGO_TARGET_DIR` for clippy/tests while `tauri dev` is running,
 or they block on the same build lock. CI (`.github/workflows/ci.yml`, Windows)

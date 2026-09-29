@@ -69,7 +69,15 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let path = app.path().app_data_dir()?.join("library.sqlite3");
+            // TOURMALINE_DATA_DIR overrides the data folder. Development runs
+            // set it because processes started by a packaged (MSIX) app, such
+            // as the Claude desktop app, get AppData writes silently redirected
+            // to a private copy, which splits the library in two.
+            let dir = match std::env::var_os("TOURMALINE_DATA_DIR") {
+                Some(dir) => PathBuf::from(dir),
+                None => app.path().app_data_dir()?,
+            };
+            let path = dir.join("library.sqlite3");
             eprintln!("Tourmaline library database: {}", path.display());
             app.manage(Db::open(&path)?);
             Ok(())
