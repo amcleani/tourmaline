@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { normaliseQuery } from "../pdf/search";
 import { readAttachment } from "../platform";
 import { colourOf, type Annotation, type Category } from "../annotations/types";
+import { NoteView } from "../notes/NoteView";
 import { Icon } from "./icons";
 
 interface Props {
@@ -168,7 +169,7 @@ export function AnnotationsPanel({
                 </div>
                 {a.kind === "area" && a.imagePath && <AttachmentImage id={a.id} />}
                 {a.quote && <p className="annotation-quote">{a.quote}</p>}
-                {a.note && <p className="annotation-note">{a.note}</p>}
+                {a.note && <NoteView className="annotation-note" text={a.note} />}
               </li>
             );
           })}

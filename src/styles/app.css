@@ -570,7 +570,7 @@ kbd {
 
 .annotation-popover {
   position: absolute;
-  width: 300px;
+  width: 360px;
   padding: 8px 10px 10px;
   background: var(--surface);
   color: var(--text);
@@ -586,17 +586,42 @@ kbd {
 .popover-header h2 { margin: 0; font-size: 0.9rem; }
 .category-choices { display: flex; flex-wrap: wrap; gap: 2px; margin: 6px 0; }
 .note-label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--text-muted); }
-.note-label textarea {
-  width: 100%;
-  resize: vertical;
-  padding: 6px 8px;
+/* Note editor (CodeMirror) and rendered notes */
+.note-editor .cm-editor {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
   color: var(--text);
-  font: inherit;
   font-size: 0.95rem;
+  max-height: 45vh;
 }
+.note-editor .cm-editor.cm-focused { outline: 2px solid var(--focus); outline-offset: 1px; }
+.note-editor .cm-scroller { font-family: inherit; line-height: 1.45; min-height: 5.5em; }
+.note-editor .cm-content { padding: 6px 8px; caret-color: var(--text); }
+.note-editor .cm-placeholder { color: var(--text-muted); }
+.cm-math { cursor: text; }
+.cm-math.display { display: block; text-align: center; margin: 2px 0; overflow-x: auto; overflow-y: hidden; }
+.cm-math-source { font-family: ui-monospace, Consolas, monospace; font-size: 0.92em; color: var(--accent); }
+.note-editor .cm-editor .cm-tooltip {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.2);
+}
+.note-editor .cm-editor .cm-tooltip-autocomplete > ul { font-family: ui-monospace, Consolas, monospace; max-height: 14em; }
+.note-editor .cm-editor .cm-tooltip-autocomplete > ul > li { padding: 2px 8px; }
+.note-editor .cm-editor .cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent); color: var(--accent-contrast); }
+.note-editor .cm-editor .cm-completionDetail { color: inherit; opacity: 0.75; margin-left: 1em; font-style: normal; }
+.note-editor .cm-editor .cm-completionInfo { padding: 6px 8px; max-width: 320px; }
+.completion-info code { display: block; font-size: 0.85em; color: var(--text-muted); margin-bottom: 4px; word-break: break-all; }
+.completion-example { font-size: 1.15em; }
+.note-view p, .note-view ul, .note-view ol, .note-view blockquote, .note-view pre { margin: 0 0 0.4em; }
+.note-view > :last-child { margin-bottom: 0; }
+.note-view ul, .note-view ol { padding-left: 1.4em; }
+.note-view blockquote { padding-left: 0.6em; border-left: 3px solid var(--border); }
+.note-view code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; }
+.note-math.display { display: block; text-align: center; margin: 0.3em 0; overflow-x: auto; overflow-y: hidden; }
 .popover-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .button.danger { color: var(--danger-text); display: inline-flex; align-items: center; gap: 4px; }
 .small { font-size: 0.8rem; }
@@ -652,10 +677,7 @@ kbd {
   margin: 4px 0 0;
   color: var(--text-muted);
   font-size: 0.9rem;
-  white-space: pre-wrap;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+  max-height: 9em;
   overflow: hidden;
 }
 .annotation-image { display: block; max-width: 100%; margin-top: 4px; border: 1px solid var(--border); background: #fff; }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { colourOf, type Annotation, type Category } from "../annotations/types";
 import { formatShortcut } from "../commands/shortcuts";
+import { NoteEditor, type NoteEditorHandle } from "../notes/NoteEditor";
 import { Icon } from "./icons";
 
 interface Props {
@@ -23,7 +24,8 @@ const SAVE_DELAY_MS = 1000;
 
 // Shown next to the selected annotation: category, note and delete. The note
 // is saved shortly after typing stops, when the field loses focus, on
-// Ctrl+Enter, on closing, and before the window closes. Escape closes it.
+// Ctrl+Enter, on closing, and before the window closes. Escape closes it
+// (unless the editor's completion list is open).
 // Key it by annotation id so the draft resets.
 export function AnnotationPopover({
   annotation,
@@ -38,7 +40,7 @@ export function AnnotationPopover({
   registerFlush,
 }: Props) {
   const [draft, setDraft] = useState(annotation.note);
-  const noteRef = useRef<HTMLTextAreaElement>(null);
+  const noteRef = useRef<NoteEditorHandle>(null);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const saved = useRef(annotation.note);
@@ -46,13 +48,13 @@ export function AnnotationPopover({
 
   // Take outside changes (undo) unless the user is typing.
   useEffect(() => {
-    if (document.activeElement !== noteRef.current) setDraft(annotation.note);
+    if (!noteRef.current?.hasFocus()) setDraft(annotation.note);
     saved.current = annotation.note;
   }, [annotation.note]);
 
   useEffect(() => {
     if (!focusNote) return;
-    noteRef.current?.focus({ preventScroll: true });
+    noteRef.current?.focus();
     onNoteFocused();
   }, [focusNote, onNoteFocused]);
 
@@ -81,11 +83,8 @@ export function AnnotationPopover({
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      close();
-    } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && e.target === noteRef.current) {
+    // The editor already used this Escape (closing its completion list).
+    if (e.key === "Escape" && !e.defaultPrevented) {
       e.preventDefault();
       e.stopPropagation();
       close();
@@ -124,21 +123,22 @@ export function AnnotationPopover({
           </button>
         ))}
       </div>
-      <label className="note-label">
-        <span>Note</span>
-        <textarea
+      <div className="note-label">
+        <span aria-hidden="true">Note</span>
+        <NoteEditor
           ref={noteRef}
           value={draft}
-          rows={4}
-          placeholder="Markdown and $math$"
-          onChange={(e) => {
-            setDraft(e.target.value);
+          ariaLabel="Note"
+          placeholder="Markdown and $math$; type \ for commands"
+          onChange={(text) => {
+            setDraft(text);
             clearTimeout(timer.current);
             timer.current = setTimeout(() => void saveRef.current(), SAVE_DELAY_MS);
           }}
           onBlur={() => void save()}
+          onSubmit={close}
         />
-      </label>
+      </div>
       <div className="popover-actions">
         <span className="muted small">{formatShortcut("Mod+Enter")} to finish</span>
         <button type="button" className="button danger" onClick={onDelete} title="Delete (Delete)">

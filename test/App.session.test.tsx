@@ -17,6 +17,8 @@ vi.mock("../src/platform", () => ({
   listCategories: vi.fn(async () => []),
   saveCategories: vi.fn(async (c: unknown) => c),
   listAnnotations: vi.fn(async () => []),
+  savedVault: vi.fn(async () => null),
+  chooseVault: vi.fn(async () => null),
 }));
 vi.mock("../src/pdf/loader", () => ({ loadPdf: vi.fn(), PDF_TO_CSS: 96 / 72 }));
 

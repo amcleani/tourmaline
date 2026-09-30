@@ -10,6 +10,7 @@ import type {
   PageHash,
   PlacementUpdate,
 } from "../annotations/types";
+import type { VaultMathSettings } from "../math/settings";
 import { sha256Hex } from "../util/hash";
 import { MemoryLibrary } from "./memoryLibrary";
 
@@ -156,6 +157,34 @@ export async function readAttachment(annotationId: string): Promise<Uint8Array> 
     return png;
   }
   return new Uint8Array(await invoke<ArrayBuffer>("read_attachment", { id: annotationId }));
+}
+
+// ---- Obsidian vault (read only) ---------------------------------------------
+
+/** The vault chosen with File › Choose Obsidian vault, if any. */
+export async function savedVault(): Promise<string | null> {
+  // Browser only: `?preamble=/test/fixtures/math/preamble.sty` stands in for a vault.
+  if (!isTauri()) return new URLSearchParams(window.location.search).get("preamble");
+  return getState("vault");
+}
+
+/** Asks for a folder, checks it is an Obsidian vault and remembers it. Null if cancelled. */
+export async function chooseVault(): Promise<string | null> {
+  if (!isTauri()) throw new Error("choosing a vault needs the desktop app");
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const path = await open({ directory: true, multiple: false, title: "Choose your Obsidian vault" });
+  if (!path) return null;
+  await invoke("check_vault", { path });
+  await setState("vault", path);
+  return path;
+}
+
+/** How the vault renders math (its MathJax plugins' settings and preamble). */
+export async function readMathSettings(vault: string): Promise<VaultMathSettings> {
+  if (isTauri()) return invoke<VaultMathSettings>("math_settings", { vault });
+  const response = await fetch(vault);
+  if (!response.ok) throw new Error(`${vault}: ${response.status}`);
+  return { latestMathjax: null, preamble: await response.text(), sources: [] };
 }
 
 // ---- App state and window ----------------------------------------------------

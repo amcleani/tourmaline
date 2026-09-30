@@ -3,6 +3,7 @@ mod db;
 mod documents;
 mod error;
 mod library;
+mod vault;
 
 use std::path::PathBuf;
 
@@ -15,6 +16,7 @@ use annotations::{Annotation, AnnotationEdit, Category, NewAnnotation, PageHash,
 use db::Db;
 use error::{Error, Result};
 use library::{DocumentInfo, FileKey};
+use vault::MathSettings;
 
 /// The folder holding the library database and its attachments.
 struct DataDir(PathBuf);
@@ -75,6 +77,18 @@ async fn get_state(app: AppHandle, key: String) -> Result<Option<String>> {
 #[tauri::command]
 async fn set_state(app: AppHandle, key: String, value: String) -> Result<()> {
     blocking(app, move |_, db| db.set_state(&key, &value)).await
+}
+
+/// Checks that a folder the user picked is an Obsidian vault.
+#[tauri::command]
+async fn check_vault(app: AppHandle, path: PathBuf) -> Result<()> {
+    blocking(app, move |_, _| vault::check_vault(&path)).await
+}
+
+/// How the vault renders math: MathJax plugin settings and the preamble (read only).
+#[tauri::command]
+async fn math_settings(app: AppHandle, vault: PathBuf) -> Result<MathSettings> {
+    blocking(app, move |_, _| vault::math_settings(&vault)).await
 }
 
 /// Recently opened papers whose files still exist.
@@ -228,7 +242,9 @@ pub fn run() {
             list_categories,
             save_categories,
             save_attachment,
-            read_attachment
+            read_attachment,
+            check_vault,
+            math_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tourmaline");

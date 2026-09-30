@@ -1,0 +1,22 @@
+
+%%General logic%%
+\newcommand{\rrbracket}{⟧}
+\newcommand{\llbracket}{⟦}
+\newcommand{\logic}[1]{\mathtt{#1}}
+
+%% Cases taken from a real vault preamble: redefined built-ins, optional
+%% arguments, macros using other macros.
+\newcommand{\alg}[1]{\mathfrak{#1}}
+\newcommand{\spa}[1]{\mathfrak{#1}}
+\newcommand{\op}[1]{\mathsf{#1}}
+\newcommand{\clop}[2][]{\op{Clop}_{#1}(\spa{#2})}
+\newcommand{\upset}[2][]{{\Uparrow_{#1}} #2}
+\newcommand{\int}[2][g]{\|#2\|^{#1}}
+\newcommand{\at}{\mathsf{At}}
+\newcommand{\model}[1]{(\struc{A}, \|\cdot\|, \models)}
+\newcommand{\struc}[1]{\mathfrak{#1}}
+\newcommand{\hom}{\text{Hom}}
+\renewcommand{\deg}{\mathsf{Deg}}
+\newcommand{\bignjoin}[1]{{\bigsqcup {#1}}}
+\DeclareMathOperator{\Clop}{Clop}
+\def\pair#1#2{\langle #1, #2\rangle}

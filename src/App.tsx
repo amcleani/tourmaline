@@ -14,6 +14,7 @@ import { PdfViewer, type Mark, type SelectionEnd, type ViewState, type ViewerHan
 import type { PdfRect } from "./pdf/search";
 import { useDocumentSearch } from "./pdf/useSearch";
 import {
+  chooseVault,
   detachFile,
   getState,
   isTauri,
@@ -25,12 +26,14 @@ import {
   quitApp,
   recentDocuments,
   saveCategories,
+  savedVault,
   savePosition,
   setState,
   setTextSample,
   type DocumentInfo,
   type OpenedDocument,
 } from "./platform";
+import { useVaultMath } from "./math/useVaultMath";
 import { installNativeMenu } from "./platform/menu";
 import { AnnotationPopover } from "./ui/AnnotationPopover";
 import { AnnotationsPanel } from "./ui/AnnotationsPanel";
@@ -108,6 +111,17 @@ export function App() {
     console.error(what, err);
     setError(`${what}: ${err instanceof Error ? err.message : String(err)}`);
   }, []);
+
+  // ---- Obsidian vault: math settings for notes ---------------------------------
+
+  const [vault, setVault] = useState<string | null>(null);
+  useEffect(() => {
+    savedVault()
+      .then(setVault)
+      .catch((e) => console.error("Could not load the vault setting", e));
+  }, []);
+  const reportMath = useCallback((message: string) => setError(message), []);
+  useVaultMath(vault, reportMath);
 
   const refreshRecent = useCallback(() => {
     recentDocuments().then(setRecent).catch((e) => console.error("Could not load recent documents", e));
@@ -596,6 +610,14 @@ export function App() {
 
     const unregister = appCommands({
       openFile,
+      chooseVault: async () => {
+        try {
+          const path = await chooseVault();
+          if (path) setVault(path);
+        } catch (e) {
+          reportError("Could not use that vault", e);
+        }
+      },
       openRecent: () => {
         refreshRecent();
         setDialog("recent");
@@ -673,7 +695,7 @@ export function App() {
       uninstallMenu?.();
       unregister.forEach((u) => u());
     };
-  }, [registry, openFile, closeTab, updateTab, refreshRecent]);
+  }, [registry, openFile, closeTab, updateTab, refreshRecent, reportError]);
 
   // Global keyboard shortcuts.
   useEffect(() => {

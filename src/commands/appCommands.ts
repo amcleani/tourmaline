@@ -4,6 +4,7 @@ export interface AppActions {
   openFile: () => Promise<void>;
   openRecent: () => void;
   closeTab: () => void;
+  chooseVault: () => Promise<void>;
   quit: () => Promise<void>;
   zoomIn: () => void;
   zoomOut: () => void;
@@ -70,6 +71,13 @@ export function appCommands(a: AppActions): Command[] {
       // Any tab, including one whose file couldn't be opened.
       when: (ctx) => ctx.tabCount > 0,
       run: a.closeTab,
+    },
+    {
+      id: "file.chooseVault",
+      title: "Choose Obsidian vault…",
+      keywords: ["obsidian", "vault", "preamble", "macros", "mathjax", "settings"],
+      menu: { menu: "File", group: 5, order: 1 },
+      run: a.chooseVault,
     },
     {
       id: "app.quit",

@@ -33,10 +33,12 @@ Use a separate `CARGO_TARGET_DIR` for clippy/tests while `tauri dev` is running,
 or they block on the same build lock. CI (`.github/workflows/ci.yml`, Windows)
 runs typecheck, Vitest, build, cargo test and clippy with `-D warnings`.
 
-`predev`/`prebuild` copy pdf.js runtime data (cmaps, standard fonts, ICC
-profiles, wasm decoders) into `public/pdfjs/` (gitignored); `src/pdf/loader.ts`
-points pdf.js at it. If PDFs render with missing glyphs or images, check that
-this copy ran.
+`predev`/`prebuild` (`scripts/copy-runtime-assets.mjs`) copy pdf.js runtime
+data (cmaps, standard fonts, ICC profiles, wasm decoders) into `public/pdfjs/`
+and the MathJax fonts into `public/mathjax/` (both gitignored). If PDFs render
+with missing glyphs or images, or formulas as boxes, check that this copy ran.
+`npm run dev` also takes `?preamble=/test/fixtures/math/preamble.sty` to stand
+in for a vault's math preamble.
 
 ## Architecture
 
@@ -118,6 +120,26 @@ pdf.js 6: `render({ canvas, viewport })`, documents are freed with
 `pdf.loadingTask.destroy()`. Focus-mode line detection is
 `src/focus/lines.ts`, checked against the fixtures in `test/fixtures/` by
 `test/readingOrder.test.ts`.
+
+**Notes and math.** Notes are markdown edited in CodeMirror 6
+(`src/notes/NoteEditor.tsx`) with formulas previewed in place
+(`mathPreview.ts`, a state field because display math replaces line breaks)
+and shown rendered elsewhere by `NoteView` (markdown-it, `notes/markdown.ts`).
+Both find math with `src/math/delimiters.ts` (Obsidian's `$`/`$$` rules) so
+they always agree. MathJax 4 is used directly (`src/math/engine.ts`, lazily
+loaded; `@mathjax/src/js/...` imports, CHTML output), set up like the user's
+Obsidian (`settings.ts`): the built-in MathJax 3 look (TeX font, its default
+and autoloaded packages, never `html`/`require`) unless latest-mathjax is
+enabled, plus the preamble. `src-tauri/src/vault.rs` reads those settings
+from the vault chosen with File › Choose Obsidian vault (read-only, files
+must be inside the vault); `useVaultMath` re-reads them when the window
+regains focus. Macros can't be undefined, so a settings change rebuilds the
+MathJax document. TeX packages and font ranges are loaded with
+`import.meta.glob` from `/node_modules`, which is why MathJax is excluded
+from Vite's dependency pre-bundling (a second copy would register the
+packages where the TeX input can't see them). `\` autocomplete
+(`math/completions.ts`) lists the preamble's macros (`preamble.ts`) with tab
+stops, then MathJax's own names.
 
 **Security.** CSP is set in `src-tauri/tauri.conf.json` (includes
 `'wasm-unsafe-eval'` for pdf.js decoders); window permissions are in

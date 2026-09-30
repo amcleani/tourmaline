@@ -84,7 +84,15 @@ pen with pressure and eraser; filterable annotation sidebar; import existing PDF
 annotations (e.g. Okular); optional write-back via pdf-lib.
 
 **Notes editor**: CodeMirror + live MathJax preview using the vault's
-`preamble.sty`; `\` command autocomplete; optional LaTeX Suite snippets.
+`preamble.sty`; `\` command autocomplete; optional LaTeX Suite snippets
+(not yet: the vault's snippets are JavaScript, which would need a parser for
+their subset, since the CSP rightly forbids eval).
+
+Math matches the vault's Obsidian: its built-in MathJax 3 unless the
+latest-mathjax plugin is enabled (then its font and packages), plus the
+obsidian-latex preamble. Tourmaline uses MathJax 4 either way, with the
+classic TeX font standing in for MathJax 3's; `\href` and `\require` are
+left out.
 
 **Copy equation as LaTeX**: arXiv source matching first; otherwise an optional
 downloadable OCR model (pix2tex / UniMERNet via ONNX in Rust).
@@ -141,7 +149,7 @@ silently dropped).
 | 0 | **Setup**: Tauri + React + pdf.js, command registry, native menu, palette, SQLite, CI | A PDF opens from File › Open and from the palette ✅ |
 | 1 | **Viewer**: virtualised pages, text layer, zoom keeping position, fit width, page tracking, tabs, outline, search, reading position; prototype line/column detection | A 50-page paper reads comfortably ✅ (line detection passes all fixture pages in `test/fixtures/`) |
 | 2 | **Annotations**: highlights, categories, notes, area capture, sidebar | Highlights survive restart and file rename ✅ |
-| 3 | **Notes editor**: CodeMirror + MathJax + preamble + autocomplete | Formulas render as in Obsidian |
+| 3 | **Notes editor**: CodeMirror + MathJax + preamble + autocomplete | Formulas render as in Obsidian (built; awaiting side-by-side check) |
 | 4a | **Vault**: read vault settings, match PDFs to JabRef entries, Handlebars templates, `tourmaline://` links | — |
 | 4b | **PDF annotations**: import existing annotations; optional write-back and `{{pdfLink}}` | — |
 | 4c | **Export**: merge into notes preserving edits; template editor with live preview | Highlight in `Goodman2023GG` → appears in `@Goodman2023GG.md` without touching the user's text → link reopens Tourmaline there |
