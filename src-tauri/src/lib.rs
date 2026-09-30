@@ -16,7 +16,7 @@ use annotations::{Annotation, AnnotationEdit, Category, NewAnnotation, PageHash,
 use db::Db;
 use error::{Error, Result};
 use library::{DocumentInfo, FileKey};
-use vault::MathSettings;
+use vault::{Bibliography, MathSettings, VaultSettings};
 
 /// The folder holding the library database and its attachments.
 struct DataDir(PathBuf);
@@ -89,6 +89,55 @@ async fn check_vault(app: AppHandle, path: PathBuf) -> Result<()> {
 #[tauri::command]
 async fn math_settings(app: AppHandle, vault: PathBuf) -> Result<MathSettings> {
     blocking(app, move |_, _| vault::math_settings(&vault)).await
+}
+
+/// Where the vault keeps literature notes and the bibliography (read only).
+#[tauri::command]
+async fn vault_settings(app: AppHandle, vault: PathBuf) -> Result<VaultSettings> {
+    blocking(app, move |_, _| vault::vault_settings(&vault)).await
+}
+
+/// Whether a note exists at a path relative to the vault.
+#[tauri::command]
+async fn vault_file_exists(app: AppHandle, vault: PathBuf, path: String) -> Result<bool> {
+    blocking(app, move |_, _| vault::vault_file_exists(&vault, &path)).await
+}
+
+/// Reads the JabRef bibliography (never written).
+#[tauri::command]
+async fn read_bibliography(app: AppHandle, path: PathBuf) -> Result<Bibliography> {
+    blocking(app, move |_, _| vault::read_bibliography(&path)).await
+}
+
+#[tauri::command]
+async fn bibliography_modified(app: AppHandle, path: PathBuf) -> Result<i64> {
+    blocking(app, move |_, _| vault::bibliography_modified(&path)).await
+}
+
+/// Links a file's paper to a bibliography entry (see `Db::link_citekey`).
+#[tauri::command]
+async fn link_citekey(app: AppHandle, file_id: String, citekey: String) -> Result<DocumentInfo> {
+    blocking(app, move |_, db| db.link_citekey(&file_id, &citekey)).await
+}
+
+/// For a tourmaline:// link: the most recently opened file of a paper (named
+/// by its id, or by one of its annotations' block ids) that still exists.
+#[tauri::command]
+async fn locate_work(app: AppHandle, work_id: Option<String>, block_id: Option<String>) -> Result<Option<DocumentInfo>> {
+    blocking(app, move |_, db| {
+        let by_block = match &block_id {
+            Some(block) => db.work_for_block(block)?,
+            None => None,
+        };
+        for work in work_id.iter().chain(by_block.iter()) {
+            let file = db.work_files(work)?.into_iter().find(|d| std::path::Path::new(&d.path).exists());
+            if file.is_some() {
+                return Ok(file);
+            }
+        }
+        Ok(None)
+    })
+    .await
 }
 
 /// Recently opened papers whose files still exist.
@@ -209,8 +258,22 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        // tourmaline:// links from notes. A link clicked while the app runs
+        // reaches it through the single-instance plugin above.
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // Installers register the scheme; a development build registers
+            // itself for the current user so links can be tried.
+            #[cfg(all(debug_assertions, any(windows, target_os = "linux")))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register_all() {
+                    eprintln!("Tourmaline: could not register tourmaline:// links: {e}");
+                }
+            }
             // TOURMALINE_DATA_DIR overrides the data folder. Development runs
             // set it because processes started by a packaged (MSIX) app, such
             // as the Claude desktop app, get AppData writes silently redirected
@@ -244,7 +307,13 @@ pub fn run() {
             save_attachment,
             read_attachment,
             check_vault,
-            math_settings
+            math_settings,
+            vault_settings,
+            vault_file_exists,
+            read_bibliography,
+            bibliography_modified,
+            link_citekey,
+            locate_work
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tourmaline");

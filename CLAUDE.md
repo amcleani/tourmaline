@@ -38,7 +38,8 @@ data (cmaps, standard fonts, ICC profiles, wasm decoders) into `public/pdfjs/`
 and the MathJax fonts into `public/mathjax/` (both gitignored). If PDFs render
 with missing glyphs or images, or formulas as boxes, check that this copy ran.
 `npm run dev` also takes `?preamble=/test/fixtures/math/preamble.sty` to stand
-in for a vault's math preamble.
+in for a vault's math preamble. and `?bib=/test/fixtures/vault/database.bib`
+for its bibliography.
 
 ## Architecture
 
@@ -145,6 +146,25 @@ from Vite's dependency pre-bundling (a second copy would register the
 packages where the TeX input can't see them). `\` autocomplete
 (`math/completions.ts`) lists the preamble's macros (`preamble.ts`) with tab
 stops, then MathJax's own names.
+
+**Vault and bibliography.** `src/vault/`: `useVault` reads the Citations
+plugin settings (`vault_settings` in `vault.rs`) and the JabRef `.bib`
+(`read_bibliography`, re-read on focus when its mtime changes). `bibtex.ts`
+is our own BibTeX reader (LaTeX → Unicode, names, JabRef's escaped `file`
+field); `bibliography.ts` matches a PDF to an entry (file field, then citekey
+prefix of the file name) and builds the Citations plugin's template
+variables; `test/bibliography.test.ts` checks both against the user's real
+bib and notes when the vault exists. A work's citekey is set with
+`link_citekey` (`library.rs`), which may move a new, unannotated file into
+the work that already has that citekey (then the text check runs, as for a
+new version). `templates.ts` interprets Handlebars' parsed AST (no
+`Handlebars.compile`: the CSP has no `unsafe-eval`); a multi-line value
+written after `> ` gets the prefix on every line. `tourmaline://open?doc=<work
+id>&hl=<block id>&page=<n>` links (`links.ts`) arrive through
+tauri-plugin-deep-link (forwarded by single-instance when running; a debug
+build registers the scheme for the current user at startup) and are resolved
+by `locate_work`. The only external URLs the app opens are `obsidian://`
+(opener scope in capabilities).
 
 **Security.** CSP is set in `src-tauri/tauri.conf.json` (includes
 `'wasm-unsafe-eval'` for pdf.js decoders); window permissions are in

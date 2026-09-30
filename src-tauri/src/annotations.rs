@@ -358,6 +358,18 @@ impl Db {
             .is_some())
     }
 
+    /// The work an annotation with this block id belongs to, unless deleted.
+    pub fn work_for_block(&self, block_id: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT work_id FROM annotations WHERE block_id = ?1 AND deleted_at IS NULL",
+                [block_id],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
     /// All categories in display order, including deleted ones.
     pub fn list_categories(&self) -> Result<Vec<Category>> {
         let conn = self.conn();
@@ -425,7 +437,7 @@ impl Db {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::library::tests::open;
     use serde_json::json;
@@ -440,7 +452,7 @@ mod tests {
         }
     }
 
-    fn highlight(work_id: &str, file_id: &str, page: u32) -> NewAnnotation {
+    pub(crate) fn highlight(work_id: &str, file_id: &str, page: u32) -> NewAnnotation {
         NewAnnotation {
             work_id: work_id.into(),
             file_id: file_id.into(),

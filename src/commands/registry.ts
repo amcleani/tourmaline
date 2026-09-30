@@ -20,6 +20,10 @@ export interface CommandContext {
   captureMode: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  /** The vault's JabRef bibliography has been read. */
+  hasBibliography: boolean;
+  /** The open paper is linked to a bibliography entry. */
+  hasCitekey: boolean;
 }
 
 /** Context with no document open and nothing going on. */
@@ -33,6 +37,8 @@ export const IDLE_CONTEXT: CommandContext = {
   captureMode: false,
   canUndo: false,
   canRedo: false,
+  hasBibliography: false,
+  hasCitekey: false,
 };
 
 export interface MenuPlacement {

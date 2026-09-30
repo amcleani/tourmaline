@@ -61,6 +61,8 @@ async function placeOnFile(pdf: PDFDocumentProxy, fileId: string, unplaced: Anno
 export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err: unknown) => void) {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [reanchoring, setReanchoring] = useState(false);
+  /** `workId:fileId` whose list has been loaded. */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const docRef = useRef(doc);
   docRef.current = doc;
   const report = useRef(onError);
@@ -113,6 +115,7 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
       const list = await listAnnotations(workId, fileId);
       if (cancelled) return;
       show(list);
+      setLoadedFor(`${workId}:${fileId}`);
       const unplaced = list.filter((a) => !a.placement);
       if (unplaced.length === 0) return;
       setReanchoring(true);
@@ -313,6 +316,8 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
   return {
     annotations,
     reanchoring,
+    /** The open document's annotations have been loaded. */
+    loaded: !!workId && loadedFor === `${workId}:${fileId}`,
     highlight,
     captureArea,
     edit,

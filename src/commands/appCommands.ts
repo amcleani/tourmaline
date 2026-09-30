@@ -5,6 +5,8 @@ export interface AppActions {
   openRecent: () => void;
   closeTab: () => void;
   chooseVault: () => Promise<void>;
+  linkEntry: () => void;
+  openNote: () => Promise<void>;
   quit: () => Promise<void>;
   zoomIn: () => void;
   zoomOut: () => void;
@@ -32,6 +34,8 @@ export interface AppActions {
   deleteAnnotation: () => void;
   captureArea: () => void;
   editCategories: () => void;
+  copyMarkdown: () => Promise<void>;
+  copyLink: () => Promise<void>;
 }
 
 const hasDocument = (ctx: CommandContext) => ctx.hasDocument;
@@ -78,6 +82,22 @@ export function appCommands(a: AppActions): Command[] {
       keywords: ["obsidian", "vault", "preamble", "macros", "mathjax", "settings"],
       menu: { menu: "File", group: 5, order: 1 },
       run: a.chooseVault,
+    },
+    {
+      id: "file.linkEntry",
+      title: "Link to bibliography entry…",
+      keywords: ["citekey", "jabref", "bibtex", "citation", "reference", "match"],
+      menu: { menu: "File", group: 5, order: 2 },
+      when: (ctx) => ctx.hasDocument && ctx.hasBibliography,
+      run: a.linkEntry,
+    },
+    {
+      id: "file.openNote",
+      title: "Open literature note in Obsidian",
+      keywords: ["obsidian", "vault", "citekey", "notes"],
+      menu: { menu: "File", group: 5, order: 3 },
+      when: (ctx) => ctx.hasDocument && ctx.hasCitekey,
+      run: a.openNote,
     },
     {
       id: "app.quit",
@@ -323,6 +343,23 @@ export function appCommands(a: AppActions): Command[] {
       menu: { menu: "Annotate", group: 2, order: 1 },
       when: annotationSelected,
       run: a.deleteAnnotation,
+    },
+    {
+      id: "annot.copyMarkdown",
+      title: "Copy as Markdown",
+      keywords: ["obsidian", "callout", "quote", "clipboard", "export", "note"],
+      shortcut: "Mod+Shift+C",
+      menu: { menu: "Annotate", group: 2, order: 2 },
+      when: annotationSelected,
+      run: a.copyMarkdown,
+    },
+    {
+      id: "annot.copyLink",
+      title: "Copy link to annotation",
+      keywords: ["tourmaline", "url", "clipboard", "obsidian", "reopen"],
+      menu: { menu: "Annotate", group: 2, order: 3 },
+      when: annotationSelected,
+      run: a.copyLink,
     },
     {
       id: "annot.categories",

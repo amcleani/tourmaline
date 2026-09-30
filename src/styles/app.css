@@ -442,6 +442,44 @@ kbd {
 .palette-title mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; }
 .palette-empty { padding: 12px; color: var(--text-muted); }
 
+/* Bibliography entry picker */
+.entry-picker { width: min(720px, calc(100vw - 32px)); }
+.entry-picker-hint { margin: 0; padding: 6px 14px; font-size: 0.85em; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.entry-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.entry-option[aria-selected="true"] { background: var(--accent); color: var(--accent-contrast); }
+.entry-key { font-weight: 600; font-size: 0.9em; overflow-wrap: anywhere; }
+.entry-current { font-weight: 400; }
+.entry-title { overflow-wrap: anywhere; }
+.entry-meta { font-size: 0.85em; color: var(--text-muted); overflow-wrap: anywhere; }
+.entry-option[aria-selected="true"] .entry-meta { color: inherit; opacity: 0.85; }
+.notice-region {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  max-width: calc(100vw - 32px);
+}
+.notice {
+  display: block;
+  padding: 8px 14px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.2);
+  overflow-wrap: anywhere;
+}
+.toolbar-citekey { max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-citekey.unlinked { color: var(--text-muted); }
+
 .dialog {
   width: min(560px, calc(100vw - 32px));
   max-height: 76vh;
@@ -711,7 +749,8 @@ kbd {
   .mark { forced-color-adjust: none; }
   .mark-highlight { background: Highlight; opacity: 0.35; mix-blend-mode: normal; }
   .mark.selected { outline-color: HighlightText; }
-  .palette-item[aria-selected="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+  .palette-item[aria-selected="true"],
+  .entry-option[aria-selected="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; }
   .toolbar-button, .recent-item, .tab.selected { border-color: ButtonText; }
   .search-hit { forced-color-adjust: none; background: Highlight; opacity: 0.4; }
   .search-hit.active { outline-color: HighlightText; opacity: 0.6; }

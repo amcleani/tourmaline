@@ -34,6 +34,10 @@ pub struct DocumentInfo {
     /// Set while this file joined a work as a new version and no text sample
     /// has been recorded for it yet (see `set_text_sample`).
     pub previous_version: Option<PreviousVersion>,
+    /// The work's bibliography entry, if linked.
+    pub citekey: Option<String>,
+    /// An entry this work must not be matched to again (see `detach_file`).
+    pub citekey_declined: Option<String>,
 }
 
 /// Identifies a file on disk: what `documents::read` produced, minus the bytes.
@@ -46,7 +50,8 @@ pub struct FileKey<'a> {
 
 const SELECT_INFO: &str = "SELECT f.sha256, f.work_id, f.path, f.name, f.size, f.last_opened, w.last_position,
             CASE WHEN f.text_sample IS NULL THEN f.derived_from END,
-            (SELECT text_sample FROM files p WHERE p.sha256 = f.derived_from)
+            (SELECT text_sample FROM files p WHERE p.sha256 = f.derived_from),
+            w.citekey, w.citekey_declined
      FROM files f JOIN works w ON w.id = f.work_id";
 
 fn info_from_row(row: &Row) -> rusqlite::Result<DocumentInfo> {
@@ -63,6 +68,8 @@ fn info_from_row(row: &Row) -> rusqlite::Result<DocumentInfo> {
             Some(file_id) => Some(PreviousVersion { file_id, text_sample: row.get(8)? }),
             None => None,
         },
+        citekey: row.get(9)?,
+        citekey_declined: row.get(10)?,
     })
 }
 
@@ -136,12 +143,20 @@ impl Db {
         let now = now_millis();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let name: String = tx
-            .query_row("SELECT name FROM files WHERE sha256 = ?1", [file_id], |r| r.get(0))
+        let (name, citekey): (String, Option<String>) = tx
+            .query_row(
+                "SELECT f.name, w.citekey FROM files f JOIN works w ON w.id = f.work_id WHERE f.sha256 = ?1",
+                [file_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .optional()?
             .ok_or_else(|| Error::Message(format!("no file {file_id}")))?;
         let work = uuid::Uuid::new_v4().to_string();
-        tx.execute("INSERT INTO works (id, title, created) VALUES (?1, ?2, ?3)", params![work, name, now])?;
+        // Not that paper, so not its bibliography entry either.
+        tx.execute(
+            "INSERT INTO works (id, title, created, citekey_declined) VALUES (?1, ?2, ?3, ?4)",
+            params![work, name, now, citekey],
+        )?;
         tx.execute(
             "UPDATE files SET work_id = ?2, derived_from = NULL, text_sample = ?3 WHERE sha256 = ?1",
             params![file_id, work, sample],
@@ -164,6 +179,72 @@ impl Db {
              LIMIT ?1"
         ))?;
         let rows = stmt.query_map([limit], info_from_row)?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Links a file's work to a bibliography entry.
+    ///
+    /// If another work already has that entry, the file is a version of that
+    /// paper: when its own work has no annotations it joins the other work
+    /// (asking the frontend to compare the text, as for a new version at a
+    /// known path). A work with annotations of its own is never merged.
+    pub fn link_citekey(&self, file_id: &str, citekey: &str) -> Result<DocumentInfo> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let work: String = tx
+            .query_row("SELECT work_id FROM files WHERE sha256 = ?1", [file_id], |r| r.get(0))
+            .optional()?
+            .ok_or_else(|| Error::Message(format!("no file {file_id}")))?;
+        let owner: Option<String> = tx
+            .query_row("SELECT id FROM works WHERE citekey = ?1", [citekey], |r| r.get(0))
+            .optional()?;
+        match owner {
+            Some(owner) if owner == work => {}
+            None => {
+                tx.execute(
+                    "UPDATE works SET citekey = ?2, citekey_declined = NULL WHERE id = ?1",
+                    params![work, citekey],
+                )?;
+            }
+            Some(owner) => {
+                let annotated: bool = tx.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM annotations WHERE work_id = ?1 AND deleted_at IS NULL)",
+                    [&work],
+                    |r| r.get(0),
+                )?;
+                if annotated {
+                    return Err(Error::Message(format!(
+                        "{citekey} belongs to another paper in the library, and this one has annotations of its own"
+                    )));
+                }
+                let latest: String = tx.query_row(
+                    "SELECT sha256 FROM files WHERE work_id = ?1 ORDER BY last_opened DESC LIMIT 1",
+                    [&owner],
+                    |r| r.get(0),
+                )?;
+                tx.execute("UPDATE files SET work_id = ?2 WHERE work_id = ?1", params![work, owner])?;
+                // Ask again whether it's the same paper, now compared with that one.
+                tx.execute(
+                    "UPDATE files SET derived_from = ?2, text_sample = NULL WHERE sha256 = ?1",
+                    params![file_id, latest],
+                )?;
+                // Deleted annotations still refer to the old work; keep it then.
+                tx.execute(
+                    "DELETE FROM works WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM annotations WHERE work_id = ?1)",
+                    [&work],
+                )?;
+            }
+        }
+        let info = tx.query_row(&format!("{SELECT_INFO} WHERE f.sha256 = ?1"), [file_id], info_from_row)?;
+        tx.commit()?;
+        Ok(info)
+    }
+
+    /// A work's files, most recently opened first.
+    pub fn work_files(&self, work_id: &str) -> Result<Vec<DocumentInfo>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(&format!("{SELECT_INFO} WHERE f.work_id = ?1 ORDER BY f.last_opened DESC"))?;
+        let rows = stmt.query_map([work_id], info_from_row)?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
@@ -236,6 +317,70 @@ pub(crate) mod tests {
         assert_eq!(detached.last_position, None);
         assert_eq!(open(&db, "b", "/dl/paper.pdf", 3).work_id, detached.work_id);
         assert_eq!(db.recent(10).unwrap().len(), 2, "both papers are in Recent");
+    }
+
+    #[test]
+    fn links_a_citekey_to_the_work() {
+        let db = Db::in_memory().unwrap();
+        let a = open(&db, "a", "/lib/Goodman2023GG.pdf", 1);
+        assert_eq!(a.citekey, None);
+        let linked = db.link_citekey("a", "Goodman2023GG").unwrap();
+        assert_eq!(linked.work_id, a.work_id);
+        assert_eq!(linked.citekey.as_deref(), Some("Goodman2023GG"));
+        assert_eq!(open(&db, "a", "/moved/x.pdf", 2).citekey.as_deref(), Some("Goodman2023GG"));
+        // Relinking to another entry replaces it.
+        assert_eq!(db.link_citekey("a", "Other").unwrap().citekey.as_deref(), Some("Other"));
+    }
+
+    #[test]
+    fn a_new_file_with_a_known_citekey_is_a_new_version() {
+        let db = Db::in_memory().unwrap();
+        let v1 = open(&db, "a", "/lib/Goodman2023GG - Grounding.pdf", 1);
+        db.set_text_sample("a", "grounding generalizations").unwrap();
+        db.link_citekey("a", "Goodman2023GG").unwrap();
+        db.create_annotation(&crate::annotations::tests::highlight(&v1.work_id, "a", 0)).unwrap();
+        // Downloaded again under another name: a separate work at first.
+        let v2 = open(&db, "b", "/downloads/Goodman2023GG.pdf", 2);
+        assert_ne!(v2.work_id, v1.work_id);
+        db.set_text_sample("b", "grounding generalizations v2").unwrap();
+        let joined = db.link_citekey("b", "Goodman2023GG").unwrap();
+        assert_eq!(joined.work_id, v1.work_id);
+        assert_eq!(
+            joined.previous_version,
+            Some(PreviousVersion { file_id: "a".into(), text_sample: Some("grounding generalizations".into()) })
+        );
+        assert_eq!(db.count("works").unwrap(), 1, "the empty work is gone");
+        assert_eq!(db.list_annotations(&v1.work_id, "b").unwrap().len(), 1);
+
+        // It turns out to be a different paper: separated, and not matched again.
+        let detached = db.detach_file("b", "something else").unwrap();
+        assert_eq!(detached.citekey, None);
+        assert_eq!(detached.citekey_declined.as_deref(), Some("Goodman2023GG"));
+        // Linking by hand (the user's choice) clears that.
+        let other = db.link_citekey("b", "Else2024").unwrap();
+        assert_eq!(other.citekey_declined, None);
+    }
+
+    #[test]
+    fn works_with_annotations_are_never_merged() {
+        let db = Db::in_memory().unwrap();
+        let a = open(&db, "a", "/lib/a.pdf", 1);
+        db.link_citekey("a", "Key").unwrap();
+        let b = open(&db, "b", "/lib/b.pdf", 2);
+        db.create_annotation(&crate::annotations::tests::highlight(&b.work_id, "b", 0)).unwrap();
+        assert!(db.link_citekey("b", "Key").is_err());
+        assert_eq!(open(&db, "b", "/lib/b.pdf", 3).work_id, b.work_id);
+        assert_eq!(db.work_files(&a.work_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn lists_a_works_files_newest_first() {
+        let db = Db::in_memory().unwrap();
+        let v1 = open(&db, "a", "/p/a.pdf", 1);
+        open(&db, "a2", "/p/a.pdf", 2);
+        let files: Vec<_> = db.work_files(&v1.work_id).unwrap().into_iter().map(|d| d.file_id).collect();
+        assert_eq!(files, ["a2", "a"]);
+        assert!(db.work_files("nope").unwrap().is_empty());
     }
 
     #[test]

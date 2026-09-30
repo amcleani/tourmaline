@@ -1,7 +1,7 @@
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import { parser } from "@lezer/markdown";
-import { renderNote } from "../src/notes/markdown";
+import { renderNote, setStrictLineBreaks } from "../src/notes/markdown";
 import { formulas } from "../src/notes/mathPreview";
 import { mathSyntax } from "../src/notes/mathSyntax";
 
@@ -57,6 +57,16 @@ describe("renderNote", () => {
     expect(html).toContain("one<br>");
     expect(html).not.toContain("<script>");
     expect(html).toContain("$&lt;b&gt;$");
+  });
+
+  it("follows Obsidian's strict line breaks", () => {
+    setStrictLineBreaks(true);
+    try {
+      expect(renderNote("one\ntwo").html).toBe("<p>one\ntwo</p>\n");
+    } finally {
+      setStrictLineBreaks(false);
+    }
+    expect(renderNote("one\ntwo").html).toBe("<p>one<br>\ntwo</p>\n");
   });
 
   it("leaves link destinations and titles alone", () => {

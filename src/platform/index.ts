@@ -11,6 +11,7 @@ import type {
   PlacementUpdate,
 } from "../annotations/types";
 import type { VaultMathSettings } from "../math/settings";
+import type { VaultSettings } from "../vault/notes";
 import { sha256Hex } from "../util/hash";
 import { MemoryLibrary } from "./memoryLibrary";
 
@@ -34,6 +35,10 @@ export interface DocumentInfo {
    * detachFile (a different paper).
    */
   previousVersion?: { fileId: string; textSample: string | null } | null;
+  /** The paper's bibliography entry, if linked. */
+  citekey?: string | null;
+  /** An entry this paper must not be matched to again (the user said it's a different paper). */
+  citekeyDeclined?: string | null;
 }
 
 export interface OpenedDocument {
@@ -185,6 +190,80 @@ export async function readMathSettings(vault: string): Promise<VaultMathSettings
   const response = await fetch(vault);
   if (!response.ok) throw new Error(`${vault}: ${response.status}`);
   return { latestMathjax: null, preamble: await response.text(), sources: [] };
+}
+
+/** Where the vault keeps literature notes and the bibliography (Citations plugin settings). */
+export async function readVaultSettings(vault: string): Promise<VaultSettings | null> {
+  if (!isTauri()) return null;
+  return invoke<VaultSettings>("vault_settings", { vault });
+}
+
+/** Whether a file exists at a path relative to the vault. */
+export async function vaultFileExists(vault: string, path: string): Promise<boolean> {
+  if (!isTauri()) return false;
+  return invoke<boolean>("vault_file_exists", { vault, path });
+}
+
+/** The JabRef bibliography's text. Only ever read. */
+export async function readBibliography(path: string): Promise<{ text: string; modified: number }> {
+  if (!isTauri()) {
+    // Browser only: `?bib=/test/…` serves a .bib from the dev server.
+    const response = await fetch(path);
+    if (!response.ok) throw new Error(`${path}: ${response.status}`);
+    return { text: await response.text(), modified: 0 };
+  }
+  return invoke("read_bibliography", { path });
+}
+
+export async function bibliographyModified(path: string): Promise<number> {
+  if (!isTauri()) return 0;
+  return invoke<number>("bibliography_modified", { path });
+}
+
+/**
+ * Links a file's paper to a bibliography entry. If another paper in the
+ * library has that entry and this one has no annotations, the file joins it
+ * as a new version (then `previousVersion` is set, as for a new version at a
+ * known path).
+ */
+export async function linkCitekey(fileId: string, citekey: string): Promise<DocumentInfo> {
+  if (!isTauri()) throw new Error("linking to the bibliography needs the desktop app");
+  return invoke<DocumentInfo>("link_citekey", { fileId, citekey });
+}
+
+/** For a tourmaline:// link: the paper's newest file that still exists. */
+export async function locateWork(workId: string | null, blockId: string | null): Promise<DocumentInfo | null> {
+  if (!isTauri()) return null;
+  return invoke<DocumentInfo | null>("locate_work", { workId, blockId });
+}
+
+/** Calls `handler` with each tourmaline:// link the app is opened with, now and later. */
+export async function onReaderLinks(handler: (url: string) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
+  const unlisten = await onOpenUrl((urls) => urls.forEach(handler));
+  // The link the app was started with, if any.
+  (await getCurrent().catch(() => null))?.forEach(handler);
+  return unlisten;
+}
+
+export async function copyText(text: string): Promise<void> {
+  if (isTauri()) {
+    const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+    return writeText(text);
+  }
+  return navigator.clipboard.writeText(text);
+}
+
+/** Opens an obsidian:// link (the only scheme the app may open). */
+export async function openInObsidian(url: string): Promise<void> {
+  if (!url.startsWith("obsidian://")) throw new Error("not an Obsidian link");
+  if (!isTauri()) {
+    window.open(url);
+    return;
+  }
+  const { openUrl } = await import("@tauri-apps/plugin-opener");
+  return openUrl(url);
 }
 
 // ---- App state and window ----------------------------------------------------

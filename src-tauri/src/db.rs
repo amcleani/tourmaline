@@ -156,6 +156,12 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     CREATE INDEX placements_file ON annotation_placements(file_sha256);
     "#
     ),
+    // v4: a citekey the user said a work is not (a file that matched another
+    // paper's bibliography entry and was then separated from it), so it isn't
+    // matched to that entry again.
+    r#"
+    ALTER TABLE works ADD COLUMN citekey_declined TEXT;
+    "#,
 ];
 
 pub struct Db {

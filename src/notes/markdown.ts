@@ -1,5 +1,5 @@
-// Markdown for notes, rendered like Obsidian's reading view: soft line breaks
-// kept, no raw HTML. Math is an inline rule using the same `$` rules as the
+// Markdown for notes, rendered like Obsidian's reading view: single line
+// breaks kept unless the vault has "Strict line breaks" on, no raw HTML. Math is an inline rule using the same `$` rules as the
 // editor (math/delimiters.ts), so markdown-it itself decides what is code,
 // a link or a quote. Formulas come out as placeholders showing their source;
 // NoteView fills them with MathJax.
@@ -13,6 +13,26 @@ export interface NoteMath {
 }
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: true });
+
+let strictLineBreaks = false;
+const lineBreakListeners = new Set<() => void>();
+
+/** Obsidian's "Strict line breaks": a single newline doesn't break the line. */
+export function setStrictLineBreaks(strict: boolean) {
+  if (strict === strictLineBreaks) return;
+  strictLineBreaks = strict;
+  md.set({ breaks: !strict });
+  lineBreakListeners.forEach((l) => l());
+}
+
+/** For useSyncExternalStore: notes re-render when the setting changes. */
+export const lineBreakSetting = {
+  subscribe(listener: () => void) {
+    lineBreakListeners.add(listener);
+    return () => void lineBreakListeners.delete(listener);
+  },
+  strict: () => strictLineBreaks,
+};
 
 // After `escape`, so `\$` stays a dollar sign; `$` ends markdown-it's text runs.
 md.inline.ruler.after("escape", "math", (state, silent) => {

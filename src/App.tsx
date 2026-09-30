@@ -15,11 +15,16 @@ import type { PdfRect } from "./pdf/search";
 import { useDocumentSearch } from "./pdf/useSearch";
 import {
   chooseVault,
+  copyText,
   detachFile,
   getState,
   isTauri,
+  linkCitekey,
   listCategories,
+  locateWork,
+  onReaderLinks,
   onWindowClose,
+  openInObsidian,
   openPdfAtPath,
   openPdfFromUrl,
   pickAndOpenPdf,
@@ -30,15 +35,21 @@ import {
   savePosition,
   setState,
   setTextSample,
+  vaultFileExists,
   type DocumentInfo,
   type OpenedDocument,
 } from "./platform";
 import { useVaultMath } from "./math/useVaultMath";
+import { citationVariables } from "./vault/bibliography";
+import { parseReaderLink, readerLink } from "./vault/links";
+import { DEFAULT_HIGHLIGHT_TEMPLATE, literatureNotePath, obsidianUrl, renderHighlight } from "./vault/notes";
+import { useVault } from "./vault/useVault";
 import { installNativeMenu } from "./platform/menu";
 import { AnnotationPopover } from "./ui/AnnotationPopover";
 import { AnnotationsPanel } from "./ui/AnnotationsPanel";
 import { CategoriesDialog } from "./ui/CategoriesDialog";
 import { CommandPalette } from "./ui/CommandPalette";
+import { EntryPicker } from "./ui/EntryPicker";
 import { FindBar } from "./ui/FindBar";
 import { GoToPageDialog } from "./ui/GoToPageDialog";
 import { OutlinePanel } from "./ui/OutlinePanel";
@@ -70,9 +81,13 @@ interface Tab {
    * path, is the same paper; annotations stay hidden until then.
    */
   pendingVersion?: { sample: string } | null;
+  /** The paper's JabRef entry, if linked. */
+  citekey: string | null;
+  /** An entry this paper must not be matched to again. */
+  citekeyDeclined: string | null;
 }
 
-type Dialog = "palette" | "shortcuts" | "goto" | "recent" | "categories" | null;
+type Dialog = "palette" | "shortcuts" | "goto" | "recent" | "categories" | "entry" | null;
 
 const SAVE_POSITION_MS = 800;
 let tabCounter = 0;
@@ -122,6 +137,15 @@ export function App() {
   }, []);
   const reportMath = useCallback((message: string) => setError(message), []);
   useVaultMath(vault, reportMath);
+  const { settings: vaultSettings, bibliography } = useVault(vault, reportMath);
+
+  /** A short confirmation ("Copied…") shown for a few seconds. */
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   const refreshRecent = useCallback(() => {
     recentDocuments().then(setRecent).catch((e) => console.error("Could not load recent documents", e));
@@ -130,19 +154,28 @@ export function App() {
 
   // ---- Opening and loading documents -------------------------------------
 
+  /**
+   * Records the start of the file's text; if the file joined a paper as a
+   * new version, first checks it's really the same paper. Returns what to
+   * ask the user when it doesn't look like it.
+   */
+  const checkVersion = useCallback(async (pdf: PDFDocumentProxy, info: DocumentInfo) => {
+    const sample = await textSample(pdf).catch(() => "");
+    const previous = info.previousVersion;
+    const differs = !!previous?.textSample && !looksLikeSamePaper(previous.textSample, sample);
+    if (!differs) void setTextSample(info.fileId, sample).catch((e) => console.error("Could not save the text sample", e));
+    return differs ? { sample } : null;
+  }, []);
+
   /** Turns freshly read bytes into a ready tab state. */
   const prepare = useCallback(async (opened: OpenedDocument) => {
     const pdf = await loadPdf(opened.bytes);
     const labels = await pdf.getPageLabels().catch(() => null);
     const saved = decodePosition(opened.info.lastPosition);
-    // Record the start of the text; if this file replaced another at the same
-    // path, first check it's really the same paper.
-    const sample = await textSample(pdf).catch(() => "");
-    const previous = opened.info.previousVersion;
-    const differs = !!previous?.textSample && !looksLikeSamePaper(previous.textSample, sample);
-    if (!differs) void setTextSample(opened.info.fileId, sample).catch((e) => console.error("Could not save the text sample", e));
     return {
-      pendingVersion: differs ? { sample } : null,
+      pendingVersion: await checkVersion(pdf, opened.info),
+      citekey: opened.info.citekey ?? null,
+      citekeyDeclined: opened.info.citekeyDeclined ?? null,
       pdf,
       labels,
       fileId: opened.info.fileId,
@@ -154,7 +187,7 @@ export function App() {
       zoom: saved?.zoom ?? DEFAULT_ZOOM,
       initialAnchor: saved?.anchor ?? null,
     };
-  }, []);
+  }, [checkVersion]);
 
   type Ready = Awaited<ReturnType<typeof prepare>>;
 
@@ -339,6 +372,8 @@ export function App() {
             zoom: DEFAULT_ZOOM,
             initialAnchor: null,
             labels: null,
+            citekey: null,
+            citekeyDeclined: null,
           }));
           // Keep anything the user opened while the session was loading.
           const openPaths = new Set(tabsRef.current.map((t) => t.path));
@@ -393,6 +428,56 @@ export function App() {
     },
     [persistPosition],
   );
+
+  // ---- Bibliography entries ------------------------------------------------------
+
+  /** Updates a tab after its file was linked to an entry (and maybe joined another paper). */
+  const applyLink = useCallback(
+    async (key: string, info: DocumentInfo) => {
+      const tab = tabsRef.current.find((t) => t.key === key);
+      if (!tab || tab.fileId !== info.fileId) return;
+      // Joining another paper's work: check it's the same paper, as for a new version.
+      const pendingVersion = info.previousVersion && tab.pdf ? await checkVersion(tab.pdf, info) : (tab.pendingVersion ?? null);
+      updateTab(key, {
+        workId: info.workId,
+        citekey: info.citekey ?? null,
+        citekeyDeclined: info.citekeyDeclined ?? null,
+        pendingVersion,
+      });
+      refreshRecent();
+    },
+    [checkVersion, updateTab, refreshRecent],
+  );
+
+  const linkTab = useCallback(
+    (tab: Tab, citekey: string): Promise<void> => {
+      if (!tab.fileId || !tab.workId) return Promise.resolve();
+      // In a plain browser nothing is stored: just show the entry.
+      const linked = isTauri()
+        ? linkCitekey(tab.fileId, citekey)
+        : Promise.resolve<DocumentInfo>({ fileId: tab.fileId, workId: tab.workId, path: tab.path, name: tab.name, size: 0, lastOpened: 0, citekey });
+      return linked.then((info) => applyLink(tab.key, info));
+    },
+    [applyLink],
+  );
+
+  // Papers not yet linked (or linked to an entry since removed) are matched
+  // to the bibliography by JabRef's file field, then by file name. Each
+  // file/entry pair is tried once per session.
+  const linkAttempts = useRef(new Set<string>());
+  useEffect(() => {
+    if (!bibliography) return;
+    for (const tab of tabs) {
+      if (tab.status !== "ready" || !tab.fileId || tab.pendingVersion) continue;
+      if (tab.citekey && bibliography.get(tab.citekey)) continue;
+      const match = bibliography.match(tab.path ?? tab.name);
+      if (!match || match.citekey === tab.citekey || match.citekey === tab.citekeyDeclined) continue;
+      const attempt = `${tab.fileId}:${match.citekey}`;
+      if (linkAttempts.current.has(attempt)) continue;
+      linkAttempts.current.add(attempt);
+      linkTab(tab, match.citekey).catch((e) => console.warn(`Could not link ${tab.name} to ${match.citekey}`, e));
+    }
+  }, [tabs, bibliography, linkTab]);
 
   // ---- Outline, search, status --------------------------------------------
 
@@ -565,6 +650,102 @@ export function App() {
     return parts;
   };
 
+  // ---- Links and the vault -------------------------------------------------------
+
+  /** A highlight or page to show once a tourmaline:// link's paper is open. */
+  const [pendingReveal, setPendingReveal] = useState<{ workId: string; blockId: string | null; page: number | null } | null>(
+    null,
+  );
+
+  const openReaderLink = useCallback(
+    async (url: string) => {
+      try {
+        const link = parseReaderLink(url);
+        if (!link) throw new Error(`${url} isn't a link Tourmaline understands`);
+        const doc = await locateWork(link.workId, link.blockId);
+        if (!doc?.path) throw new Error("its paper isn't in the library, or its file has moved");
+        await showDocument(await openPdfAtPath(doc.path));
+        setPendingReveal({ workId: doc.workId, blockId: link.blockId, page: link.page });
+      } catch (e) {
+        reportError("Could not open the link", e);
+      }
+    },
+    [showDocument, reportError],
+  );
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let disposed = false;
+    onReaderLinks((url) => void openReaderLink(url))
+      .then((u) => (disposed ? u() : (unsubscribe = u)))
+      .catch((e) => console.error("Could not listen for tourmaline:// links", e));
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, [openReaderLink]);
+
+  // Once the linked paper is showing with its annotations, go to the target.
+  useEffect(() => {
+    const target = pendingReveal;
+    if (!target || activeTab?.workId !== target.workId || !activePdf || !notes.loaded) return;
+    setPendingReveal(null);
+    const a = target.blockId ? notes.annotations.find((x) => x.blockId === target.blockId) : undefined;
+    if (a) {
+      selectAnnotation(a);
+      // Orphans aren't on a page: show them in the sidebar.
+      if (!a.placement || a.placement.status === "orphan") setAnnotationsOpen(true);
+    } else if (target.page) {
+      viewerRef.current?.goToPage(target.page - 1);
+    } else if (target.blockId) {
+      setError(`The highlight ${target.blockId} is no longer in ${activeTab.name}; it may have been deleted.`);
+    }
+  }, [pendingReveal, activeTab, activePdf, notes.loaded, notes.annotations, selectAnnotation]);
+
+  const pageLabelOf = (tab: Tab | null, a: Annotation) => {
+    const page = a.placement && a.placement.status !== "orphan" ? a.placement.page : null;
+    return page === null ? "?" : (tab?.labels?.[page] ?? String(page + 1));
+  };
+
+  const copyAnnotation = async (as: "markdown" | "link") => {
+    const { selected: a, activeTab: tab } = latest.current;
+    if (!a) return;
+    try {
+      if (as === "link") {
+        await copyText(readerLink(a.workId, { blockId: a.blockId }));
+        setNotice("Copied a link to the annotation");
+        return;
+      }
+      const entry = tab?.citekey ? bibliography?.get(tab.citekey) : undefined;
+      const markdown = renderHighlight(DEFAULT_HIGHLIGHT_TEMPLATE, {
+        annotation: a,
+        category: categories.find((c) => c.id === a.categoryId),
+        pageLabel: pageLabelOf(tab, a),
+        entry: entry ? citationVariables(entry) : undefined,
+      });
+      await copyText(markdown);
+      setNotice("Copied as Markdown: paste it into a note");
+    } catch (e) {
+      reportError("Could not copy the annotation", e);
+    }
+  };
+
+  const openLiteratureNote = async () => {
+    const tab = latest.current.activeTab;
+    if (!tab?.citekey || !vaultSettings) return;
+    try {
+      const entry = bibliography?.get(tab.citekey);
+      const path = literatureNotePath(vaultSettings.citations, entry ? citationVariables(entry) : { citekey: tab.citekey });
+      if (!vault || !(await vaultFileExists(vault, path))) {
+        setNotice(`There is no literature note at ${path} yet.`);
+        return;
+      }
+      await openInObsidian(obsidianUrl(vaultSettings.name, path));
+    } catch (e) {
+      reportError("Could not open the literature note", e);
+    }
+  };
+
   // ---- Commands --------------------------------------------------------------
 
   useEffect(() => {
@@ -578,13 +759,49 @@ export function App() {
       captureMode,
       canUndo: notes.canUndo,
       canRedo: notes.canRedo,
+      hasBibliography: bibliography !== null,
+      hasCitekey: !!activeTab?.citekey,
     };
     registry.notifyContextChanged();
-  }, [activePdf, tabs.length, findOpen, dialog, versionPending, selectionEnd, selected, captureMode, notes.canUndo, notes.canRedo, registry]);
+  }, [
+    activePdf,
+    tabs.length,
+    findOpen,
+    dialog,
+    versionPending,
+    selectionEnd,
+    selected,
+    captureMode,
+    notes.canUndo,
+    notes.canRedo,
+    bibliography,
+    activeTab?.citekey,
+    registry,
+  ]);
 
   // Actions read the latest state through a ref, so commands register once.
-  const latest = useRef({ activeTab, status, search, notes, selected, currentCategory, highlightSelection });
-  latest.current = { activeTab, status, search, notes, selected, currentCategory, highlightSelection };
+  const latest = useRef({
+    activeTab,
+    status,
+    search,
+    notes,
+    selected,
+    currentCategory,
+    highlightSelection,
+    copyAnnotation,
+    openLiteratureNote,
+  });
+  latest.current = {
+    activeTab,
+    status,
+    search,
+    notes,
+    selected,
+    currentCategory,
+    highlightSelection,
+    copyAnnotation,
+    openLiteratureNote,
+  };
 
   useEffect(() => {
     const setZoom = (make: (current: number) => ZoomSpec) => {
@@ -682,6 +899,10 @@ export function App() {
         viewerRef.current?.focus();
       },
       editCategories: () => setDialog("categories"),
+      linkEntry: () => setDialog("entry"),
+      openNote: () => latest.current.openLiteratureNote(),
+      copyMarkdown: () => latest.current.copyAnnotation("markdown"),
+      copyLink: () => latest.current.copyAnnotation("link"),
     }).map((c) => registry.register(c));
 
     let uninstallMenu: (() => void) | null = null;
@@ -775,6 +996,25 @@ export function App() {
             <span className="toolbar-status">{Math.round(status.zoom * 100)}%</span>
           </>
         )}
+        {activePdf && activeTab && bibliography && (
+          <button
+            type="button"
+            className={`toolbar-text-button toolbar-citekey${activeTab.citekey ? "" : " unlinked"}`}
+            onClick={() => registry.execute("file.linkEntry", "toolbar")}
+            title={
+              activeTab.citekey
+                ? `${bibliography.get(activeTab.citekey)?.fields.title ?? "Not in the bibliography any more"}. Link to another entry…`
+                : "Link to bibliography entry…"
+            }
+            aria-label={
+              activeTab.citekey
+                ? `Bibliography entry ${activeTab.citekey}. Link to another entry`
+                : "Not linked to a bibliography entry. Link to bibliography entry"
+            }
+          >
+            {activeTab.citekey ? `@${activeTab.citekey}` : "No entry"}
+          </button>
+        )}
       </Toolbar>
       <TabBar
         tabs={tabs.map((t) => ({ key: t.key, title: t.name, detail: t.path }))}
@@ -790,6 +1030,9 @@ export function App() {
           </button>
         </div>
       )}
+      <div className="notice-region" role="status" aria-live="polite">
+        {notice && <span className="notice">{notice}</span>}
+      </div>
       <div className={captureMode ? "workspace capturing" : "workspace"}>
         {activePdf && outlineOpen && (
           <aside className="sidebar" aria-label="Outline">
@@ -888,6 +1131,17 @@ export function App() {
               })
               .catch((e) => reportError("Could not separate the papers", e));
           }}
+        />
+      )}
+      {dialog === "entry" && bibliography && activeTab && (
+        <EntryPicker
+          bibliography={bibliography}
+          current={activeTab.citekey}
+          fileName={activeTab.name}
+          onPick={(citekey) => {
+            linkTab(activeTab, citekey).catch((e) => reportError(`Could not link ${activeTab.name} to ${citekey}`, e));
+          }}
+          onClose={() => setDialog(null)}
         />
       )}
       {dialog === "categories" && (

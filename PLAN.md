@@ -57,13 +57,24 @@ mouse (menus, toolbar, right-click) and by keyboard (shortcuts, command palette)
   Tourmaline at the highlight. `{{pdfLink}}` (`[[x.pdf#page=5&annotation=412R]]`)
   opens Obsidian's own viewer; needs PDF write-back turned on.
 - **Block IDs** per highlight (`^hl-k3x9q2`) that never change.
+- Templates are parsed by Handlebars and run by Tourmaline's own interpreter
+  (the app's CSP forbids the `new Function` Handlebars' compiler uses):
+  everything the Citations plugin's templates use works; partials don't.
+- Notes follow the vault's "Strict line breaks" setting.
+- Phase 4a ships the highlight template and **Copy as Markdown** / **Copy link
+  to annotation**; the template editor and writing notes are 4c.
 - Multi-line notes and `$$` blocks in callouts get a `>` on every line.
 - Optional CSS snippet in `.obsidian/snippets/` to colour category callouts (off by default).
 
 ## Citekeys (JabRef)
 
 Match PDF → entry by the `.bib` `file` field, then by filename prefix, then a
-searchable picker (remembered). Never write `database.bib` directly; for new
+searchable picker (remembered; File › Link to bibliography entry, or the
+citekey button in the toolbar). A new file matched to an entry another paper
+already has joins that paper as a new version (decision 1) if it has no
+annotations of its own; if the user then says it's a different paper, it is
+not matched to that entry again. Works with their own annotations are never
+merged. Never write `database.bib` directly; for new
 papers, fetch metadata from DOI/arXiv and send to JabRef (`--importToOpen`) or
 copy BibTeX. Watch the `.bib` for changes.
 
@@ -149,7 +160,7 @@ silently dropped).
 | 1 | **Viewer**: virtualised pages, text layer, zoom keeping position, fit width, page tracking, tabs, outline, search, reading position; prototype line/column detection | A 50-page paper reads comfortably ✅ (line detection passes all fixture pages in `test/fixtures/`) |
 | 2 | **Annotations**: highlights, categories, notes, area capture, sidebar | Highlights survive restart and file rename ✅ |
 | 3 | **Notes editor**: CodeMirror + MathJax + preamble + autocomplete | Formulas render as in Obsidian ✅ |
-| 4a | **Vault**: read vault settings, match PDFs to JabRef entries, Handlebars templates, `tourmaline://` links | — |
+| 4a | **Vault**: read vault settings, match PDFs to JabRef entries, Handlebars templates, `tourmaline://` links | `BaconDorrC.pdf` is matched to its entry; Copy as Markdown gives a callout whose `tourmaline://` link reopens the highlight |
 | 4b | **PDF annotations**: import existing annotations; optional write-back and `{{pdfLink}}` | — |
 | 4c | **Export**: merge into notes preserving edits; template editor with live preview | Highlight in `Goodman2023GG` → appears in `@Goodman2023GG.md` without touching the user's text → link reopens Tourmaline there |
 | 5 | **Focus mode** | A two-column arXiv paper reads in order |

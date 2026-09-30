@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { mathGeneration, onMathChange, renderMath } from "../math/engine";
-import { renderNote } from "./markdown";
+import { lineBreakSetting, renderNote } from "./markdown";
 
 function blockLinks(e: React.MouseEvent) {
   if ((e.target as HTMLElement).closest("a")) e.preventDefault();
@@ -14,7 +14,9 @@ export function useMathGeneration(): number {
 // A note rendered as Obsidian's reading view shows it: markdown with MathJax.
 export function NoteView({ text, className }: { text: string; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const rendered = useMemo(() => renderNote(text), [text]);
+  const strict = useSyncExternalStore(lineBreakSetting.subscribe, lineBreakSetting.strict);
+  // `strict` changes how the same text renders.
+  const rendered = useMemo(() => renderNote(text), [text, strict]);
   const generation = useMathGeneration();
 
   useEffect(() => {
