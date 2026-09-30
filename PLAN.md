@@ -107,7 +107,7 @@ if the PDF changes.
 | # | Phase | Done when |
 |---|---|---|
 | 0 | **Setup**: Tauri + React + pdf.js, command registry, native menu, palette, SQLite, CI | A PDF opens from File › Open and from the palette ✅ |
-| 1 | **Viewer**: virtualised pages, text layer, zoom keeping position, fit width, page tracking, tabs, outline, search, reading position; prototype line/column detection | A 50-page paper reads comfortably |
+| 1 | **Viewer**: virtualised pages, text layer, zoom keeping position, fit width, page tracking, tabs, outline, search, reading position; prototype line/column detection | A 50-page paper reads comfortably ✅ (line detection passes all fixture pages in `test/fixtures/`) |
 | 2 | **Annotations**: highlights, categories, notes, area capture, sidebar | Highlights survive restart and file rename |
 | 3 | **Notes editor**: CodeMirror + MathJax + preamble + autocomplete | Formulas render as in Obsidian |
 | 4a | **Vault**: read vault settings, match PDFs to JabRef entries, Handlebars templates, `tourmaline://` links | — |
@@ -118,6 +118,15 @@ if the PDF changes.
 | 7 | **Ink** | Strokes survive zoom and export |
 | 8 | **Equation → LaTeX** | Copied LaTeX compiles |
 | 9 | **Polish**: accessibility audit, themes, UI scale, shortcut editor, installer, auto-update | Everything works mouse-only and keyboard-only |
+
+## Development notes
+
+- Test corpus: `test/fixtures/` (9 LaTeX-built PDFs with ground truth; see its
+  README). `test/readingOrder.test.ts` checks line detection against it.
+- Development runs keep their library in `.dev-data/` (`TOURMALINE_DATA_DIR`):
+  apps launched from the Claude desktop app have AppData writes redirected.
+- Still missing: `test/fixtures/REAL_PAPERS.md` (a list of the user's papers for
+  manual checks; the fixture subagent didn't finish it).
 
 ## Risks
 
