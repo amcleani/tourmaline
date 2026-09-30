@@ -10,6 +10,7 @@ import { PdfViewer, type ViewState, type ViewerHandle, type ZoomSpec } from "./p
 import { useDocumentSearch } from "./pdf/useSearch";
 import {
   getState,
+  onWindowClose,
   openPdfAtPath,
   pickAndOpenPdf,
   quitApp,
@@ -24,6 +25,7 @@ import { CommandPalette } from "./ui/CommandPalette";
 import { FindBar } from "./ui/FindBar";
 import { GoToPageDialog } from "./ui/GoToPageDialog";
 import { OutlinePanel } from "./ui/OutlinePanel";
+import { RecentDialog } from "./ui/RecentDialog";
 import { ShortcutsDialog } from "./ui/ShortcutsDialog";
 import { TabBar } from "./ui/TabBar";
 import { Toolbar } from "./ui/Toolbar";
@@ -43,7 +45,7 @@ interface Tab {
   labels: string[] | null;
 }
 
-type Dialog = "palette" | "shortcuts" | "goto" | null;
+type Dialog = "palette" | "shortcuts" | "goto" | "recent" | null;
 
 const SAVE_POSITION_MS = 800;
 let tabCounter = 0;
@@ -70,7 +72,7 @@ export function App() {
   const activeTab = tabs.find((t) => t.key === activeKey) ?? null;
   const activePdf = activeTab?.status === "ready" ? activeTab.pdf : null;
 
-  const ctxRef = useRef<CommandContext>({ hasDocument: false, tabCount: 0, findOpen: false });
+  const ctxRef = useRef<CommandContext>({ hasDocument: false, tabCount: 0, findOpen: false, modalOpen: false });
   const registry = useMemo(() => new CommandRegistry(() => ctxRef.current), []);
 
   const updateTab = useCallback((key: string, patch: Partial<Tab>) => {
@@ -107,28 +109,60 @@ export function App() {
     };
   }, []);
 
+  type Ready = Awaited<ReturnType<typeof prepare>>;
+
+  /**
+   * Puts a loaded document into a tab. Loads are asynchronous, so by now the
+   * tab may be gone (the document is then freed), or may hold another copy of
+   * the document (the one it replaces is freed after React has moved on).
+   */
+  const installReady = useCallback(
+    (key: string, ready: Ready): boolean => {
+      const tab = tabsRef.current.find((t) => t.key === key);
+      if (!tab) {
+        void ready.pdf.loadingTask.destroy();
+        return false;
+      }
+      const replaced = tab.pdf && tab.pdf !== ready.pdf ? tab.pdf : null;
+      updateTab(key, ready);
+      if (replaced) setTimeout(() => void replaced.loadingTask.destroy(), 0);
+      return true;
+    },
+    [updateTab],
+  );
+
   const showDocument = useCallback(
     async (opened: OpenedDocument) => {
-      const existing = tabsRef.current.find(
-        (t) => (t.docId && t.docId === opened.info.id) || (t.path && t.path === opened.info.path),
-      );
-      if (existing?.status === "ready") {
-        setActiveKey(existing.key);
+      const { id, path } = opened.info;
+      const sameContents = tabsRef.current.find((t) => t.docId === id);
+      if (sameContents?.status === "ready") {
+        setActiveKey(sameContents.key);
         return;
       }
+      // Same file whose contents changed (a new version saved over it), or a
+      // restored tab not loaded yet: load into that tab rather than open a second.
+      const target = sameContents ?? tabsRef.current.find((t) => t.path && t.path === path);
       const ready = await prepare(opened);
-      if (existing) {
-        updateTab(existing.key, ready);
-        setActiveKey(existing.key);
+      if (target && installReady(target.key, ready)) {
+        setActiveKey(target.key);
       } else {
+        // Opened twice in quick succession: keep the first.
+        const duplicate = tabsRef.current.find((t) => t.docId === id && t.status === "ready");
+        if (duplicate) {
+          void ready.pdf.loadingTask.destroy();
+          setActiveKey(duplicate.key);
+          return;
+        }
         const key = newTabKey();
-        setTabs((prev) => [...prev, { key, ...ready }]);
+        const tab: Tab = { key, ...ready };
+        tabsRef.current = [...tabsRef.current, tab];
+        setTabs((prev) => [...prev, tab]);
         setActiveKey(key);
       }
       setError(null);
       refreshRecent();
     },
-    [prepare, updateTab, refreshRecent],
+    [prepare, installReady, refreshRecent],
   );
 
   const openFile = useCallback(async () => {
@@ -160,27 +194,45 @@ export function App() {
     openPdfAtPath(path)
       .then(prepare)
       .then((ready) => {
-        // The tab may have been closed while it loaded; free the document then.
-        if (!tabsRef.current.some((t) => t.key === key)) {
-          void ready.pdf.loadingTask.destroy();
-          return;
-        }
-        updateTab(key, ready);
-        refreshRecent();
+        if (installReady(key, ready)) refreshRecent();
       })
       .catch((err) => updateTab(key, { status: "error", error: `Could not open ${name}: ${err?.message ?? err}` }));
-  }, [activeTab, prepare, updateTab, refreshRecent]);
+  }, [activeTab, prepare, updateTab, installReady, refreshRecent]);
 
   // ---- Positions and session ---------------------------------------------
 
   const saveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const persistPosition = useCallback((tab: Tab) => {
+  const persistPosition = useCallback(async (tab: Tab) => {
     const view = views.current.get(tab.key);
     if (!tab.docId || !view) return;
-    savePosition(tab.docId, encodePosition({ anchor: view.anchor, zoom: tab.zoom })).catch((e) =>
+    await savePosition(tab.docId, encodePosition({ anchor: view.anchor, zoom: tab.zoom })).catch((e) =>
       console.error("Could not save the reading position", e),
     );
   }, []);
+
+  // Saves are delayed while scrolling; write any pending ones before the
+  // window closes (Ctrl+Q, File > Quit or the close button).
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let disposed = false;
+    onWindowClose(async () => {
+      const pending = [...saveTimers.current.keys()];
+      saveTimers.current.forEach((timer) => clearTimeout(timer));
+      saveTimers.current.clear();
+      await Promise.all(
+        pending.map((key) => {
+          const tab = tabsRef.current.find((t) => t.key === key);
+          return tab ? persistPosition(tab) : undefined;
+        }),
+      );
+    })
+      .then((u) => (disposed ? u() : (unsubscribe = u)))
+      .catch((e) => console.error("Could not watch for the window closing", e));
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, [persistPosition]);
 
   const onViewChange = useCallback(
     (key: string, view: ViewState) => {
@@ -190,8 +242,9 @@ export function App() {
       saveTimers.current.set(
         key,
         setTimeout(() => {
+          saveTimers.current.delete(key);
           const tab = tabsRef.current.find((t) => t.key === key);
-          if (tab) persistPosition(tab);
+          if (tab) void persistPosition(tab);
         }, SAVE_POSITION_MS),
       );
     },
@@ -199,8 +252,10 @@ export function App() {
   );
 
   useEffect(() => {
+    let cancelled = false;
     getState("session")
       .then(async (json) => {
+        if (cancelled) return;
         const session = decodeSession(json);
         if (json && !session) {
           // Unreadable (e.g. written by a newer version): keep a copy rather than
@@ -220,13 +275,21 @@ export function App() {
             initialAnchor: null,
             labels: null,
           }));
-          setTabs(restored);
-          setActiveKey(restored[session.active]?.key ?? null);
+          // Keep anything the user opened while the session was loading.
+          const openPaths = new Set(tabsRef.current.map((t) => t.path));
+          const added = restored.filter((t) => !openPaths.has(t.path));
+          setTabs((prev) => [...added, ...prev]);
+          setActiveKey((current) => current ?? restored[session.active]?.key ?? null);
         }
         if (session) setOutlineOpen(session.outlineOpen);
       })
       .catch((e) => console.error("Could not restore the session", e))
-      .finally(() => setSessionLoaded(true));
+      .finally(() => {
+        if (!cancelled) setSessionLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -249,7 +312,8 @@ export function App() {
       if (index === -1) return;
       const tab = list[index];
       clearTimeout(saveTimers.current.get(key));
-      persistPosition(tab);
+      saveTimers.current.delete(key);
+      void persistPosition(tab);
       views.current.delete(key);
       void tab.pdf?.loadingTask.destroy();
       const remaining = list.filter((t) => t.key !== key);
@@ -290,9 +354,14 @@ export function App() {
   // ---- Commands --------------------------------------------------------------
 
   useEffect(() => {
-    ctxRef.current = { hasDocument: activePdf !== null, tabCount: tabs.length, findOpen: findOpen && activePdf !== null };
+    ctxRef.current = {
+      hasDocument: activePdf !== null,
+      tabCount: tabs.length,
+      findOpen: findOpen && activePdf !== null,
+      modalOpen: dialog !== null,
+    };
     registry.notifyContextChanged();
-  }, [activePdf, tabs.length, findOpen, registry]);
+  }, [activePdf, tabs.length, findOpen, dialog, registry]);
 
   // Actions read the latest state through a ref, so commands register once.
   const latest = useRef({ activeTab, status, search });
@@ -322,6 +391,10 @@ export function App() {
 
     const unregister = appCommands({
       openFile,
+      openRecent: () => {
+        refreshRecent();
+        setDialog("recent");
+      },
       closeTab: () => {
         const tab = latest.current.activeTab;
         if (tab) closeTab(tab.key);
@@ -357,7 +430,7 @@ export function App() {
       uninstallMenu?.();
       unregister.forEach((u) => u());
     };
-  }, [registry, openFile, closeTab, updateTab]);
+  }, [registry, openFile, closeTab, updateTab, refreshRecent]);
 
   // Global keyboard shortcuts.
   useEffect(() => {
@@ -444,15 +517,15 @@ export function App() {
               count={search.matches.length}
               active={search.active}
               status={search.status}
-              onNext={search.next}
-              onPrevious={search.previous}
+              onNext={() => registry.execute("nav.findNext", "other")}
+              onPrevious={() => registry.execute("nav.findPrevious", "other")}
               onClose={() => registry.execute("nav.closeFind", "other")}
               focusToken={findFocusToken}
             />
           )}
           {activeTab && activePdf ? (
             <PdfViewer
-              key={activeTab.key}
+              key={`${activeTab.key}:${activeTab.docId}`}
               doc={activePdf}
               name={activeTab.name}
               zoom={activeTab.zoom}
@@ -473,6 +546,7 @@ export function App() {
       </div>
       {dialog === "palette" && <CommandPalette registry={registry} onClose={() => setDialog(null)} />}
       {dialog === "shortcuts" && <ShortcutsDialog registry={registry} onClose={() => setDialog(null)} />}
+      {dialog === "recent" && <RecentDialog recent={recent} onOpen={openRecent} onClose={() => setDialog(null)} />}
       {dialog === "goto" && activePdf && (
         <GoToPageDialog
           pageCount={pageCount}

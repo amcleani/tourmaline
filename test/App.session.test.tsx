@@ -13,6 +13,7 @@ vi.mock("../src/platform", () => ({
   pickAndOpenPdf: vi.fn(async () => null),
   savePosition: vi.fn(async () => {}),
   quitApp: vi.fn(async () => {}),
+  onWindowClose: vi.fn(async () => () => {}),
 }));
 vi.mock("../src/pdf/loader", () => ({ loadPdf: vi.fn(), PDF_TO_CSS: 96 / 72 }));
 

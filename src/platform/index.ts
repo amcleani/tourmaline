@@ -77,6 +77,22 @@ export async function setState(key: string, value: string): Promise<void> {
   }
 }
 
+/**
+ * Runs `handler` (awaited) before the window closes. Returns an unsubscribe
+ * function. Outside Tauri this is best effort (pagehide).
+ */
+export async function onWindowClose(handler: () => Promise<void>): Promise<() => void> {
+  if (isTauri()) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    return getCurrentWindow().onCloseRequested(async () => {
+      await handler();
+    });
+  }
+  const listener = () => void handler();
+  window.addEventListener("pagehide", listener);
+  return () => window.removeEventListener("pagehide", listener);
+}
+
 export async function quitApp(): Promise<void> {
   if (isTauri()) {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");

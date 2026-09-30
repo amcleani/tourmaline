@@ -10,7 +10,7 @@ interface Props {
 
 export function Welcome({ recent, onOpen, onOpenRecent }: Props) {
   return (
-    <main className="welcome">
+    <div className="welcome">
       <h1>Tourmaline</h1>
       <p className="muted">
         Open a PDF with the button below, File › Open, or <kbd>{formatShortcut("Mod+O")}</kbd>. Every command is also
@@ -35,6 +35,6 @@ export function Welcome({ recent, onOpen, onOpenRecent }: Props) {
           </ul>
         </section>
       )}
-    </main>
+    </div>
   );
 }

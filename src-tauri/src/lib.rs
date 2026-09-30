@@ -4,35 +4,51 @@ mod error;
 
 use std::path::PathBuf;
 
-use tauri::{ipc::Response, Manager, State};
+use tauri::{ipc::Response, AppHandle, Manager};
 
 use db::Db;
 use documents::DocumentInfo;
 use error::Result;
 
+/// Runs blocking work (database, file system) off both the main thread and the
+/// async runtime. Synchronous Tauri commands run on the main thread, so a slow
+/// disk or a cloud-synced placeholder file would freeze the window.
+async fn blocking<T, F>(app: AppHandle, work: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&Db) -> Result<T> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || work(&app.state::<Db>()))
+        .await
+        .map_err(|e| error::Error::Message(e.to_string()))?
+}
+
 /// Records that a document was opened. The id is the SHA-256 the frontend
 /// computed from the bytes returned by `read_document`.
 #[tauri::command]
-fn record_open(path: PathBuf, id: String, size: u64, db: State<'_, Db>) -> Result<DocumentInfo> {
-    let mut info = documents::describe(&path, id, size)?;
-    db.record_open(&info)?;
-    info.last_position = db.last_position(&info.id)?;
-    Ok(info)
+async fn record_open(app: AppHandle, path: PathBuf, id: String, size: u64) -> Result<DocumentInfo> {
+    blocking(app, move |db| {
+        let mut info = documents::describe(&path, id, size)?;
+        db.record_open(&info)?;
+        info.last_position = db.last_position(&info.id)?;
+        Ok(info)
+    })
+    .await
 }
 
 #[tauri::command]
-fn save_position(id: String, position: String, db: State<'_, Db>) -> Result<()> {
-    db.save_position(&id, &position)
+async fn save_position(app: AppHandle, id: String, position: String) -> Result<()> {
+    blocking(app, move |db| db.save_position(&id, &position)).await
 }
 
 #[tauri::command]
-fn get_state(key: String, db: State<'_, Db>) -> Result<Option<String>> {
-    db.get_state(&key)
+async fn get_state(app: AppHandle, key: String) -> Result<Option<String>> {
+    blocking(app, move |db| db.get_state(&key)).await
 }
 
 #[tauri::command]
-fn set_state(key: String, value: String, db: State<'_, Db>) -> Result<()> {
-    db.set_state(&key, &value)
+async fn set_state(app: AppHandle, key: String, value: String) -> Result<()> {
+    blocking(app, move |db| db.set_state(&key, &value)).await
 }
 
 /// Returns the raw file bytes as a binary IPC response (no JSON encoding).
@@ -46,14 +62,17 @@ async fn read_document(path: PathBuf) -> Result<Response> {
 
 /// Recently opened documents whose files still exist.
 #[tauri::command]
-fn recent_documents(limit: u32, db: State<'_, Db>) -> Result<Vec<DocumentInfo>> {
-    // Ask for extra rows so files that have since been deleted don't shrink the list.
-    let docs = db.recent(limit.saturating_mul(2))?;
-    Ok(docs
-        .into_iter()
-        .filter(|d| std::path::Path::new(&d.path).exists())
-        .take(limit as usize)
-        .collect())
+async fn recent_documents(app: AppHandle, limit: u32) -> Result<Vec<DocumentInfo>> {
+    blocking(app, move |db| {
+        // Ask for extra rows so files that have since been deleted don't shrink the list.
+        let docs = db.recent(limit.saturating_mul(2))?;
+        Ok(docs
+            .into_iter()
+            .filter(|d| std::path::Path::new(&d.path).exists())
+            .take(limit as usize)
+            .collect())
+    })
+    .await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

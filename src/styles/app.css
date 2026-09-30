@@ -166,6 +166,26 @@ kbd {
   cursor: pointer;
 }
 .recent-item:hover { background: var(--surface-2); }
+.recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 60vh;
+  overflow: auto;
+}
+.recent-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.recent-option svg { grid-row: span 2; }
+.recent-option[aria-selected="true"] { background: var(--accent); color: var(--accent-contrast); }
+.recent-option[aria-selected="true"] .recent-path { color: inherit; opacity: 0.8; }
 .recent-item svg { grid-row: span 2; }
 .recent-name { font-weight: 500; }
 .recent-path { font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

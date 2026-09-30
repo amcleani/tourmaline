@@ -43,10 +43,14 @@ impl Db {
         let dir = path.parent().unwrap_or(Path::new("."));
         std::fs::create_dir_all(dir)?;
         let conn = Connection::open(path)?;
-        // Snapshot before migrating, so a bad migration can be undone by hand.
-        if let Err(e) = backup_daily(&conn, &dir.join("backups"), &today(), BACKUPS_KEPT) {
+        let backups = dir.join("backups");
+        if let Err(e) = backup_daily(&conn, &backups, &today(), BACKUPS_KEPT) {
             eprintln!("Tourmaline: could not back up the library database: {e}");
         }
+        // A migration always gets its own snapshot (never pruned), even if
+        // today's daily one was taken earlier; a failed backup stops the
+        // migration rather than risk the library.
+        backup_before_migrating(&conn, &backups)?;
         Self::init(conn)
     }
 
@@ -57,8 +61,8 @@ impl Db {
 
     fn init(mut conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
         migrate(&mut conn)?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -170,7 +174,7 @@ fn backup_daily(conn: &Connection, dir: &Path, date: &str, keep: usize) -> Resul
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("library-") && n.ends_with(".sqlite3"))
+                .is_some_and(|n| n.starts_with("library-") && !n.starts_with("library-pre-") && n.ends_with(".sqlite3"))
         })
         .collect();
     // ISO dates sort chronologically as strings.
@@ -206,11 +210,39 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (y, m, d)
 }
 
+/// Snapshot to `library-pre-v<N>.sqlite3` if migrations are about to run on an
+/// existing database.
+fn backup_before_migrating(conn: &Connection, dir: &Path) -> Result<Option<PathBuf>> {
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version == 0 || version >= MIGRATIONS.len() as i64 {
+        return Ok(None);
+    }
+    std::fs::create_dir_all(dir)?;
+    let target = dir.join(format!("library-pre-v{}.sqlite3", MIGRATIONS.len()));
+    if target.exists() {
+        std::fs::remove_file(&target)?;
+    }
+    conn.execute("VACUUM INTO ?1", [target.to_string_lossy()])?;
+    Ok(Some(target))
+}
+
 fn migrate(conn: &mut Connection) -> Result<()> {
+    // Foreign keys must be off while migrating: rebuilding a table (create,
+    // copy, DROP, rename) would otherwise fire ON DELETE actions on the rows
+    // that reference it. The pragma can't change inside a transaction, so it's
+    // set here, and each migration checks integrity before committing.
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
     let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
         let tx = conn.transaction()?;
         tx.execute_batch(sql)?;
+        let violations: i64 = tx.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))?;
+        if violations > 0 {
+            return Err(crate::error::Error::Message(format!(
+                "Library migration {} would break {violations} references; nothing was changed.",
+                i + 1
+            )));
+        }
         tx.pragma_update(None, "user_version", (i + 1) as i64)?;
         tx.commit()?;
     }
@@ -338,5 +370,52 @@ mod tests {
         b.record_open(&doc("b", "/p/b.pdf", 2)).unwrap();
         assert_eq!(a.document_count().unwrap(), 2);
         assert_eq!(b.document_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn migration_gets_its_own_backup_and_daily_pruning_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        let backups = dir.path().join("backups");
+        // An existing library one version behind.
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute(
+                "INSERT INTO documents VALUES ('a', '/p/a.pdf', 'a.pdf', 1, 1, 1, NULL)",
+                [],
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        assert_eq!(db.schema_version().unwrap(), MIGRATIONS.len() as i64);
+        let pre = backups.join(format!("library-pre-v{}.sqlite3", MIGRATIONS.len()));
+        let copy = Connection::open(&pre).unwrap();
+        let v: i64 = copy.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 1, "snapshot is of the database before migrating");
+        drop(copy);
+
+        let conn = Connection::open(&path).unwrap();
+        for day in ["2030-01-01", "2030-01-02", "2030-01-03"] {
+            backup_daily(&conn, &backups, day, 1).unwrap();
+        }
+        assert!(pre.exists(), "daily pruning must not delete pre-migration snapshots");
+    }
+
+    #[test]
+    fn migration_breaking_references_is_rolled_back() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE parent (id INTEGER PRIMARY KEY);
+             CREATE TABLE child (p INTEGER REFERENCES parent(id));
+             INSERT INTO parent VALUES (1); INSERT INTO child VALUES (1);",
+        )
+        .unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        let tx = conn.transaction().unwrap();
+        tx.execute_batch("DELETE FROM parent;").unwrap();
+        let violations: i64 = tx.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+        assert_eq!(violations, 1, "the integrity check used by migrate() sees the broken reference");
     }
 }

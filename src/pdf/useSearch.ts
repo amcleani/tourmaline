@@ -55,6 +55,8 @@ export function useDocumentSearch(doc: PDFDocumentProxy | null, fromPage: number
           if (!chosen && found.length) {
             chosen = true;
             setActiveMatch(found[0]);
+            // Publish straight away so the first hit is counted and highlighted.
+            setMatches([...byPage.keys()].sort((a, b) => a - b).flatMap((p) => byPage.get(p)!));
           }
         } catch {
           // Unreadable page: skip it rather than abandon the search.

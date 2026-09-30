@@ -61,6 +61,10 @@ product requirement. New context the `when` conditions need goes in
 - Global shortcuts are ignored while an `aria-modal` dialog is open, and in
   text fields for editing keys (Home/End/arrows...).
 - The palette hides commands whose `when` is false.
+- Exception: controls that act on one specific item (the close button on a
+  given tab, an entry in a list) may call a handler directly, provided a
+  command offers the same action by keyboard, menu and palette (Close tab,
+  Open recent...).
 
 **Frontend ↔ Rust.** `src/platform/index.ts` is the only module that calls
 `invoke`; it falls back to web APIs outside Tauri so the UI runs in a browser

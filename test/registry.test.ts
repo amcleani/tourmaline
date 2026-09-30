@@ -1,6 +1,6 @@
 import { CommandRegistry, type Command, type CommandContext } from "../src/commands/registry";
 
-function setup(ctx: CommandContext = { hasDocument: false, tabCount: 0, findOpen: false }) {
+function setup(ctx: CommandContext = { hasDocument: false, tabCount: 0, findOpen: false, modalOpen: false }) {
   let time = 0;
   const context = { current: ctx };
   const registry = new CommandRegistry(() => context.current, () => time);
@@ -23,7 +23,7 @@ describe("CommandRegistry", () => {
     expect(registry.execute("test.cmd")).toBe(false);
     expect(run).not.toHaveBeenCalled();
 
-    context.current = { hasDocument: true, tabCount: 1, findOpen: false };
+    context.current = { hasDocument: true, tabCount: 1, findOpen: false, modalOpen: false };
     expect(registry.execute("test.cmd")).toBe(true);
     expect(run).toHaveBeenCalledOnce();
   });
@@ -58,6 +58,20 @@ describe("CommandRegistry", () => {
     advance(500);
     registry.execute("test.cmd", "menu");
     expect(run).toHaveBeenCalledTimes(3);
+  });
+
+  it("ignores keyboard and menu while a modal dialog is open", () => {
+    const { registry, context, advance } = setup({ hasDocument: true, tabCount: 1, findOpen: false, modalOpen: true });
+    const run = vi.fn();
+    registry.register(command({ run }));
+    expect(registry.execute("test.cmd", "keyboard")).toBe(false);
+    expect(registry.execute("test.cmd", "menu")).toBe(false);
+    // The palette closes itself before running the chosen command.
+    expect(registry.execute("test.cmd", "palette")).toBe(true);
+    context.current = { ...context.current, modalOpen: false };
+    advance(500); // past the duplicate-press window
+    expect(registry.execute("test.cmd", "keyboard")).toBe(true);
+    expect(run).toHaveBeenCalledTimes(2);
   });
 
   it("groups menu items and sorts them", () => {

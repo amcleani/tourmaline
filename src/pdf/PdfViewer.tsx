@@ -9,6 +9,8 @@ import {
   fitZoom,
   offsetOf,
   typicalSize,
+  MAX_ZOOM,
+  MIN_ZOOM,
   visibleRange,
   type Anchor,
   type Size,
@@ -158,6 +160,8 @@ export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewCh
   // the webview's own page zoom.
   const zoomStep = useRef(onZoomStep);
   zoomStep.current = onZoomStep;
+  const zoomNow = useRef(effectiveZoom);
+  zoomNow.current = effectiveZoom;
   useEffect(() => {
     const el = scrollRef.current!;
     let accumulated = 0;
@@ -166,9 +170,14 @@ export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewCh
       e.preventDefault();
       accumulated += e.deltaY;
       if (Math.abs(accumulated) < WHEEL_STEP) return;
-      zoomFocusY.current = e.clientY - el.getBoundingClientRect().top;
-      zoomStep.current(accumulated < 0 ? 1 : -1);
+      const direction = accumulated < 0 ? 1 : -1;
       accumulated = 0;
+      // At the zoom limit nothing will relayout, so don't leave a focus point
+      // behind for some unrelated relayout to use later.
+      const z = zoomNow.current;
+      if ((direction === 1 && z >= MAX_ZOOM - 1e-6) || (direction === -1 && z <= MIN_ZOOM + 1e-6)) return;
+      zoomFocusY.current = e.clientY - el.getBoundingClientRect().top;
+      zoomStep.current(direction);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -207,11 +216,20 @@ export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewCh
       async goToTarget(target) {
         const l = layoutRef.current;
         if (!l) return;
-        if (target.y === null) return goToPage(target.page);
-        const page = await doc.getPage(target.page + 1);
-        const vp = page.getViewport({ scale: l.zoom * PDF_TO_CSS });
-        const [, y] = vp.convertToViewportPoint(0, target.y);
-        scrollToOffset(l.tops[target.page] + y - PADDING / 2);
+        // Destinations come from the PDF and can point outside it.
+        const pageIndex = Math.min(Math.max(target.page, 0), l.tops.length - 1);
+        if (target.y === null) return goToPage(pageIndex);
+        try {
+          const page = await doc.getPage(pageIndex + 1);
+          // On a rotated page a destination's y alone doesn't give the
+          // on-screen height (that needs its x too), so go to the page top.
+          if (page.rotate % 180 !== 0) return goToPage(pageIndex);
+          const vp = page.getViewport({ scale: l.zoom * PDF_TO_CSS });
+          const [, y] = vp.convertToViewportPoint(0, target.y);
+          scrollToOffset(l.tops[pageIndex] + y - PADDING / 2);
+        } catch {
+          goToPage(pageIndex);
+        }
       },
       async revealRect(pageIndex, rect) {
         const l = layoutRef.current;
@@ -371,10 +389,16 @@ function PageView({ doc, index, top, left, width, height, zoom, highlights, onSi
       cancelled = true;
     };
   }, [doc, index, page, viewport, pageNumber]);
+  // When the page scrolls away, free what pdf.js cached for drawing it
+  // (operator list, decoded images) once any render in flight has settled.
+  const pageRef = useRef<PDFPageProxy | null>(null);
+  pageRef.current = page;
   useEffect(
     () => () => {
       textLayer.current?.cancel();
       textLayer.current = null;
+      const loaded = pageRef.current;
+      if (loaded) void lastRender.current.finally(() => loaded.cleanup());
     },
     [],
   );

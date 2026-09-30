@@ -2,6 +2,7 @@ import type { Command, CommandContext } from "./registry";
 
 export interface AppActions {
   openFile: () => Promise<void>;
+  openRecent: () => void;
   closeTab: () => void;
   quit: () => Promise<void>;
   zoomIn: () => void;
@@ -42,11 +43,19 @@ export function appCommands(a: AppActions): Command[] {
       run: a.openFile,
     },
     {
+      id: "file.openRecent",
+      title: "Open recent…",
+      keywords: ["history", "previous", "last"],
+      shortcut: "Mod+R",
+      menu: { menu: "File", group: 1, order: 2 },
+      run: a.openRecent,
+    },
+    {
       id: "file.closeTab",
       title: "Close tab",
       keywords: ["document"],
       shortcut: "Mod+W",
-      menu: { menu: "File", group: 1, order: 2 },
+      menu: { menu: "File", group: 1, order: 3 },
       when: hasDocument,
       run: a.closeTab,
     },

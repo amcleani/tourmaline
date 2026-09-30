@@ -11,6 +11,8 @@ export interface CommandContext {
   hasDocument: boolean;
   tabCount: number;
   findOpen: boolean;
+  /** A modal dialog is open: keyboard shortcuts and the menu don't act behind it. */
+  modalOpen: boolean;
 }
 
 export interface MenuPlacement {
@@ -109,6 +111,9 @@ export class CommandRegistry {
     if (!command) return false;
     const ctx = this.getContext();
     if (!(command.when?.(ctx) ?? true)) return false;
+    // A modal dialog owns the keyboard; shortcuts and the menu must not act
+    // on the document behind it. (The palette runs its choice after closing.)
+    if (ctx.modalOpen && (source === "keyboard" || source === "menu")) return false;
 
     const at = this.now();
     const last = this.lastRun;

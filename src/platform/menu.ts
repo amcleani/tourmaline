@@ -6,7 +6,15 @@ import { isTauri } from "./index";
 // added or removed the whole menu is rebuilt; otherwise only each item's
 // enabled state is updated.
 
-const hasCommandModifier = (shortcut: string) => /^(Ctrl|Alt|Meta)\+/.test(normaliseShortcut(shortcut));
+/**
+ * Whether a shortcut is safe as a native accelerator: it needs Ctrl/Alt/Meta,
+ * and must not be a caret or editing key, which text fields need (a native
+ * accelerator takes the key before the page sees it).
+ */
+const nativeAcceleratorOk = (shortcut: string) => {
+  const s = normaliseShortcut(shortcut);
+  return /^(Ctrl|Alt|Meta)\+/.test(s) && !/\+(Home|End|Arrow\w+|PageUp|PageDown|Backspace|Delete|Tab)$/.test(s);
+};
 
 type MenuItemHandle = Awaited<ReturnType<typeof import("@tauri-apps/api/menu").MenuItem.new>>;
 
@@ -65,7 +73,7 @@ async function buildMenu(registry: CommandRegistry): Promise<Map<string, MenuIte
         const shortcut = command.shortcut;
         const item = await MenuItem.new({
           text: command.title,
-          accelerator: shortcut && hasCommandModifier(shortcut) ? toAccelerator(shortcut) : undefined,
+          accelerator: shortcut && nativeAcceleratorOk(shortcut) ? toAccelerator(shortcut) : undefined,
           enabled: registry.isEnabled(command.id),
           action: () => registry.execute(command.id, "menu"),
         });
