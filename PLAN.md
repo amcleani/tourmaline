@@ -125,6 +125,10 @@ if the PDF changes.
   README). `test/readingOrder.test.ts` checks line detection against it.
 - Development runs keep their library in `.dev-data/` (`TOURMALINE_DATA_DIR`):
   apps launched from the Claude desktop app have AppData writes redirected.
+- Known issue: search highlights estimate character positions proportionally
+  within a text item, so they drift sideways on long lines ("action model"
+  highlighted as "ction models"). Fix by measuring positions from the text
+  layer spans. (Phase 2 highlights use the real selection, so they're unaffected.)
 - Still missing: `test/fixtures/REAL_PAPERS.md` (a list of the user's papers for
   manual checks; the fixture subagent didn't finish it).
 
