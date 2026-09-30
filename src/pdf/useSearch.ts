@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { Highlight } from "./PdfViewer";
-import { buildPageText, findInPage, matchRects, normaliseQuery, type PdfRect } from "./search";
-import { getTextContent } from "./textCache";
+import { findInPage, matchRects, normaliseQuery, type PdfRect } from "./search";
+import { getPageText } from "./textCache";
 
 export interface FoundMatch {
   page: number;
@@ -18,18 +18,21 @@ const BATCH_PAGES = 16;
 /**
  * Searches a document page by page in the background. A new query cancels the
  * previous search. The first match at or after `fromPage` becomes active.
+ * Matches are returned in document order.
  */
 export function useDocumentSearch(doc: PDFDocumentProxy | null, fromPage: number) {
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<FoundMatch[]>([]);
-  const [active, setActive] = useState(-1);
+  // Tracked by identity: matches from before `fromPage` arrive later and are
+  // inserted ahead of it, which would shift an index.
+  const [activeMatch, setActiveMatch] = useState<FoundMatch | null>(null);
   const [status, setStatus] = useState<SearchStatus>("idle");
   const fromPageRef = useRef(fromPage);
   fromPageRef.current = fromPage;
 
   useEffect(() => {
     setMatches([]);
-    setActive(-1);
+    setActiveMatch(null);
     if (!doc || !normaliseQuery(query)) {
       setStatus("idle");
       return;
@@ -37,29 +40,28 @@ export function useDocumentSearch(doc: PDFDocumentProxy | null, fromPage: number
     let cancelled = false;
     setStatus("searching");
     const timer = setTimeout(async () => {
-      const found: FoundMatch[] = [];
-      let activeChosen = false;
-      for (let page = 0; page < doc.numPages && !cancelled; page++) {
+      // Search from the current page to the end, then wrap around, so the
+      // match the reader most likely wants is found first.
+      const start = Math.min(Math.max(fromPageRef.current, 0), doc.numPages - 1);
+      const order = [...Array(doc.numPages).keys()].map((i) => (start + i) % doc.numPages);
+      const byPage = new Map<number, FoundMatch[]>();
+      let chosen = false;
+      for (const [n, page] of order.entries()) {
+        if (cancelled) return;
         try {
-          const content = await getTextContent(doc, page);
-          const text = buildPageText(content.items);
-          for (const m of findInPage(text, page, query)) {
-            found.push({ page, rects: matchRects(text, content.items, m) });
+          const { text, content } = await getPageText(doc, page);
+          const found = findInPage(text, page, query).map((m) => ({ page, rects: matchRects(text, content.items, m) }));
+          if (found.length) byPage.set(page, found);
+          if (!chosen && found.length) {
+            chosen = true;
+            setActiveMatch(found[0]);
           }
         } catch {
           // Unreadable page: skip it rather than abandon the search.
         }
-        const lastPage = page === doc.numPages - 1;
         if (cancelled) return;
-        if ((page + 1) % BATCH_PAGES === 0 || lastPage) {
-          setMatches(found.slice());
-          if (!activeChosen) {
-            const idx = found.findIndex((f) => f.page >= fromPageRef.current);
-            if (idx !== -1 || lastPage) {
-              activeChosen = true;
-              setActive(idx !== -1 ? idx : found.length ? 0 : -1);
-            }
-          }
+        if ((n + 1) % BATCH_PAGES === 0 || n === order.length - 1) {
+          setMatches([...byPage.keys()].sort((a, b) => a - b).flatMap((p) => byPage.get(p)!));
         }
       }
       if (!cancelled) setStatus("done");
@@ -70,22 +72,26 @@ export function useDocumentSearch(doc: PDFDocumentProxy | null, fromPage: number
     };
   }, [doc, query]);
 
+  const active = activeMatch ? matches.indexOf(activeMatch) : -1;
+
   const step = useCallback(
     (direction: 1 | -1) => {
-      setActive((i) => (matches.length === 0 ? -1 : (i + direction + matches.length) % matches.length));
+      if (matches.length === 0) return;
+      const i = activeMatch ? matches.indexOf(activeMatch) : -1;
+      setActiveMatch(matches[i === -1 ? 0 : (i + direction + matches.length) % matches.length]);
     },
-    [matches.length],
+    [matches, activeMatch],
   );
 
   const highlights = useMemo(() => {
     const byPage = new Map<number, Highlight[]>();
-    matches.forEach((m, i) => {
+    for (const m of matches) {
       const list = byPage.get(m.page) ?? [];
-      list.push({ rects: m.rects, active: i === active });
+      list.push({ rects: m.rects, active: m === activeMatch });
       byPage.set(m.page, list);
-    });
+    }
     return byPage;
-  }, [matches, active]);
+  }, [matches, activeMatch]);
 
-  return { query, setQuery, matches, active, status, next: () => step(1), previous: () => step(-1), highlights };
+  return { query, setQuery, matches, active, activeMatch, status, next: () => step(1), previous: () => step(-1), highlights };
 }

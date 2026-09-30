@@ -8,6 +8,7 @@ import {
   currentPage,
   fitZoom,
   offsetOf,
+  typicalSize,
   visibleRange,
   type Anchor,
   type Size,
@@ -50,6 +51,7 @@ interface Props {
   doc: PDFDocumentProxy;
   name: string;
   zoom: ZoomSpec;
+  /** Where to open; read once when the viewer mounts. */
   initialAnchor?: Anchor | null;
   highlights?: ReadonlyMap<number, Highlight[]>;
   onViewChange: (state: ViewState) => void;
@@ -100,7 +102,7 @@ export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewCh
 
   const effectiveZoom = useMemo(() => {
     if (zoom.mode === "custom" || !sizes || viewport.width === 0) return zoom.zoom;
-    return fitZoom(zoom.mode, sizes[0], viewport.width, viewport.height);
+    return fitZoom(zoom.mode, typicalSize(sizes), viewport.width, viewport.height);
   }, [zoom, sizes, viewport]);
 
   const layout = useMemo(() => (sizes ? computeLayout(sizes, effectiveZoom) : null), [sizes, effectiveZoom]);
@@ -111,13 +113,14 @@ export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewCh
   const prevLayout = useRef<typeof layout>(null);
   const zoomFocusY = useRef<number | null>(null);
   const restored = useRef(false);
+  const openAt = useRef(initialAnchor);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!layout || !el) return;
     const prev = prevLayout.current;
     prevLayout.current = layout;
     if (!prev) {
-      if (initialAnchor && !restored.current) el.scrollTop = offsetOf(layout, initialAnchor);
+      if (openAt.current && !restored.current) el.scrollTop = offsetOf(layout, openAt.current);
       restored.current = true;
     } else if (prev !== layout) {
       const focusY = zoomFocusY.current ?? el.clientHeight / 2;
@@ -130,7 +133,7 @@ export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewCh
       el.scrollLeft = centreX * ratio - el.clientWidth / 2;
     }
     setScrollTop(el.scrollTop);
-  }, [layout, initialAnchor]);
+  }, [layout]);
 
   // Report position (throttled to animation frames).
   const report = useRef(onViewChange);

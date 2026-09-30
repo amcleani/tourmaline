@@ -8,6 +8,7 @@ import {
   nextZoom,
   offsetOf,
   pageAt,
+  typicalSize,
   visibleRange,
 } from "../src/pdf/layout";
 import { PDF_TO_CSS } from "../src/pdf/units";
@@ -81,6 +82,13 @@ describe("layout", () => {
     const h = 1056 / 2 + 2 * PADDING;
     expect(fitZoom("fit-page", letter, w, h)).toBeCloseTo(0.5, 5);
     expect(fitZoom("fit-width", { width: 72 / PDF_TO_CSS, height: 100 }, 132, 400)).toBeCloseTo(100 / 72, 5);
+  });
+});
+
+describe("typical page size", () => {
+  it("ignores an odd cover page", () => {
+    expect(typicalSize([landscape, letter, letter, letter])).toEqual(letter);
+    expect(typicalSize([])).toEqual({ width: 612, height: 792 });
   });
 });
 

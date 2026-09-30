@@ -73,3 +73,18 @@ describe("finding matches", () => {
     expect(rects[1][3]).toBeGreaterThan(688);
   });
 });
+
+describe("highlight rectangles on rotated text", () => {
+  it("follows the text direction", () => {
+    // Text running up the page (as on a /Rotate 90 page): origin (300, 100), 5 units per char.
+    const rotated: TextItemLike = { str: "abcdef", transform: [0, 10, -10, 0, 300, 100], width: 30, height: 10, hasEOL: false };
+    const page = buildPageText([rotated]);
+    const [match] = findInPage(page, 0, "cd");
+    const [[x0, y0, x1, y1]] = matchRects(page, [rotated], match);
+    // "cd" is chars 2-3: 10-20 units up from the origin, glyphs extending left of x=300.
+    expect(y0).toBeCloseTo(110);
+    expect(y1).toBeCloseTo(120);
+    expect(x0).toBeCloseTo(300 - 8.5);
+    expect(x1).toBeCloseTo(300 + 2.5);
+  });
+});

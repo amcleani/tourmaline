@@ -118,12 +118,23 @@ export function matchRects(page: PageText, items: ReadonlyArray<TextItemLike | {
   for (const [itemIndex, [c0, c1]] of byItem) {
     const item = items[itemIndex] as TextItemLike;
     const len = item.str.length || 1;
-    const [, , c, d, e, f] = item.transform;
+    const [a, b, c, d, e, f] = item.transform;
     const fontHeight = item.height || Math.hypot(c, d) || 10;
-    const x0 = e + (item.width * c0) / len;
-    const x1 = e + (item.width * c1) / len;
-    // Baseline at f; cover descenders and ascenders.
-    rects.push([x0, f - 0.25 * fontHeight, x1, f + 0.85 * fontHeight]);
+    // Text runs along (a, b) from the origin (e, f), with "up" along (c, d);
+    // using the vectors rather than x/y keeps rotated text right.
+    const runLength = Math.hypot(a, b) || 1;
+    const upLength = Math.hypot(c, d) || 1;
+    const [ux, uy] = [a / runLength, b / runLength];
+    const [vx, vy] = [c / upLength, d / upLength];
+    const along0 = (item.width * c0) / len;
+    const along1 = (item.width * c1) / len;
+    // Cover descenders and ascenders around the baseline.
+    const corners = [along0, along1].flatMap((t) =>
+      [-0.25 * fontHeight, 0.85 * fontHeight].map((h) => [e + ux * t + vx * h, f + uy * t + vy * h]),
+    );
+    const xs = corners.map(([x]) => x);
+    const ys = corners.map(([, y]) => y);
+    rects.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
   }
   return rects;
 }

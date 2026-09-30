@@ -51,9 +51,15 @@ product requirement. New context the `when` conditions need goes in
 
 - Shortcuts are written `"Mod+Shift+K"` and normalised in `shortcuts.ts`
   (`Mod` = Ctrl on Windows). Registering a duplicate id or shortcut throws.
-- On Windows the native menu accelerator and the webview keydown can both fire
-  for one key press; `execute()` drops a repeat of the same command from a
-  different source within 150 ms. Keep that in mind when testing shortcuts.
+- Only Ctrl/Alt/Meta shortcuts are registered as native menu accelerators
+  (`src/platform/menu.ts`): a native accelerator takes the key before the page
+  sees it, even when disabled, so plain keys (Escape, F3) are handled only by
+  the page's keydown handler. Don't put tab-separated shortcut text in menu
+  labels - it blanks the window on Windows. For modifier shortcuts both the
+  menu and the page can fire; `execute()` drops a repeat of the same command
+  from a different source within 150 ms.
+- Global shortcuts are ignored while an `aria-modal` dialog is open, and in
+  text fields for editing keys (Home/End/arrows...).
 - The palette hides commands whose `when` is false.
 
 **Frontend ↔ Rust.** `src/platform/index.ts` is the only module that calls
@@ -71,10 +77,18 @@ snapshot goes to `backups/library-<date>.sqlite3` next to the database (14
 kept). The app is single-instance (tauri-plugin-single-instance) so only one
 process writes the library; it logs the database path at startup.
 
-**Viewer.** `src/pdf/PdfViewer.tsx` renders pages lazily with an
-IntersectionObserver; sizes use CSS px = PDF pt × 96/72 × zoom, canvases are
-scaled by devicePixelRatio. pdf.js 6: `render({ canvas, viewport })`, and
-documents are freed with `pdf.loadingTask.destroy()`.
+**Viewer.** Geometry lives in `src/pdf/layout.ts` (pure, unit-tested):
+page tops/sizes, which pages are near the viewport (only those mount), the
+current page, fit zoom, and `Anchor` = page + fraction, which keeps the
+reader's place across zoom and relayout. `src/pdf/PdfViewer.tsx` renders
+canvas + pdf.js text layer per mounted page (CSS px = PDF pt × 96/72 × zoom;
+canvas × devicePixelRatio, capped) and exposes a `ViewerHandle` for
+navigation. Text content is extracted once per page (`src/pdf/textCache.ts`)
+and shared by the text layer and search (`search.ts`, `useSearch.ts`).
+pdf.js 6: `render({ canvas, viewport })`, documents are freed with
+`pdf.loadingTask.destroy()`. Focus-mode line detection is
+`src/focus/lines.ts`, checked against the fixtures in `test/fixtures/` by
+`test/readingOrder.test.ts`.
 
 **Security.** CSP is set in `src-tauri/tauri.conf.json` (includes
 `'wasm-unsafe-eval'` for pdf.js decoders); window permissions are in

@@ -102,6 +102,23 @@ export function offsetOf(layout: Layout, anchor: Anchor): number {
   return layout.tops[page] + anchor.fraction * layout.heights[page];
 }
 
+/**
+ * The most common page size, so a cover or fold-out page doesn't set the zoom
+ * for a whole document in the fit modes.
+ */
+export function typicalSize(sizes: Size[]): Size {
+  const counts = new Map<string, { size: Size; n: number }>();
+  for (const s of sizes) {
+    const key = `${Math.round(s.width)}x${Math.round(s.height)}`;
+    const entry = counts.get(key) ?? { size: s, n: 0 };
+    entry.n++;
+    counts.set(key, entry);
+  }
+  let best: { size: Size; n: number } | undefined;
+  for (const entry of counts.values()) if (!best || entry.n > best.n) best = entry;
+  return best?.size ?? { width: 612, height: 792 };
+}
+
 export type ZoomMode = "custom" | "fit-width" | "fit-page";
 
 /** Zoom level that fits a page into the viewport, leaving room for padding and a scrollbar. */

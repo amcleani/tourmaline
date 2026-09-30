@@ -160,6 +160,11 @@ export function App() {
     openPdfAtPath(path)
       .then(prepare)
       .then((ready) => {
+        // The tab may have been closed while it loaded; free the document then.
+        if (!tabsRef.current.some((t) => t.key === key)) {
+          void ready.pdf.loadingTask.destroy();
+          return;
+        }
         updateTab(key, ready);
         refreshRecent();
       })
@@ -226,7 +231,9 @@ export function App() {
 
   useEffect(() => {
     if (!sessionLoaded) return;
-    const saved = tabs.filter((t) => t.path && t.status !== "error");
+    // Tabs that failed to open stay in the session: the file may be on a
+    // drive or synced folder that is only temporarily unavailable.
+    const saved = tabs.filter((t) => t.path);
     const json = encodeSession({
       tabs: saved.map((t) => ({ path: t.path!, name: t.name })),
       active: Math.max(0, saved.findIndex((t) => t.key === activeKey)),
@@ -271,7 +278,7 @@ export function App() {
 
   const currentPage = status?.page ?? 0;
   const search = useDocumentSearch(findOpen ? activePdf : null, currentPage);
-  const activeMatch = search.active >= 0 ? search.matches[search.active] : undefined;
+  const activeMatch = search.activeMatch;
   useEffect(() => {
     if (activeMatch) void viewerRef.current?.revealRect(activeMatch.page, activeMatch.rects[0]);
   }, [activeMatch]);
@@ -356,9 +363,15 @@ export function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      // In text fields only shortcuts with Ctrl/Alt/Meta, or function keys, count.
-      const functionKey = /^F\d{1,2}$/.test(e.key);
-      if (isTypingTarget(e.target) && !(e.ctrlKey || e.altKey || e.metaKey || functionKey)) return;
+      // A modal dialog owns the keyboard; its own handlers deal with keys.
+      if (document.querySelector('[aria-modal="true"]')) return;
+      // In text fields only shortcuts with Ctrl/Alt/Meta, or function keys,
+      // count, and never the keys used for editing and moving the caret.
+      if (isTypingTarget(e.target)) {
+        const functionKey = /^F\d{1,2}$/.test(e.key);
+        const editingKey = /^(Home|End|Arrow\w+|PageUp|PageDown|Backspace|Delete)$/.test(e.key);
+        if (editingKey || !(e.ctrlKey || e.altKey || e.metaKey || functionKey)) return;
+      }
       const command = registry.commandForEvent(e);
       if (!command) return;
       e.preventDefault();
