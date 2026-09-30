@@ -160,7 +160,7 @@ silently dropped).
 | 1 | **Viewer**: virtualised pages, text layer, zoom keeping position, fit width, page tracking, tabs, outline, search, reading position; prototype line/column detection | A 50-page paper reads comfortably ✅ (line detection passes all fixture pages in `test/fixtures/`) |
 | 2 | **Annotations**: highlights, categories, notes, area capture, sidebar | Highlights survive restart and file rename ✅ |
 | 3 | **Notes editor**: CodeMirror + MathJax + preamble + autocomplete | Formulas render as in Obsidian ✅ |
-| 4a | **Vault**: read vault settings, match PDFs to JabRef entries, Handlebars templates, `tourmaline://` links | `BaconDorrC.pdf` is matched to its entry; Copy as Markdown gives a callout whose `tourmaline://` link reopens the highlight |
+| 4a | **Vault**: read vault settings, match PDFs to JabRef entries, Handlebars templates, `tourmaline://` links | `BaconDorrC.pdf` is matched to its entry; Copy as Markdown gives a callout whose `tourmaline://` link reopens the highlight ✅ |
 | 4b | **PDF annotations**: import existing annotations; optional write-back and `{{pdfLink}}` | — |
 | 4c | **Export**: merge into notes preserving edits; template editor with live preview | Highlight in `Goodman2023GG` → appears in `@Goodman2023GG.md` without touching the user's text → link reopens Tourmaline there |
 | 5 | **Focus mode** | A two-column arXiv paper reads in order |
