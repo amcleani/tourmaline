@@ -1,4 +1,6 @@
+import { parser } from "@lezer/markdown";
 import { renderNote } from "../src/notes/markdown";
+import { mathSyntax } from "../src/notes/mathSyntax";
 
 describe("renderNote", () => {
   it("keeps TeX away from markdown", () => {
@@ -21,5 +23,27 @@ describe("renderNote", () => {
     expect(math.map((m) => m.tex)).toEqual(["y"]);
     expect(html).toContain("<code>$x$</code>");
     expect(html).toContain('title="$y$"');
+  });
+});
+
+describe("editor markdown with math", () => {
+  const md = parser.configure([mathSyntax]);
+  const nodes = (text: string) => {
+    const out: string[] = [];
+    md.parse(text).iterate({ enter: (n) => void out.push(`${n.name}:${text.slice(n.from, n.to)}`) });
+    return out;
+  };
+
+  it("keeps TeX underscores out of emphasis", () => {
+    const found = nodes("map $(x)_+$ from *here* by $a_+$");
+    expect(found).toContain("Math:$(x)_+$");
+    expect(found).toContain("Math:$a_+$");
+    expect(found).toContain("Emphasis:*here*");
+    expect(found.filter((n) => n.startsWith("Emphasis:"))).toHaveLength(1);
+  });
+
+  it("agrees with findMath on dollars that aren't math", () => {
+    expect(nodes("costs $5 and $10").some((n) => n.startsWith("Math"))).toBe(false);
+    expect(nodes("$$x and $y$").filter((n) => n.startsWith("Math"))).toEqual(["Math:$y$"]);
   });
 });

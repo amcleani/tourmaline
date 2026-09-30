@@ -40,7 +40,7 @@ export function findMath(text: string): MathSpan[] {
     } else if (ch === "`") {
       i = skipCodeSpan(text, i);
     } else if (ch === "$") {
-      const span = text[i + 1] === "$" ? displayAt(text, i) : inlineAt(text, i);
+      const span = mathAt(text, i);
       if (span) {
         spans.push(span);
         i = span.to;
@@ -52,6 +52,15 @@ export function findMath(text: string): MathSpan[] {
     }
   }
   return spans;
+}
+
+/**
+ * The formula starting at the `$` at `start`, if that `$` opens one. The
+ * caller has already skipped escapes and code (as the editor's markdown
+ * parser does).
+ */
+export function mathAt(text: string, start: number): MathSpan | null {
+  return text[start + 1] === "$" ? displayAt(text, start) : inlineAt(text, start);
 }
 
 /** Returns the offset after the closing fence (or the end of the text). */

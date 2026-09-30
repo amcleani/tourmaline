@@ -9,6 +9,7 @@ import { tags } from "@lezer/highlight";
 import { onMathChange } from "../math/engine";
 import { texCompletionSource } from "../math/completions";
 import { mathPreview, refreshMath } from "./mathPreview";
+import { mathSyntax } from "./mathSyntax";
 
 interface Props {
   value: string;
@@ -74,7 +75,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
           ),
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
-          markdown(),
+          markdown({ extensions: [mathSyntax] }),
           syntaxHighlighting(highlight),
           mathPreview(),
           autocompletion({ override: [texCompletionSource], icons: false }),
