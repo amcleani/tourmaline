@@ -436,15 +436,19 @@ export function App() {
     async (key: string, info: DocumentInfo) => {
       const tab = tabsRef.current.find((t) => t.key === key);
       if (!tab || tab.fileId !== info.fileId) return;
-      // Joining another paper's work: check it's the same paper, as for a new version.
-      const pendingVersion = info.previousVersion && tab.pdf ? await checkVersion(tab.pdf, info) : (tab.pendingVersion ?? null);
+      // Switch to the paper the file now belongs to at once, so nothing made
+      // meanwhile lands on a work it has left.
       updateTab(key, {
         workId: info.workId,
         citekey: info.citekey ?? null,
         citekeyDeclined: info.citekeyDeclined ?? null,
-        pendingVersion,
       });
       refreshRecent();
+      // Joined another paper's work: check it's the same paper, as for a new version.
+      if (info.previousVersion && tab.pdf) {
+        const pendingVersion = await checkVersion(tab.pdf, info);
+        if (pendingVersion && tabsRef.current.find((t) => t.key === key)?.fileId === info.fileId) updateTab(key, { pendingVersion });
+      }
     },
     [checkVersion, updateTab, refreshRecent],
   );
@@ -938,6 +942,8 @@ export function App() {
         // Ctrl+C, Ctrl+Z... keep their usual meaning when the command can't run
         // (Ctrl+C with text selected in the page copies the text).
         if (!registry.isEnabled(command.id)) return;
+        // Text selected anywhere else (a note in the sidebar) is what Ctrl+C copies.
+        if (/^[cx]$/i.test(e.key) && !(window.getSelection()?.isCollapsed ?? true)) return;
       }
       e.preventDefault();
       registry.execute(command.id, "keyboard");
@@ -1131,7 +1137,12 @@ export function App() {
             const { key, fileId, pendingVersion } = activeTab;
             detachFile(fileId!, pendingVersion!.sample)
               .then((info) => {
-                updateTab(key, { workId: info.workId, pendingVersion: null });
+                updateTab(key, {
+                  workId: info.workId,
+                  citekey: info.citekey ?? null,
+                  citekeyDeclined: info.citekeyDeclined ?? null,
+                  pendingVersion: null,
+                });
                 refreshRecent();
               })
               .catch((e) => reportError("Could not separate the papers", e));

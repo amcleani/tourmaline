@@ -43,12 +43,11 @@ export class Bibliography {
     for (const e of db.entries) if (!entries.has(e.key)) entries.set(e.key, e);
     this.entries = entries;
 
+    // Relative links resolve against JabRef's file directory for this library.
+    // Which per-user one applies depends on the machine JabRef runs on, so a
+    // link is indexed under each candidate (and the .bib's own folder).
     const bibDir = dirname(path);
-    const fileDir = db.fileDirectory
-      ? isAbsolute(db.fileDirectory)
-        ? db.fileDirectory
-        : `${bibDir}/${db.fileDirectory}`
-      : bibDir;
+    const fileDirs = [...db.fileDirectories.map((d) => (isAbsolute(d) ? d : `${bibDir}/${d}`)), bibDir];
     const add = (map: Map<string, string[]>, k: string, key: string) => {
       const list = map.get(k);
       if (!list) map.set(k, [key]);
@@ -58,7 +57,9 @@ export class Bibliography {
       add(this.byLowerKey, e.key.toLowerCase(), e.key);
       for (const f of e.raw.file ? parseFileField(e.raw.file) : []) {
         if (/^[a-z][a-z0-9+.-]*:\/\//i.test(f.link)) continue; // a URL
-        add(this.byPath, normalisePath(isAbsolute(f.link) ? f.link : `${fileDir}/${f.link}`), e.key);
+        for (const dir of isAbsolute(f.link) ? [""] : fileDirs) {
+          add(this.byPath, normalisePath(dir ? `${dir}/${f.link}` : f.link), e.key);
+        }
         add(this.byName, basename(f.link).toLowerCase(), e.key);
       }
     }

@@ -70,10 +70,17 @@ export class TemplateError extends Error {}
 
 // ---- Rendering ----------------------------------------------------------------
 
+/**
+ * One block level. As in Handlebars, `../` counts only levels that changed
+ * the context ({{#if}} inside {{#each}} doesn't), and `@../` only levels that
+ * brought new data (@index...).
+ */
 interface Frame {
   context: unknown;
   data: Record<string, unknown>;
   params: Record<string, unknown>;
+  newContext: boolean;
+  newData: boolean;
 }
 
 const own = (value: unknown, key: string): unknown =>
@@ -184,18 +191,21 @@ class Renderer {
   }
 
   lookup(path: PathExpression, stack: Frame[]): unknown {
-    const frame = stack[Math.max(0, stack.length - 1 - path.depth)];
+    const up = (kind: "newContext" | "newData") => {
+      const levels = stack.filter((f) => f[kind]);
+      return levels[Math.max(0, levels.length - 1 - path.depth)];
+    };
     let value: unknown;
     let parts = path.parts;
     if (path.data) {
       if (parts[0] === "root") value = this.root;
-      else value = own(frame.data, parts[0]);
+      else value = own(path.depth ? up("newData").data : stack[stack.length - 1].data, parts[0]);
       parts = parts.slice(1);
     } else if (!isScoped(path) && path.depth === 0 && parts.length && hasParam(stack, parts[0])) {
       value = paramValue(stack, parts[0]);
       parts = parts.slice(1);
     } else {
-      value = frame.context;
+      value = up("newContext").context;
     }
     for (const part of parts) value = own(value, part);
     return value;
@@ -215,10 +225,16 @@ class Renderer {
           context,
           data: { ...top.data, ...data },
           params: Object.fromEntries(names.map((n, i) => [n, params?.[i]])),
+          newContext: context !== top.context,
+          newData: data !== undefined,
         };
         this.program(b.program, [...stack, frame]);
       },
-      inverse: (context) => this.program(b.inverse, context === top.context ? stack : [...stack, { ...top, context }]),
+      inverse: (context) =>
+        this.program(
+          b.inverse,
+          context === top.context ? stack : [...stack, { ...top, context, params: {}, newContext: true, newData: false }],
+        ),
     };
     const name = isHelperName(b.path) ? b.path.parts[0] : null;
     const params = b.params.map((p) => this.expression(p, stack));
@@ -232,7 +248,7 @@ class Renderer {
     const value = this.lookup(b.path, stack);
     if (value === true) options.fn(top.context);
     else if (isEmpty(value)) options.inverse(top.context);
-    else if (Array.isArray(value)) each(value, options);
+    else if (Array.isArray(value)) each(value, options, top.context);
     else options.fn(value);
   }
 }
@@ -246,7 +262,7 @@ const hasParam = (stack: Frame[], name: string) => stack.some((f) => Object.hasO
 const paramValue = (stack: Frame[], name: string) =>
   [...stack].reverse().find((f) => Object.hasOwn(f.params, name))!.params[name];
 
-function each(value: unknown, options: Options) {
+function each(value: unknown, options: Options, context: unknown) {
   if (Array.isArray(value) && value.length) {
     value.forEach((item, i) =>
       options.fn(item, { index: i, key: i, first: i === 0, last: i === value.length - 1 }, [item, i]),
@@ -260,7 +276,7 @@ function each(value: unknown, options: Options) {
       ]),
     );
   } else {
-    options.inverse(undefined);
+    options.inverse(context);
   }
 }
 
@@ -281,7 +297,7 @@ const BLOCK_HELPERS = new Map<string, (value: unknown, options: Options, context
       else o.fn(context);
     },
   ],
-  ["each", (v, o) => each(v, o)],
+  ["each", (v, o, context) => each(v, o, context)],
   [
     "with",
     (v, o, context) => {
@@ -311,7 +327,7 @@ function compile(source: string): HbsProgram {
 export function renderTemplate(source: string, context: Record<string, unknown>): string {
   const program = compile(source);
   const out = new Output();
-  new Renderer(out, context).program(program, [{ context, data: { root: context }, params: {} }]);
+  new Renderer(out, context).program(program, [{ context, data: { root: context }, params: {}, newContext: true, newData: true }]);
   return out.text;
 }
 

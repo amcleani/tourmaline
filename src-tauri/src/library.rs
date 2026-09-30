@@ -195,6 +195,12 @@ impl Db {
             .query_row("SELECT work_id FROM files WHERE sha256 = ?1", [file_id], |r| r.get(0))
             .optional()?
             .ok_or_else(|| Error::Message(format!("no file {file_id}")))?;
+        // A work left without files (see below) can't be joined: release the key.
+        tx.execute(
+            "UPDATE works SET citekey = NULL
+             WHERE citekey = ?1 AND NOT EXISTS (SELECT 1 FROM files WHERE work_id = works.id)",
+            [citekey],
+        )?;
         let owner: Option<String> = tx
             .query_row("SELECT id FROM works WHERE citekey = ?1", [citekey], |r| r.get(0))
             .optional()?;
@@ -228,11 +234,13 @@ impl Db {
                     "UPDATE files SET derived_from = ?2, text_sample = NULL WHERE sha256 = ?1",
                     params![file_id, latest],
                 )?;
-                // Deleted annotations still refer to the old work; keep it then.
+                // Deleted annotations still refer to the old work; keep it then,
+                // but without its entry, which now belongs to no file.
                 tx.execute(
                     "DELETE FROM works WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM annotations WHERE work_id = ?1)",
                     [&work],
                 )?;
+                tx.execute("UPDATE works SET citekey = NULL WHERE id = ?1", [&work])?;
             }
         }
         let info = tx.query_row(&format!("{SELECT_INFO} WHERE f.sha256 = ?1"), [file_id], info_from_row)?;
@@ -359,6 +367,27 @@ pub(crate) mod tests {
         // Linking by hand (the user's choice) clears that.
         let other = db.link_citekey("b", "Else2024").unwrap();
         assert_eq!(other.citekey_declined, None);
+    }
+
+    #[test]
+    fn an_entry_left_on_a_work_without_files_can_be_linked_again() {
+        let db = Db::in_memory().unwrap();
+        let a = open(&db, "a", "/lib/a.pdf", 1);
+        db.link_citekey("a", "X").unwrap();
+        let hl = db.create_annotation(&crate::annotations::tests::highlight(&a.work_id, "a", 0)).unwrap();
+        db.delete_annotation(&hl.id).unwrap();
+        // Another paper owns Y; a.pdf joins it, leaving its old work (kept for
+        // the deleted highlight) without files.
+        open(&db, "b", "/lib/b.pdf", 2);
+        db.link_citekey("b", "Y").unwrap();
+        assert_ne!(db.link_citekey("a", "Y").unwrap().work_id, a.work_id);
+        // X is free again for the next file that matches it.
+        open(&db, "c", "/lib/c.pdf", 3);
+        assert_eq!(db.link_citekey("c", "X").unwrap().citekey.as_deref(), Some("X"));
+        // Even if an older library left a key on a work without files.
+        db.conn().execute("UPDATE works SET citekey = 'Z' WHERE id = ?1", [&a.work_id]).unwrap();
+        open(&db, "d", "/lib/d.pdf", 4);
+        assert_eq!(db.link_citekey("d", "Z").unwrap().citekey.as_deref(), Some("Z"));
     }
 
     #[test]

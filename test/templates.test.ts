@@ -1,3 +1,4 @@
+import Handlebars from "handlebars";
 import type { Annotation } from "../src/annotations/types";
 import { parseReaderLink, readerLink } from "../src/vault/links";
 import { DEFAULT_HIGHLIGHT_TEMPLATE, literatureNotePath, obsidianUrl, renderHighlight, type VaultSettings } from "../src/vault/notes";
@@ -62,6 +63,42 @@ describe("renderTemplate", () => {
     expect(templateProblem("{{> partial}}", {})).toMatch(/partials aren't supported/);
     expect(templateProblem("{{shout title}}", {})).toMatch(/unknown helper "shout"/);
     expect(templateProblem("{{title}}", {})).toBeNull();
+  });
+});
+
+// Handlebars' own compiler is allowed in Node, so the interpreter can be
+// checked against it directly.
+describe("renderTemplate agrees with Handlebars", () => {
+  const context = {
+    title: "T",
+    items: ["x", "", "y"],
+    nested: [{ b: [1, 2] }, { b: [3] }],
+    author: { name: "N", tags: [] },
+    meta: { a: 1, b: 2 },
+    empty: [],
+    zero: 0,
+  };
+  it.each([
+    "{{#each items}}{{#if this}}{{../title}}{{else}}-{{/if}}{{/each}}",
+    "{{#with author}}{{#if name}}{{../title}}{{name}}{{/if}}{{/with}}",
+    "{{#each nested}}{{#each b}}{{#if true}}[{{@index}}{{../../title}}]{{/if}}{{/each}}{{/each}}",
+    "{{#each nested}}{{#each b}}{{../../title}}{{this}}{{/each}}{{/each}}",
+    "{{#each empty}}x{{else}}none {{title}}{{/each}}",
+    "{{#with author}}{{#each tags}}t{{else}}{{name}} has none{{/each}}{{/with}}",
+    "{{#each meta as |v k|}}{{k}}={{v}}{{#unless @last}},{{/unless}}{{/each}}",
+    "{{#if zero}}a{{else if title}}b{{/if}} {{#if zero includeZero=true}}z{{/if}}",
+    "{{#items}}[{{.}}]{{/items}}{{#author}}{{name}}{{/author}}{{^empty}}E{{/empty}}",
+    "a\n  {{#if title}}\n  b\n  {{/if}}\nc {{~title~}} d",
+    "{{@root.title}}{{#with author}}{{@root.title}}{{/with}}",
+  ])("%s", (template) => {
+    expect(renderTemplate(template, context)).toBe(Handlebars.compile(template, { noEscape: true })(context));
+  });
+
+  // Handlebars 4.7 itself gives "0|1|1|" here; the parent loop's index is meant.
+  it("gives @../index as the parent loop's index", () => {
+    expect(renderTemplate("{{#each nested}}{{#each b}}{{#if true}}{{@../index}}{{@index}}|{{/if}}{{/each}}{{/each}}", context)).toBe(
+      "00|01|10|",
+    );
   });
 });
 

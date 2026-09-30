@@ -27,8 +27,11 @@ export interface BibEntry {
 
 export interface BibDatabase {
   entries: BibEntry[];
-  /** JabRef's library-specific file directory (`jabref-meta: fileDirectory`), if set. */
-  fileDirectory: string | null;
+  /**
+   * JabRef's file directories for this library (`jabref-meta: fileDirectory`
+   * and the per-user `fileDirectory-<user>-<host>` ones), per-user first.
+   */
+  fileDirectories: string[];
   /** Entries that couldn't be read, as "line N: message". */
   errors: string[];
 }
@@ -57,8 +60,8 @@ export function parseBibtex(text: string): BibDatabase {
   const strings = new Map(Object.entries(MONTHS));
   const entries: BibEntry[] = [];
   const errors: string[] = [];
-  let fileDirectory: string | null = null;
-  let userFileDirectory: string | null = null;
+  const generalDirectories: string[] = [];
+  const userDirectories: string[] = [];
   let pos = 0;
 
   const lineAt = (i: number) => text.slice(0, i).split("\n").length;
@@ -135,8 +138,7 @@ export function parseBibtex(text: string): BibDatabase {
         const meta = /^\s*jabref-meta:\s*(fileDirectory(?:-[^:]*)?):([\s\S]*?);?\s*$/.exec(body);
         if (meta) {
           const dir = unescapeJabref(meta[2]);
-          if (meta[1] === "fileDirectory") fileDirectory = dir;
-          else userFileDirectory ??= dir;
+          (meta[1] === "fileDirectory" ? generalDirectories : userDirectories).push(dir);
         }
         continue;
       }
@@ -190,7 +192,7 @@ export function parseBibtex(text: string): BibDatabase {
       pos = next === -1 ? text.length : start + 1 + next + 1;
     }
   }
-  return { entries, fileDirectory: fileDirectory ?? userFileDirectory, errors };
+  return { entries, fileDirectories: [...userDirectories, ...generalDirectories], errors };
 }
 
 // ---- LaTeX to text -----------------------------------------------------------
@@ -287,7 +289,9 @@ export function latexToText(src: string): string {
       const end = closingBrace(src, i);
       const inner = src.slice(i + 1, end);
       i = end + 1;
-      return latexToText(inner);
+      // A dotless i or j under an accent is just the letter: \'{\i} is í.
+      const dotless = /^\s*\\([ij])\s*$/.exec(inner);
+      return dotless ? dotless[1] : latexToText(inner);
     }
     if (src[i] === "\\") {
       const m = /^\\([a-zA-Z]+|.)/.exec(src.slice(i));
@@ -455,8 +459,9 @@ export interface LinkedFile {
 }
 
 /** Removes JabRef's backslash escapes (`\:`, `\;`, `\\`). */
+/** Removes JabRef's escapes (`\:`, `\;`, `\\`); other backslashes are path separators. */
 function unescapeJabref(s: string): string {
-  return s.replace(/\\(.)/g, "$1");
+  return s.replace(/\\([\\:;])/g, "$1");
 }
 
 /** JabRef's `file` field: `description:link:type` items separated by `;`, with `\` escapes. */
@@ -465,7 +470,7 @@ export function parseFileField(raw: string): LinkedFile[] {
     const parts: string[] = [];
     let current = "";
     for (let i = 0; i < s.length; i++) {
-      if (s[i] === "\\" && i + 1 < s.length) current += s[i] + s[++i];
+      if (s[i] === "\\" && "\\:;".includes(s[i + 1] ?? "")) current += s[i] + s[++i];
       else if (s[i] === sep) {
         parts.push(current);
         current = "";
@@ -480,6 +485,10 @@ export function parseFileField(raw: string): LinkedFile[] {
       const parts = split(item, ":").map(unescapeJabref);
       // A bare path with no description or type.
       if (parts.length === 1) return { description: "", link: parts[0].trim(), type: "" };
+      // An unescaped drive letter (:C:\Papers\x.pdf:PDF) splits the link in two.
+      if (parts.length >= 4 && /^[a-zA-Z]$/.test(parts[1]) && /^[\\/]/.test(parts[2])) {
+        return { description: parts[0], link: `${parts[1]}:${parts[2]}`.trim(), type: parts[3] };
+      }
       // Newer JabRef adds the URL the file was downloaded from as a fourth part.
       return { description: parts[0], link: (parts[1] ?? "").trim(), type: parts[2] ?? "" };
     });

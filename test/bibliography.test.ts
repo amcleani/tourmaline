@@ -14,6 +14,7 @@ describe("latexToText", () => {
     ["Hirvel\\\"a", "Hirvelä"],
     ["Andr{\\'e}ka", "Andréka"],
     ["{\\'\\i}", "í"],
+    ["Mart\\'{\\i}n", "Martín"],
     ["{\\O}ystein", "Øystein"],
     ["Taylor {\\&} Francis", "Taylor & Francis"],
     ["\\textit{Principia} and \\emph{Mathematica}", "Principia and Mathematica"],
@@ -61,6 +62,7 @@ describe("parseBibtex", () => {
 @Book{After2020, title = "Still {read}", year = 2020}
 @Comment{jabref-meta: databaseType:bibtex;}
 @Comment{jabref-meta: fileDirectory:C\:\\Papers;}
+@Comment{jabref-meta: fileDirectory-ada-laptop:D\:\\Mine;}
 `;
   const db = parseBibtex(bib);
 
@@ -81,8 +83,8 @@ describe("parseBibtex", () => {
     expect(db.errors[0]).toMatch(/^line 14:/);
   });
 
-  it("reads JabRef's file directory", () => {
-    expect(db.fileDirectory).toBe("C:\\Papers");
+  it("reads JabRef's file directories, per-user first", () => {
+    expect(db.fileDirectories).toEqual(["D:\\Mine", "C:\\Papers"]);
   });
 });
 
@@ -98,6 +100,9 @@ describe("parseFileField", () => {
     ]);
     expect(parseFileField(String.raw`:C\:\\Users\\me\\a.pdf:PDF`)[0].link).toBe("C:\\Users\\me\\a.pdf");
     expect(parseFileField("plain.pdf")[0].link).toBe("plain.pdf");
+    // Unescaped Windows paths.
+    expect(parseFileField(String.raw`:C:\Papers\a.pdf:PDF`)[0]).toEqual({ description: "", link: "C:\\Papers\\a.pdf", type: "PDF" });
+    expect(parseFileField(":C:/Papers/a.pdf:PDF")[0].link).toBe("C:/Papers/a.pdf");
     // Newer JabRef: the source URL comes fourth.
     expect(parseFileField(String.raw`Full Text PDF:Bacon2024 - M.pdf:PDF:https\://link.springer.com/x.pdf`)).toEqual([
       { description: "Full Text PDF", link: "Bacon2024 - M.pdf", type: "PDF" },
