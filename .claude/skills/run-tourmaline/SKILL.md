@@ -65,6 +65,10 @@ Useful interactions:
   then Return. Test papers from the user's vault (read-only):
   - `C:\Users\amcle\Documents\Academia\Library\Goodman2023GG - Grounding Generalizations.pdf` (38 pages, one column)
   - `C:\Users\amcle\Documents\Academia\Library\BaconDorrC.pdf` (84 pages, has Okular highlights)
+- **Escape cannot be tested with computer-use**: the tool never delivers it to
+  the app (confirmed by the user, who saw Escape close the palette). Ask the
+  user to press it, or test Escape-driven behaviour in the Browser pane
+  against `npm run dev`.
 - **Key names**: `ctrl+=` for zoom in (not `ctrl+equal`), `ctrl+-`, `ctrl+0`,
   `ctrl+k`, `ctrl+w`, `ctrl+/`.
 - Status (file name, page count, zoom %) is at the right end of the toolbar;

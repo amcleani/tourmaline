@@ -26,6 +26,7 @@ export interface Line {
 }
 
 export interface PageLines {
+  /** Bounding boxes are in PDF space even when the page is rotated. */
   lines: Line[];
   columns: 1 | 2;
   /** x of the gutter centre when columns === 2. */
@@ -35,6 +36,43 @@ export interface PageLines {
 export interface DetectOptions {
   /** Set false to ignore columns (per-paper off switch for odd layouts). */
   detectColumns?: boolean;
+  /** The page's /Rotate (0, 90, 180, 270): lines are found as the page is displayed. */
+  rotation?: number;
+}
+
+/**
+ * Linear part of the clockwise display rotation, as (x, y) -> (p x + q y, r x + s y)
+ * in PDF space (y up).
+ */
+function rotationMatrix(rotation: number): [number, number, number, number] {
+  switch (((rotation % 360) + 360) % 360) {
+    case 90:
+      return [0, 1, -1, 0];
+    case 180:
+      return [-1, 0, 0, -1];
+    case 270:
+      return [0, -1, 1, 0];
+    default:
+      return [1, 0, 0, 1];
+  }
+}
+
+/** Rotates an item's text matrix into display orientation. */
+function rotateItem(item: TextItemLike, [p, q, r, s]: [number, number, number, number]): TextItemLike {
+  const [a, b, c, d, e, f] = item.transform;
+  return {
+    ...item,
+    transform: [p * a + q * b, r * a + s * b, p * c + q * d, r * c + s * d, p * e + q * f, r * e + s * f],
+  };
+}
+
+/** Maps a display-space rectangle back to PDF space. */
+function unrotateRect([x0, y0, x1, y1]: PdfRect, [p, q, r, s]: [number, number, number, number]): PdfRect {
+  // The rotations are orthogonal, so the inverse is the transpose.
+  const back = (x: number, y: number) => [p * x + r * y, q * x + s * y];
+  const [ax, ay] = back(x0, y0);
+  const [bx, by] = back(x1, y1);
+  return [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)];
 }
 
 interface Box {
@@ -202,12 +240,22 @@ function findGutter(fragments: Fragment[]): number | null {
   while (hi < right && !blocked(hi + 1)) hi += 1;
   const gutter = (lo + hi) / 2;
 
-  const leftCount = fragments.filter((f) => f.x1 <= gutter).length;
-  const rightCount = fragments.filter((f) => f.x0 >= gutter).length;
+  const leftSide = fragments.filter((f) => f.x1 <= gutter);
+  const rightSide = fragments.filter((f) => f.x0 >= gutter);
+  const leftCount = leftSide.length;
+  const rightCount = rightSide.length;
   const spanning = fragments.filter((f) => f.x0 < gutter && f.x1 > gutter).length;
-  const sideMin = Math.min(leftCount, rightCount);
-  // Two columns need real text on both sides, and most lines must stay out of the gutter.
-  if (sideMin < 3 || spanning > 0.35 * (leftCount + rightCount + spanning)) return null;
+  // Two columns need several real lines of text on each side: lines that fill
+  // most of their column. Short pieces (equation numbers, the end of a
+  // paragraph, a centred formula) don't make a column.
+  const fullLines = (side: Fragment[]) => {
+    if (side.length === 0) return 0;
+    const sideWidth = Math.max(...side.map((f) => f.x1)) - Math.min(...side.map((f) => f.x0));
+    return side.filter((f) => f.x1 - f.x0 > 0.6 * sideWidth).length;
+  };
+  if (fullLines(leftSide) < 3 || fullLines(rightSide) < 3) return null;
+  // Most lines must stay out of the gutter.
+  if (spanning > 0.35 * (leftCount + rightCount + spanning)) return null;
   // A gutter hugging the text edge is just a ragged margin.
   if (gutter - left < 0.25 * width || right - gutter < 0.25 * width) return null;
   return gutter;
@@ -217,17 +265,94 @@ function isWide(f: Fragment, left: number, width: number) {
   return f.x1 - f.x0 > 0.6 * width || (f.x0 - left < 0.1 * width && f.x1 - left > 0.9 * width);
 }
 
+/** Value at quantile q (0-1) of a non-empty list. */
+function quantile(values: number[], q: number): number {
+  const sorted = values.slice().sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))))];
+}
+
+/** Merges fragments into one (for wide elements assembled from pieces). */
+function combine(frags: Fragment[]): Fragment {
+  const parts = frags.flatMap((f) => f.parts);
+  const top = frags.reduce((a, b) => (b.baseline > a.baseline ? b : a));
+  return {
+    ...top,
+    x0: Math.min(...frags.map((f) => f.x0)),
+    x1: Math.max(...frags.map((f) => f.x1)),
+    y0: Math.min(...frags.map((f) => f.y0)),
+    y1: Math.max(...frags.map((f) => f.y1)),
+    parts,
+    ...joinParts(parts),
+  };
+}
+
+/**
+ * Finds full-width elements that don't cross the gutter as one piece, such
+ * as a wide display equation whose parts sit at different heights. Column
+ * text keeps clear of the gutter, so a fragment that reaches into it marks a
+ * wide element; everything beside it at the same height belongs to it too.
+ */
+function splitWideGroups(leftCol: Fragment[], rightCol: Fragment[]): Fragment[][] {
+  if (leftCol.length === 0 || rightCol.length === 0) return [];
+  // Where column text normally ends (left column) and starts (right column),
+  // judged from lines that fill most of their column.
+  const full = (col: Fragment[]) => {
+    const width = Math.max(...col.map((f) => f.x1)) - Math.min(...col.map((f) => f.x0));
+    const lines = col.filter((f) => f.x1 - f.x0 > 0.6 * width);
+    return lines.length ? lines : col;
+  };
+  const leftEdge = quantile(full(leftCol).map((f) => f.x1), 0.5);
+  const rightStart = quantile(full(rightCol).map((f) => f.x0), 0.5);
+  const intruders = [
+    ...leftCol.filter((f) => f.x1 > leftEdge + f.size),
+    ...rightCol.filter((f) => f.x0 < rightStart - f.size),
+  ];
+
+  const all = [...leftCol, ...rightCol];
+  const taken = new Set<Fragment>();
+  const groups: Fragment[][] = [];
+  for (const seed of intruders) {
+    if (taken.has(seed)) continue;
+    const group = [seed];
+    taken.add(seed);
+    let y0 = seed.y0;
+    let y1 = seed.y1;
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const f of all) {
+        if (taken.has(f) || f.y1 <= y0 || f.y0 >= y1) continue;
+        group.push(f);
+        taken.add(f);
+        y0 = Math.min(y0, f.y0);
+        y1 = Math.max(y1, f.y1);
+        grew = true;
+      }
+    }
+    // A wide element has pieces on both sides of the gutter.
+    const hasLeft = group.some((f) => leftCol.includes(f));
+    const hasRight = group.some((f) => rightCol.includes(f));
+    if (hasLeft && hasRight) groups.push(group);
+    else group.forEach((f) => taken.delete(f));
+  }
+  return groups;
+}
+
 /** Orders fragments for reading, given an optional gutter. */
 function order(fragments: Fragment[], gutter: number | null): Ordered[] {
   const byTop = (p: Fragment, q: Fragment) => q.baseline - p.baseline || p.x0 - q.x0;
   if (gutter === null) return fragments.slice().sort(byTop).map((f) => ({ ...f, column: -1 as const }));
 
-  const spanning = fragments.filter((f) => f.x0 < gutter && f.x1 > gutter).sort(byTop);
-  const leftCol = fragments.filter((f) => f.x1 <= gutter);
-  const rightCol = fragments.filter((f) => f.x0 >= gutter);
+  let leftCol = fragments.filter((f) => f.x1 <= gutter);
+  let rightCol = fragments.filter((f) => f.x0 >= gutter);
+  const groups = splitWideGroups(leftCol, rightCol);
+  const grouped = new Set(groups.flat());
+  leftCol = leftCol.filter((f) => !grouped.has(f));
+  rightCol = rightCol.filter((f) => !grouped.has(f));
+  const spanning = [...fragments.filter((f) => f.x0 < gutter && f.x1 > gutter), ...groups.map(combine)].sort(byTop);
 
   const out: Ordered[] = [];
-  let upper = Infinity; // baseline of the previous spanning element
+  let upper = Infinity; // baseline of the previous full-width element
   const band = (col: Fragment[], lower: number) =>
     col.filter((f) => f.baseline < upper && f.baseline >= lower).sort(byTop);
 
@@ -278,7 +403,10 @@ function mergeStacked(frags: Ordered[], columnWidth: (column: -1 | 0 | 1) => num
   return merged.map((f) => ({ text: f.text, bbox: [f.x0, f.y0, f.x1, f.y1], items: f.items, column: f.column }));
 }
 
-export function detectLines(items: ReadonlyArray<unknown>, options: DetectOptions = {}): PageLines {
+export function detectLines(rawItems: ReadonlyArray<unknown>, options: DetectOptions = {}): PageLines {
+  const matrix = rotationMatrix(options.rotation ?? 0);
+  const rotated = matrix[0] !== 1;
+  const items = rotated ? rawItems.map((item) => (isText(item) ? rotateItem(item, matrix) : item)) : rawItems;
   const fragments = buildFragments(items);
   const gutter = options.detectColumns === false ? null : findGutter(fragments);
   const ordered = order(fragments, gutter);
@@ -288,6 +416,7 @@ export function detectLines(items: ReadonlyArray<unknown>, options: DetectOption
     const own = ordered.filter((f) => f.column === column);
     if (own.length) widths.set(column, Math.max(...own.map((f) => f.x1)) - Math.min(...own.map((f) => f.x0)));
   }
-  const lines = mergeStacked(ordered, (column) => widths.get(column) ?? 0);
+  let lines = mergeStacked(ordered, (column) => widths.get(column) ?? 0);
+  if (rotated) lines = lines.map((l) => ({ ...l, bbox: unrotateRect(l.bbox, matrix) }));
   return { lines, columns: gutter === null ? 1 : 2, gutter };
 }

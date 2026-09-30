@@ -117,3 +117,27 @@ describe("math and small text", () => {
     expect(texts([rotated, blank, ...words("body text", 72, 700)])).toEqual(["body text"]);
   });
 });
+
+describe("rotated pages", () => {
+  it("finds lines as displayed and reports boxes in PDF space", () => {
+    // /Rotate 90: text that reads upright on screen runs up the page in PDF space.
+    const up = (str: string, x: number, y: number): TextItemLike => ({
+      str,
+      transform: [0, 10, -10, 0, x, y],
+      width: str.length * 5,
+      height: 10,
+      hasEOL: false,
+    });
+    // Rotating clockwise for display moves larger x downwards, so the
+    // displayed top line is the one furthest left in PDF space.
+    const items = [up("second line", 314, 100), up("first line", 300, 100)];
+    const result = detectLines(items, { rotation: 90 });
+    expect(result.lines.map((l) => l.text)).toEqual(["first line", "second line"]);
+    const [x0, y0, x1, y1] = result.lines[0].bbox;
+    // The box surrounds the item's origin (300, 100) and extends up the page.
+    expect(x0).toBeLessThan(300);
+    expect(x1).toBeGreaterThan(300 - 10);
+    expect(y0).toBeCloseTo(100, 0);
+    expect(y1).toBeCloseTo(150, 0);
+  });
+});
