@@ -14,9 +14,11 @@ import type { PdfRect } from "./pdf/search";
 import { useDocumentSearch } from "./pdf/useSearch";
 import {
   getState,
+  isTauri,
   listCategories,
   onWindowClose,
   openPdfAtPath,
+  openPdfFromUrl,
   pickAndOpenPdf,
   quitApp,
   recentDocuments,
@@ -187,6 +189,13 @@ export function App() {
     } catch (err) {
       reportError("Could not open the PDF", err);
     }
+  }, [showDocument, reportError]);
+
+  // Development in a plain browser: ?pdf=<url> opens a PDF from the dev server.
+  useEffect(() => {
+    if (isTauri()) return;
+    const url = new URLSearchParams(window.location.search).get("pdf");
+    if (url) openPdfFromUrl(url).then(showDocument, (err) => reportError(`Could not open ${url}`, err));
   }, [showDocument, reportError]);
 
   const openRecent = useCallback(

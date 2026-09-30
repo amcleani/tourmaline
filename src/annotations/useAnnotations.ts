@@ -14,7 +14,7 @@ import { getPageHash, getPageText } from "../pdf/textCache";
 import { reanchor } from "./anchor";
 import { renderRegion } from "./capture";
 import { textAnchor, type CapturedSelection } from "./selection";
-import type { Annotation, AnnotationEdit, PageHash, PlacementUpdate } from "./types";
+import { byPosition, type Annotation, type AnnotationEdit, type PageHash, type PlacementUpdate } from "./types";
 
 export interface OpenDoc {
   workId: string;
@@ -78,7 +78,7 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
     (async () => {
       const list = await listAnnotations(workId, fileId);
       if (cancelled) return;
-      setAnnotations(list);
+      setAnnotations([...list].sort(byPosition));
       const unplaced = list.filter((a) => !a.placement);
       if (unplaced.length === 0) return;
 
@@ -98,7 +98,7 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
       if (cancelled) return;
       const byId = new Map(updates.map((u) => [u.annotationId, u.placement]));
       setAnnotations((prev) =>
-        prev.map((a) => (byId.has(a.id) ? { ...a, placement: byId.get(a.id)!, fallback: null } : a)),
+        prev.map((a) => (byId.has(a.id) ? { ...a, placement: byId.get(a.id)!, fallback: null } : a)).sort(byPosition),
       );
     })()
       .catch((err) => !cancelled && report.current("Could not load the annotations", err))
@@ -110,7 +110,7 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
 
   /** Applies a change to the list if it still shows the same work. */
   const apply = useCallback((forWork: string, change: (list: Annotation[]) => Annotation[]) => {
-    if (docRef.current?.workId === forWork) setAnnotations(change);
+    if (docRef.current?.workId === forWork) setAnnotations((prev) => [...change(prev)].sort(byPosition));
   }, []);
   const upsert = (list: Annotation[], a: Annotation) =>
     list.some((x) => x.id === a.id) ? list.map((x) => (x.id === a.id ? a : x)) : [...list, a];
@@ -173,11 +173,13 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
         apply(d.workId, (list) => upsert(list, created));
         push(d.workId, { kind: "create", id: created.id });
         // The picture is what goes into the note; the annotation exists even if it fails.
-        const png = await renderRegion(d.pdf, page, rect);
-        const imagePath = await saveAttachment(created.id, png);
-        const withImage = { ...created, imagePath };
-        apply(d.workId, (list) => list.map((a) => (a.id === created.id ? { ...a, imagePath } : a)));
-        return withImage;
+        renderRegion(d.pdf, page, rect)
+          .then((png) => saveAttachment(created.id, png))
+          .then((imagePath) =>
+            apply(d.workId, (list) => list.map((a) => (a.id === created.id ? { ...a, imagePath } : a))),
+          )
+          .catch((err) => report.current("Could not save the picture of the area", err));
+        return created;
       } catch (err) {
         report.current("Could not capture the area", err);
         return null;

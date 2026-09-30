@@ -187,6 +187,19 @@ export async function quitApp(): Promise<void> {
   }
 }
 
+/**
+ * Browser only (`npm run dev`): opens a PDF served by the dev server, so the
+ * UI can be tried without the file picker: `?pdf=/test/fixtures/two-column.pdf`.
+ */
+export async function openPdfFromUrl(url: string): Promise<OpenedDocument> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const id = await sha256Hex(bytes);
+  const name = decodeURIComponent(url.split("/").pop() || "document.pdf");
+  return { info: { fileId: id, workId: id, path: null, name, size: bytes.length, lastOpened: Date.now() }, bytes };
+}
+
 function pickInBrowser(): Promise<OpenedDocument | null> {
   return new Promise((resolve, reject) => {
     const input = document.createElement("input");

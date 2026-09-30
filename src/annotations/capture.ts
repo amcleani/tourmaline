@@ -19,7 +19,9 @@ export async function renderRegion(pdf: PDFDocumentProxy, pageIndex: number, rec
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.ceil(Math.max(ax, bx)) - left);
   canvas.height = Math.max(1, Math.ceil(Math.max(ay, by)) - top);
-  await page.render({ canvas, viewport, transform: [1, 0, 0, 1, -left, -top] }).promise;
+  // "print" renders straight through instead of pacing itself with animation
+  // frames, which stall while the window is in the background.
+  await page.render({ canvas, viewport, transform: [1, 0, 0, 1, -left, -top], intent: "print" }).promise;
   const blob = await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("could not encode the image"))), "image/png"),
   );

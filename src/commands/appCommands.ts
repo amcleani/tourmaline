@@ -105,7 +105,6 @@ export function appCommands(a: AppActions): Command[] {
       title: "Close find bar, stop capturing or deselect",
       keywords: ["escape", "cancel"],
       shortcut: "Escape",
-      hideInPalette: true,
       when: (ctx) => ctx.findOpen || ctx.captureMode || ctx.annotationSelected || ctx.hasTextSelection,
       run: a.cancel,
     },

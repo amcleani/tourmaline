@@ -110,6 +110,20 @@ export const CALLOUT_TYPES = [
 
 export const FALLBACK_COLOUR = "#9e9e9e";
 
+/**
+ * Reading order: by page; on a page, highlights by their position in the
+ * text (which follows columns), otherwise top to bottom. Orphans go last.
+ */
+export function byPosition(a: Annotation, b: Annotation): number {
+  const pa = a.placement?.status === "orphan" ? null : a.placement;
+  const pb = b.placement?.status === "orphan" ? null : b.placement;
+  if (!pa || !pb) return Number(!pa) - Number(!pb) || a.created - b.created;
+  if (pa.page !== pb.page) return pa.page - pb.page;
+  if (pa.textStart !== null && pb.textStart !== null) return pa.textStart - pb.textStart;
+  const top = (p: Placement) => Math.max(...p.geometry.rects.filter((r) => r[0] === p.page).map((r) => r[4]), -Infinity);
+  return top(pb) - top(pa) || a.created - b.created;
+}
+
 export function colourOf(a: Pick<Annotation, "colour" | "categoryId">, categories: readonly Category[]): string {
   return a.colour ?? categories.find((c) => c.id === a.categoryId)?.colour ?? FALLBACK_COLOUR;
 }
