@@ -84,9 +84,8 @@ pen with pressure and eraser; filterable annotation sidebar; import existing PDF
 annotations (e.g. Okular); optional write-back via pdf-lib.
 
 **Notes editor**: CodeMirror + live MathJax preview using the vault's
-`preamble.sty`; `\` command autocomplete; optional LaTeX Suite snippets
-(not yet: the vault's snippets are JavaScript, which would need a parser for
-their subset, since the CSP rightly forbids eval).
+`preamble.sty`; `\` command autocomplete. No LaTeX Suite snippets (the
+user doesn't want them).
 
 Math matches the vault's Obsidian: its built-in MathJax 3 unless the
 latest-mathjax plugin is enabled (then its font and packages), plus the
