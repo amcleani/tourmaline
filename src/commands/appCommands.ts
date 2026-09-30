@@ -67,7 +67,8 @@ export function appCommands(a: AppActions): Command[] {
       keywords: ["document"],
       shortcut: "Mod+W",
       menu: { menu: "File", group: 1, order: 3 },
-      when: hasDocument,
+      // Any tab, including one whose file couldn't be opened.
+      when: (ctx) => ctx.tabCount > 0,
       run: a.closeTab,
     },
     {
