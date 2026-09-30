@@ -58,26 +58,40 @@ pub(crate) const MIGRATIONS: &[&str] = &[
         size          INTEGER NOT NULL,
         origin        TEXT NOT NULL CHECK (origin IN ('opened', 'writeback', 'external')),
         derived_from  TEXT REFERENCES files(sha256),
+        -- Start of the text, to tell a new version from a different paper
+        -- saved under the same name. NULL until the frontend has read it.
+        text_sample   TEXT,
         first_opened  INTEGER NOT NULL,
         last_opened   INTEGER NOT NULL
     );
+    -- Every path a file has been seen at, so new bytes at any of them count as
+    -- a new version even after the same bytes were opened elsewhere.
+    CREATE TABLE file_paths (
+        sha256    TEXT NOT NULL REFERENCES files(sha256),
+        path      TEXT NOT NULL COLLATE NOCASE,
+        last_seen INTEGER NOT NULL,
+        PRIMARY KEY (sha256, path)
+    );
+    CREATE INDEX file_paths_path ON file_paths(path);
     CREATE INDEX files_work ON files(work_id);
     CREATE INDEX files_path ON files(path COLLATE NOCASE);
     CREATE INDEX files_last_opened ON files(last_opened DESC);
 
+    -- Paths compare without case, as Windows does.
     CREATE TEMP TABLE migrated_works AS
         SELECT path, "#,
         sql_uuid!(),
-        r#" AS work_id FROM (SELECT DISTINCT path FROM documents);
+        r#" AS work_id FROM (SELECT path FROM documents GROUP BY path COLLATE NOCASE);
     INSERT INTO works (id, title, last_position, created)
         SELECT m.work_id, d.name, d.last_position,
-               (SELECT MIN(first_opened) FROM documents WHERE path = d.path)
-        FROM migrated_works m JOIN documents d ON d.path = m.path
-        WHERE d.last_opened = (SELECT MAX(last_opened) FROM documents WHERE path = d.path)
+               (SELECT MIN(first_opened) FROM documents WHERE path = d.path COLLATE NOCASE)
+        FROM migrated_works m JOIN documents d ON d.path = m.path COLLATE NOCASE
+        WHERE d.last_opened = (SELECT MAX(last_opened) FROM documents WHERE path = d.path COLLATE NOCASE)
         GROUP BY m.path;
     INSERT INTO files (sha256, work_id, path, name, size, origin, derived_from, first_opened, last_opened)
         SELECT d.id, m.work_id, d.path, d.name, d.size, 'opened', NULL, d.first_opened, d.last_opened
-        FROM documents d JOIN migrated_works m ON m.path = d.path;
+        FROM documents d JOIN migrated_works m ON m.path = d.path COLLATE NOCASE;
+    INSERT INTO file_paths (sha256, path, last_seen) SELECT id, path, last_opened FROM documents;
     DROP TABLE migrated_works;
     DROP TABLE documents;
 

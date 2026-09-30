@@ -36,10 +36,27 @@ async function hashesFor(pdf: PDFDocumentProxy, pages: Iterable<number>): Promis
   return Promise.all([...new Set(pages)].map(async (page) => ({ page, hash: await getPageHash(pdf, page) })));
 }
 
+/** Places annotations that have no placement on this file yet (made on another version). */
+async function placeOnFile(pdf: PDFDocumentProxy, fileId: string, unplaced: Annotation[]): Promise<Map<string, Annotation["placement"]>> {
+  const load = async (page: number) => {
+    const [{ text, content }, hash] = await Promise.all([getPageText(pdf, page), getPageHash(pdf, page)]);
+    return { text, items: content.items, hash };
+  };
+  const updates: PlacementUpdate[] = [];
+  for (const a of unplaced) updates.push({ annotationId: a.id, placement: await reanchor(a, pdf.numPages, load) });
+  const placed = updates.filter((u) => u.placement.status !== "orphan").map((u) => u.placement.page);
+  await savePlacements(fileId, updates, await hashesFor(pdf, placed));
+  return new Map(updates.map((u) => [u.annotationId, u.placement]));
+}
+
 /**
  * The annotations of the open document's work, placed on the open file.
  * Annotations made on another version of the file are re-anchored when first
  * shown on this one.
+ *
+ * Every change goes through one queue, so quick successive changes (holding
+ * Ctrl+Z, a note saving while the category changes) apply in order and each
+ * starts from the result of the previous one.
  */
 export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err: unknown) => void) {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -48,12 +65,22 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
   docRef.current = doc;
   const report = useRef(onError);
   report.current = onError;
+  /** The list as of the last change, ahead of React's render. */
+  const listRef = useRef<Annotation[]>([]);
+  /** The file each work was last shown with, so changes can land after its tab closed. */
+  const fileOf = useRef(new Map<string, string>());
+  /** Ids deleted in this session, so late saves (a closing popover) don't revive them. */
+  const deleted = useRef(new Set<string>());
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueue = useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
+    const run = queue.current.then(task, task);
+    queue.current = run.catch(() => undefined);
+    return run;
+  }, []);
 
   // Undo history per work, so switching tabs keeps each paper's history.
   const history = useRef(new Map<string, { undo: Op[]; redo: Op[] }>());
   const [historyVersion, setHistoryVersion] = useState(0);
-  /** Ids deleted in this session, so late saves (a closing popover) don't revive them. */
-  const deleted = useRef(new Set<string>());
   const stacks = (workId: string) => {
     let h = history.current.get(workId);
     if (!h) history.current.set(workId, (h = { undo: [], redo: [] }));
@@ -67,205 +94,220 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
     setHistoryVersion((v) => v + 1);
   };
 
+  const show = useCallback((list: Annotation[]) => {
+    const next = list.filter((a) => !deleted.current.has(a.id)).sort(byPosition);
+    listRef.current = next;
+    setAnnotations(next);
+  }, []);
+
   const workId = doc?.workId;
   const fileId = doc?.fileId;
   const pdf = doc?.pdf;
+  if (workId && fileId) fileOf.current.set(workId, fileId);
 
   useEffect(() => {
-    setAnnotations([]);
+    show([]);
     if (!workId || !fileId || !pdf) return;
     let cancelled = false;
     (async () => {
       const list = await listAnnotations(workId, fileId);
       if (cancelled) return;
-      setAnnotations([...list].sort(byPosition));
+      show(list);
       const unplaced = list.filter((a) => !a.placement);
       if (unplaced.length === 0) return;
-
-      // Made on another version of this paper: find them in this one.
       setReanchoring(true);
-      const load = async (page: number) => {
-        const [{ text, content }, hash] = await Promise.all([getPageText(pdf, page), getPageHash(pdf, page)]);
-        return { text, items: content.items, hash };
-      };
-      const updates: PlacementUpdate[] = [];
-      for (const a of unplaced) {
-        updates.push({ annotationId: a.id, placement: await reanchor(a, pdf.numPages, load) });
-        if (cancelled) return;
-      }
-      const placed = updates.filter((u) => u.placement.status !== "orphan").map((u) => u.placement.page);
-      await savePlacements(fileId, updates, await hashesFor(pdf, placed));
+      const placements = await placeOnFile(pdf, fileId, unplaced);
       if (cancelled) return;
-      const byId = new Map(updates.map((u) => [u.annotationId, u.placement]));
-      setAnnotations((prev) =>
-        prev.map((a) => (byId.has(a.id) ? { ...a, placement: byId.get(a.id)!, fallback: null } : a)).sort(byPosition),
-      );
+      show(listRef.current.map((a) => (placements.has(a.id) ? { ...a, placement: placements.get(a.id)!, fallback: null } : a)));
     })()
       .catch((err) => !cancelled && report.current("Could not load the annotations", err))
       .finally(() => !cancelled && setReanchoring(false));
     return () => {
       cancelled = true;
     };
-  }, [workId, fileId, pdf]);
+  }, [workId, fileId, pdf, show]);
 
   /** Applies a change to the list if it still shows the same work. */
-  const apply = useCallback((forWork: string, change: (list: Annotation[]) => Annotation[]) => {
-    if (docRef.current?.workId === forWork) setAnnotations((prev) => [...change(prev)].sort(byPosition));
-  }, []);
+  const apply = useCallback(
+    (forWork: string, change: (list: Annotation[]) => Annotation[]) => {
+      if (docRef.current?.workId === forWork) show(change(listRef.current));
+    },
+    [show],
+  );
   const upsert = (list: Annotation[], a: Annotation) =>
     list.some((x) => x.id === a.id) ? list.map((x) => (x.id === a.id ? a : x)) : [...list, a];
 
+  /** A restored annotation may come from another version of the file: place it on this one. */
+  const withPlacement = async (a: Annotation): Promise<Annotation> => {
+    const d = docRef.current;
+    if (a.placement || !d || d.workId !== a.workId) return a;
+    const placements = await placeOnFile(d.pdf, d.fileId, [a]);
+    return { ...a, placement: placements.get(a.id) ?? null, fallback: null };
+  };
+
   const highlight = useCallback(
-    async (capture: CapturedSelection, categoryId: string | null): Promise<Annotation | null> => {
+    (capture: CapturedSelection, categoryId: string | null): Promise<Annotation | null> => {
       const d = docRef.current;
-      if (!d) return null;
-      try {
-        const { text } = await getPageText(d.pdf, capture.startPage);
-        const anchor = textAnchor(text, capture.start, capture.end);
-        const created = await createAnnotation({
-          workId: d.workId,
-          fileId: d.fileId,
-          kind: "highlight",
-          categoryId,
-          colour: null,
-          note: "",
-          quote: capture.quote,
-          prefix: anchor.prefix,
-          suffix: anchor.suffix,
-          placement: {
-            page: capture.startPage,
-            geometry: { rects: capture.rects },
-            textStart: anchor.textStart,
-            textEnd: anchor.textEnd,
-            status: "exact",
-          },
-          pageHashes: await hashesFor(d.pdf, capture.rects.map((r) => r[0])),
-        });
-        apply(d.workId, (list) => upsert(list, created));
-        push(d.workId, { kind: "create", id: created.id });
-        return created;
-      } catch (err) {
-        report.current("Could not save the highlight", err);
-        return null;
-      }
+      if (!d) return Promise.resolve(null);
+      return enqueue(async () => {
+        try {
+          const { text } = await getPageText(d.pdf, capture.startPage);
+          const anchor = textAnchor(text, capture.start, capture.end);
+          const created = await createAnnotation({
+            workId: d.workId,
+            fileId: d.fileId,
+            kind: "highlight",
+            categoryId,
+            colour: null,
+            note: "",
+            quote: capture.quote,
+            prefix: anchor.prefix,
+            suffix: anchor.suffix,
+            placement: {
+              page: capture.startPage,
+              geometry: { rects: capture.rects },
+              textStart: anchor.textStart,
+              textEnd: anchor.textEnd,
+              status: "exact",
+            },
+            pageHashes: await hashesFor(d.pdf, capture.rects.map((r) => r[0])),
+          });
+          apply(d.workId, (list) => upsert(list, created));
+          push(d.workId, { kind: "create", id: created.id });
+          return created;
+        } catch (err) {
+          report.current("Could not save the highlight", err);
+          return null;
+        }
+      });
     },
-    [apply],
+    [apply, enqueue],
   );
 
   const captureArea = useCallback(
-    async (page: number, rect: PdfRect, categoryId: string | null): Promise<Annotation | null> => {
+    (page: number, rect: PdfRect, categoryId: string | null): Promise<Annotation | null> => {
       const d = docRef.current;
-      if (!d) return null;
-      try {
-        const created = await createAnnotation({
-          workId: d.workId,
-          fileId: d.fileId,
-          kind: "area",
-          categoryId,
-          colour: null,
-          note: "",
-          quote: null,
-          prefix: null,
-          suffix: null,
-          placement: { page, geometry: { rects: [[page, ...rect]] }, textStart: null, textEnd: null, status: "exact" },
-          pageHashes: await hashesFor(d.pdf, [page]),
-        });
-        apply(d.workId, (list) => upsert(list, created));
-        push(d.workId, { kind: "create", id: created.id });
-        // The picture is what goes into the note; the annotation exists even if it fails.
-        renderRegion(d.pdf, page, rect)
-          .then((png) => saveAttachment(created.id, png))
-          .then((imagePath) =>
-            apply(d.workId, (list) => list.map((a) => (a.id === created.id ? { ...a, imagePath } : a))),
-          )
-          .catch((err) => report.current("Could not save the picture of the area", err));
-        return created;
-      } catch (err) {
-        report.current("Could not capture the area", err);
-        return null;
-      }
+      if (!d) return Promise.resolve(null);
+      return enqueue(async () => {
+        try {
+          const created = await createAnnotation({
+            workId: d.workId,
+            fileId: d.fileId,
+            kind: "area",
+            categoryId,
+            colour: null,
+            note: "",
+            quote: null,
+            prefix: null,
+            suffix: null,
+            placement: { page, geometry: { rects: [[page, ...rect]] }, textStart: null, textEnd: null, status: "exact" },
+            pageHashes: await hashesFor(d.pdf, [page]),
+          });
+          apply(d.workId, (list) => upsert(list, created));
+          push(d.workId, { kind: "create", id: created.id });
+          // The picture is what goes into the note; the annotation exists even if it fails.
+          renderRegion(d.pdf, page, rect)
+            .then((png) => saveAttachment(created.id, png))
+            .then((imagePath) =>
+              apply(d.workId, (list) => list.map((a) => (a.id === created.id ? { ...a, imagePath } : a))),
+            )
+            .catch((err) => report.current("Could not save the picture of the area", err));
+          return created;
+        } catch (err) {
+          report.current("Could not capture the area", err);
+          return null;
+        }
+      });
     },
-    [apply],
+    [apply, enqueue],
   );
 
   /**
-   * Changes an annotation. Takes the annotation rather than its id so a note
-   * saved as its popover closes still lands after the user has switched tabs.
+   * Changes an annotation. Takes the annotation rather than its id, and doesn't
+   * need its document to be open, so a note saved as its popover closes still
+   * lands after the tab was closed or switched.
    */
   const edit = useCallback(
-    async (target: Annotation, change: Partial<AnnotationEdit>) => {
-      const d = docRef.current;
-      if (!d) return;
-      const current = annotationsRef.current.find((a) => a.id === target.id) ?? target;
-      // Deleted meanwhile (the popover of a deleted annotation saving its note).
-      if (deleted.current.has(target.id)) return;
-      const before = editOf(current);
-      const after = { ...before, ...change };
-      if (before.categoryId === after.categoryId && before.colour === after.colour && before.note === after.note) return;
-      try {
-        const updated = await updateAnnotation(target.id, d.fileId, after);
-        apply(target.workId, (list) => upsert(list, updated));
-        push(target.workId, { kind: "edit", id: target.id, before, after });
-      } catch (err) {
-        report.current("Could not save the change", err);
-      }
-    },
-    [apply],
+    (target: Annotation, change: Partial<AnnotationEdit>): Promise<void> =>
+      enqueue(async () => {
+        const file = fileOf.current.get(target.workId);
+        if (!file || deleted.current.has(target.id)) return;
+        // The latest version, after any change queued before this one.
+        const current = listRef.current.find((a) => a.id === target.id) ?? target;
+        const before = editOf(current);
+        const after = { ...before, ...change };
+        if (before.categoryId === after.categoryId && before.colour === after.colour && before.note === after.note) return;
+        try {
+          const updated = await updateAnnotation(target.id, file, after);
+          apply(target.workId, (list) => upsert(list, updated));
+          push(target.workId, { kind: "edit", id: target.id, before, after });
+        } catch (err) {
+          report.current("Could not save the change", err);
+        }
+      }),
+    [apply, enqueue],
   );
 
   const remove = useCallback(
-    async (id: string) => {
+    (id: string): Promise<void> => {
       const d = docRef.current;
-      if (!d) return;
-      deleted.current.add(id);
-      try {
-        await deleteAnnotation(id);
-        apply(d.workId, (list) => list.filter((a) => a.id !== id));
-        push(d.workId, { kind: "delete", id });
-      } catch (err) {
-        deleted.current.delete(id);
-        report.current("Could not delete the annotation", err);
-      }
+      if (!d) return Promise.resolve();
+      return enqueue(async () => {
+        deleted.current.add(id);
+        try {
+          await deleteAnnotation(id);
+          apply(d.workId, (list) => list.filter((a) => a.id !== id));
+          push(d.workId, { kind: "delete", id });
+        } catch (err) {
+          deleted.current.delete(id);
+          report.current("Could not delete the annotation", err);
+        }
+      });
     },
-    [apply],
+    [apply, enqueue],
   );
-
-  const annotationsRef = useRef(annotations);
-  annotationsRef.current = annotations;
 
   /** Runs one step of history; returns the id of the annotation it touched. */
   const step = useCallback(
-    async (direction: "undo" | "redo"): Promise<string | null> => {
+    (direction: "undo" | "redo"): Promise<string | null> => {
       const d = docRef.current;
-      if (!d) return null;
-      const h = stacks(d.workId);
-      const op = (direction === "undo" ? h.undo : h.redo).pop();
-      if (!op) return null;
-      setHistoryVersion((v) => v + 1);
-      const hide = (op.kind === "create") === (direction === "undo");
-      try {
-        if (op.kind === "edit") {
-          const updated = await updateAnnotation(op.id, d.fileId, direction === "undo" ? op.before : op.after);
-          apply(d.workId, (list) => upsert(list, updated));
-        } else if (hide) {
-          deleted.current.add(op.id);
-          await deleteAnnotation(op.id);
-          apply(d.workId, (list) => list.filter((a) => a.id !== op.id));
-        } else {
-          const restored = await restoreAnnotation(op.id, d.fileId);
-          deleted.current.delete(op.id);
-          apply(d.workId, (list) => upsert(list, restored));
-        }
-        (direction === "undo" ? h.redo : h.undo).push(op);
+      if (!d) return Promise.resolve(null);
+      return enqueue(async () => {
+        const h = stacks(d.workId);
+        const op = (direction === "undo" ? h.undo : h.redo).pop();
+        if (!op) return null;
         setHistoryVersion((v) => v + 1);
-        return op.kind !== "edit" && hide ? null : op.id;
-      } catch (err) {
-        report.current(`Could not ${direction}`, err);
-        return null;
-      }
+        const hide = (op.kind === "create") === (direction === "undo");
+        try {
+          if (op.kind === "edit") {
+            const updated = await updateAnnotation(op.id, d.fileId, direction === "undo" ? op.before : op.after);
+            apply(d.workId, (list) => upsert(list, updated));
+          } else if (hide) {
+            deleted.current.add(op.id);
+            await deleteAnnotation(op.id);
+            apply(d.workId, (list) => list.filter((a) => a.id !== op.id));
+          } else {
+            const restored = await withPlacement(await restoreAnnotation(op.id, d.fileId));
+            deleted.current.delete(op.id);
+            apply(d.workId, (list) => upsert(list, restored));
+          }
+          (direction === "undo" ? h.redo : h.undo).push(op);
+          setHistoryVersion((v) => v + 1);
+          return op.kind !== "edit" && hide ? null : op.id;
+        } catch (err) {
+          // Put the step back so it can be tried again.
+          (direction === "undo" ? h.undo : h.redo).push(op);
+          setHistoryVersion((v) => v + 1);
+          report.current(`Could not ${direction}`, err);
+          return null;
+        }
+      });
     },
-    [apply],
+    [apply, enqueue],
   );
+
+  /** Resolves once every change asked for so far has been saved. */
+  const settled = useCallback(() => enqueue(async () => undefined), [enqueue]);
 
   const h = workId ? history.current.get(workId) : undefined;
   return {
@@ -275,6 +317,7 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
     captureArea,
     edit,
     remove,
+    settled,
     undo: useCallback(() => step("undo"), [step]),
     redo: useCallback(() => step("redo"), [step]),
     canUndo: (h?.undo.length ?? 0) > 0,

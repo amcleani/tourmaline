@@ -82,7 +82,10 @@ reading position; each exact version of its PDF is a *file* keyed by SHA-256,
 hashed in Rust from the bytes `open_document` returns (one binary response:
 u32 header length, JSON `DocumentInfo`, file bytes; `unpackDocument` in
 `platform/index.ts`). Same bytes anywhere → same work (renames/moves); new
-bytes at a known path → new version of that work (`library.rs`). Annotations
+bytes at any path a known file was seen at (`file_paths`) → new version of
+that work (`library.rs`), unless the start of its text differs from the
+file it replaced (`src/annotations/version.ts`), in which case the user is
+asked and `detach_file` gives it its own work. Annotations
 (`annotations.rs`) have one placement per file; on a new version the frontend
 re-anchors them (`src/annotations/anchor.ts`: page text hash → quote +
 prefix/suffix → orphan) and saves the placements. Deletes are soft. Area
@@ -103,7 +106,8 @@ canvas + pdf.js text layer per mounted page (CSS px = PDF pt × 96/72 × zoom;
 canvas × devicePixelRatio, capped) and exposes a `ViewerHandle` for
 navigation. Text content is extracted once per page (`src/pdf/textCache.ts`)
 and shared by the text layer and search (`search.ts`, `useSearch.ts`).
-Annotations: `useAnnotations` (state, undo/redo per work) feeds `Mark`s to
+Annotations: `useAnnotations` (state, undo/redo per work; every change runs
+through one queue so quick changes apply in order) feeds `Mark`s to
 the viewer, drawn under the text layer; clicks hit-test marks in PDF space.
 Text selections become highlights via `captureSelection` in
 `src/annotations/selection.ts` (text layer span k = k-th text item, so DOM

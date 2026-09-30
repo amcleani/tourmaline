@@ -27,6 +27,12 @@ export interface DocumentInfo {
   lastOpened: number;
   /** Reading position JSON saved by savePosition, if any. */
   lastPosition?: string | null;
+  /**
+   * Set when this file replaced another at the same path and hasn't been
+   * checked yet: compare the text, then setTextSample (same paper) or
+   * detachFile (a different paper).
+   */
+  previousVersion?: { fileId: string; textSample: string | null } | null;
 }
 
 export interface OpenedDocument {
@@ -78,6 +84,17 @@ export async function pickAndOpenPdf(): Promise<OpenedDocument | null> {
 export async function recentDocuments(limit = 10): Promise<DocumentInfo[]> {
   if (!isTauri()) return [];
   return invoke<DocumentInfo[]>("recent_documents", { limit });
+}
+
+/** Records the start of a file's text; also marks a new version as checked. */
+export async function setTextSample(fileId: string, sample: string): Promise<void> {
+  if (isTauri()) await invoke("set_text_sample", { fileId, sample });
+}
+
+/** Gives a file that turned out to be a different paper its own work. */
+export async function detachFile(fileId: string, sample: string): Promise<DocumentInfo> {
+  if (!isTauri()) throw new Error("not available in the browser");
+  return invoke<DocumentInfo>("detach_file", { fileId, sample });
 }
 
 export async function savePosition(workId: string, position: string): Promise<void> {

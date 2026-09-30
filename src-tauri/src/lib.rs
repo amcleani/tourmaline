@@ -50,6 +50,18 @@ async fn open_document(app: AppHandle, path: PathBuf) -> Result<Response> {
     .await
 }
 
+/// Records the start of a file's text (see `Db::set_text_sample`).
+#[tauri::command]
+async fn set_text_sample(app: AppHandle, file_id: String, sample: String) -> Result<()> {
+    blocking(app, move |_, db| db.set_text_sample(&file_id, &sample)).await
+}
+
+/// Gives a file that replaced another paper's file a work of its own.
+#[tauri::command]
+async fn detach_file(app: AppHandle, file_id: String, sample: String) -> Result<DocumentInfo> {
+    blocking(app, move |_, db| db.detach_file(&file_id, &sample)).await
+}
+
 #[tauri::command]
 async fn save_position(app: AppHandle, work_id: String, position: String) -> Result<()> {
     blocking(app, move |_, db| db.save_position(&work_id, &position)).await
@@ -201,6 +213,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_document,
+            set_text_sample,
+            detach_file,
             recent_documents,
             save_position,
             get_state,

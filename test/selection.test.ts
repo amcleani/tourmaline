@@ -1,5 +1,5 @@
 import { buildPageText, type TextItemLike } from "../src/pdf/search";
-import { cleanQuote, mergeLineRects, textAnchor, textOffset } from "../src/annotations/selection";
+import { cleanQuote, mergeInPdfSpace, mergeLineRects, textAnchor, textOffset } from "../src/annotations/selection";
 
 const item = (str: string, hasEOL = false): TextItemLike => ({
   str,
@@ -60,5 +60,20 @@ describe("text offsets", () => {
     expect(page.text.slice(anchor.textStart, anchor.textEnd)).toBe("theorem");
     expect(anchor.prefix).toBe("godel's first ");
     expect(anchor.suffix).toBe(" holds.");
+  });
+});
+
+describe("mergeInPdfSpace", () => {
+  it("merges pieces of a line in PDF coordinates (y up)", () => {
+    expect(
+      mergeInPdfSpace([
+        [10, 700, 60, 712],
+        [62, 700, 100, 711],
+        [10, 685, 90, 697],
+      ]),
+    ).toEqual([
+      [10, 700, 100, 712],
+      [10, 685, 90, 697],
+    ]);
   });
 });

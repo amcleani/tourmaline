@@ -12,7 +12,7 @@ interface Props {
   pageLabel: (page: number) => string;
   onSelect: (id: string) => void;
   onEditNote: () => void;
-  /** Rendered under the selected entry when it can't be shown on the page (orphans). */
+  /** Rendered under the list when the selected entry can't be shown on the page (orphans). */
   inlineEditor?: React.ReactNode;
 }
 
@@ -38,10 +38,11 @@ export function AnnotationsPanel({
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const listId = useId();
 
+  // Chips for the categories in use, plus any hidden one (so it can be shown again).
   const used = useMemo(() => {
     const ids = new Set(annotations.map((a) => a.categoryId ?? ""));
-    return categories.filter((c) => ids.has(c.id));
-  }, [annotations, categories]);
+    return categories.filter((c) => ids.has(c.id) || hidden.has(c.id));
+  }, [annotations, categories, hidden]);
 
   const visible = useMemo(() => {
     const q = normaliseQuery(query);
@@ -105,7 +106,7 @@ export function AnnotationsPanel({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        {used.length > 1 && (
+        {(used.length > 1 || hidden.size > 0) && (
           <div className="category-filter" role="group" aria-label="Show categories">
             {used.map((c) => (
               <button
@@ -168,12 +169,12 @@ export function AnnotationsPanel({
                 {a.kind === "area" && a.imagePath && <AttachmentImage id={a.id} />}
                 {a.quote && <p className="annotation-quote">{a.quote}</p>}
                 {a.note && <p className="annotation-note">{a.note}</p>}
-                {selected && inlineEditor}
               </li>
             );
           })}
         </ul>
       )}
+      {inlineEditor && <div className="panel-editor">{inlineEditor}</div>}
     </div>
   );
 }

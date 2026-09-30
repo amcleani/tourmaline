@@ -47,7 +47,9 @@ export async function reanchor(
 
   if (old && old.page < pageCount && a.fallback?.pageHash) {
     const source = await load(old.page);
-    if (source.hash === a.fallback.pageHash) return { ...old, status: "exact" };
+    // Same text in the same place, so the same geometry. It is only as sure
+    // as the placement it copies (a fuzzy one stays fuzzy).
+    if (source.hash === a.fallback.pageHash) return { ...old, status: old.status === "fuzzy" ? "fuzzy" : "exact" };
   }
 
   const quote = a.quote ? normaliseQuery(a.quote) : "";

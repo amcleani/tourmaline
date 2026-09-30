@@ -5,6 +5,7 @@ import { appCommands } from "./commands/appCommands";
 import { isTextEditingShortcut } from "./commands/shortcuts";
 import { colourOf, type Annotation, type Category } from "./annotations/types";
 import { useAnnotations } from "./annotations/useAnnotations";
+import { looksLikeSamePaper, textSample } from "./annotations/version";
 import { DEFAULT_ZOOM, decodePosition, decodeSession, encodePosition, encodeSession } from "./app/session";
 import { nextZoom, type Anchor } from "./pdf/layout";
 import { loadPdf } from "./pdf/loader";
@@ -13,6 +14,7 @@ import { PdfViewer, type Mark, type SelectionEnd, type ViewState, type ViewerHan
 import type { PdfRect } from "./pdf/search";
 import { useDocumentSearch } from "./pdf/useSearch";
 import {
+  detachFile,
   getState,
   isTauri,
   listCategories,
@@ -25,6 +27,7 @@ import {
   saveCategories,
   savePosition,
   setState,
+  setTextSample,
   type DocumentInfo,
   type OpenedDocument,
 } from "./platform";
@@ -40,6 +43,7 @@ import { RecentDialog } from "./ui/RecentDialog";
 import { SelectionToolbar } from "./ui/SelectionToolbar";
 import { ShortcutsDialog } from "./ui/ShortcutsDialog";
 import { TabBar } from "./ui/TabBar";
+import { VersionDialog } from "./ui/VersionDialog";
 import { Toolbar } from "./ui/Toolbar";
 import { Welcome } from "./ui/Welcome";
 
@@ -58,6 +62,11 @@ interface Tab {
   zoom: ZoomSpec;
   initialAnchor: Anchor | null;
   labels: string[] | null;
+  /**
+   * Set while asking whether this file, which replaced another at the same
+   * path, is the same paper; annotations stay hidden until then.
+   */
+  pendingVersion?: { sample: string } | null;
 }
 
 type Dialog = "palette" | "shortcuts" | "goto" | "recent" | "categories" | null;
@@ -112,7 +121,14 @@ export function App() {
     const pdf = await loadPdf(opened.bytes);
     const labels = await pdf.getPageLabels().catch(() => null);
     const saved = decodePosition(opened.info.lastPosition);
+    // Record the start of the text; if this file replaced another at the same
+    // path, first check it's really the same paper.
+    const sample = await textSample(pdf).catch(() => "");
+    const previous = opened.info.previousVersion;
+    const differs = !!previous?.textSample && !looksLikeSamePaper(previous.textSample, sample);
+    if (!differs) void setTextSample(opened.info.fileId, sample).catch((e) => console.error("Could not save the text sample", e));
     return {
+      pendingVersion: differs ? { sample } : null,
       pdf,
       labels,
       fileId: opened.info.fileId,
@@ -226,6 +242,13 @@ export function App() {
   // ---- Positions and session ---------------------------------------------
 
   const saveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  /** Note drafts in open popovers, saved before the window closes. */
+  const draftFlushers = useRef(new Set<() => Promise<void> | void>());
+  const registerFlush = useCallback((flush: () => Promise<void> | void) => {
+    draftFlushers.current.add(flush);
+    return () => void draftFlushers.current.delete(flush);
+  }, []);
+  const annotationsSettled = useRef<() => Promise<void>>(async () => {});
   const persistPosition = useCallback(async (tab: Tab) => {
     const view = views.current.get(tab.key);
     if (!tab.workId || !view) return;
@@ -240,6 +263,9 @@ export function App() {
     let unsubscribe: (() => void) | null = null;
     let disposed = false;
     onWindowClose(async () => {
+      // Unsaved note drafts first, then everything queued for the library.
+      await Promise.all([...draftFlushers.current].map((flush) => flush()));
+      await annotationsSettled.current();
       const pending = [...saveTimers.current.keys()];
       saveTimers.current.forEach((timer) => clearTimeout(timer));
       saveTimers.current.clear();
@@ -395,11 +421,16 @@ export function App() {
 
   const activeWork = activeTab?.workId ?? null;
   const activeFile = activeTab?.fileId ?? null;
+  const versionPending = !!activeTab?.pendingVersion;
   const openDoc = useMemo(
-    () => (activePdf && activeWork && activeFile ? { workId: activeWork, fileId: activeFile, pdf: activePdf } : null),
-    [activePdf, activeWork, activeFile],
+    () =>
+      activePdf && activeWork && activeFile && !versionPending
+        ? { workId: activeWork, fileId: activeFile, pdf: activePdf }
+        : null,
+    [activePdf, activeWork, activeFile, versionPending],
   );
   const notes = useAnnotations(openDoc, reportError);
+  annotationsSettled.current = notes.settled;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [captureMode, setCaptureMode] = useState(false);
   const [selectionEnd, setSelectionEnd] = useState<SelectionEnd | null>(null);
@@ -484,7 +515,8 @@ export function App() {
         setLastCategory(categoryId);
         void notes.edit(a, { categoryId });
       }}
-      onNote={(note) => void notes.edit(a, { note })}
+      onNote={(note) => notes.edit(a, { note })}
+      registerFlush={registerFlush}
       onDelete={() => registry.execute("annot.delete", "other")}
       onClose={() => {
         setSelectedId(null);
@@ -526,7 +558,7 @@ export function App() {
       hasDocument: activePdf !== null,
       tabCount: tabs.length,
       findOpen: findOpen && activePdf !== null,
-      modalOpen: dialog !== null,
+      modalOpen: dialog !== null || versionPending,
       hasTextSelection: selectionEnd !== null,
       annotationSelected: selected !== null,
       captureMode,
@@ -534,7 +566,7 @@ export function App() {
       canRedo: notes.canRedo,
     };
     registry.notifyContextChanged();
-  }, [activePdf, tabs.length, findOpen, dialog, selectionEnd, selected, captureMode, notes.canUndo, notes.canRedo, registry]);
+  }, [activePdf, tabs.length, findOpen, dialog, versionPending, selectionEnd, selected, captureMode, notes.canUndo, notes.canRedo, registry]);
 
   // Actions read the latest state through a ref, so commands register once.
   const latest = useRef({ activeTab, status, search, notes, selected, currentCategory, highlightSelection });
@@ -624,6 +656,8 @@ export function App() {
         viewerRef.current?.clearSelection();
         setSelectionEnd(null);
         setCaptureMode((on) => !on);
+        // The arrow keys place the rectangle, so the document needs focus.
+        viewerRef.current?.focus();
       },
       editCategories: () => setDialog("categories"),
     }).map((c) => registry.register(c));
@@ -786,7 +820,8 @@ export function App() {
           )}
           {captureMode && (
             <div className="capture-hint" role="status">
-              Drag over the page to capture an area. Escape or A to stop.
+              Drag over the page, or use the arrow keys (Shift+arrows to resize) and Enter, to capture an area. Escape
+              or A to stop.
             </div>
           )}
         </main>
@@ -794,6 +829,7 @@ export function App() {
           <aside className="sidebar right" aria-label="Annotations">
             <h2 className="sidebar-heading">Annotations</h2>
             <AnnotationsPanel
+              key={activeWork ?? ""}
               annotations={notes.annotations}
               categories={categories}
               selectedId={selectedId}
@@ -813,6 +849,25 @@ export function App() {
       {dialog === "palette" && <CommandPalette registry={registry} onClose={() => setDialog(null)} />}
       {dialog === "shortcuts" && <ShortcutsDialog registry={registry} onClose={() => setDialog(null)} />}
       {dialog === "recent" && <RecentDialog recent={recent} onOpen={openRecent} onClose={() => setDialog(null)} />}
+      {activeTab?.pendingVersion && activeTab.fileId && (
+        <VersionDialog
+          name={activeTab.name}
+          onSame={() => {
+            const { key, fileId, pendingVersion } = activeTab;
+            updateTab(key, { pendingVersion: null });
+            void setTextSample(fileId!, pendingVersion!.sample).catch((e) => reportError("Could not save the answer", e));
+          }}
+          onDifferent={() => {
+            const { key, fileId, pendingVersion } = activeTab;
+            detachFile(fileId!, pendingVersion!.sample)
+              .then((info) => {
+                updateTab(key, { workId: info.workId, pendingVersion: null });
+                refreshRecent();
+              })
+              .catch((e) => reportError("Could not separate the papers", e));
+          }}
+        />
+      )}
       {dialog === "categories" && (
         <CategoriesDialog
           categories={categories}

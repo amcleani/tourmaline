@@ -73,3 +73,13 @@ describe("reanchor", () => {
     expect((await reanchor(area, 1, pages("a"))).status).toBe("orphan");
   });
 });
+
+describe("reanchor keeps uncertainty", () => {
+  it("doesn't turn a fuzzy placement exact just because the page is unchanged", async () => {
+    const a = annotation({
+      fallback: { fileId: "v2", placement: { ...oldPlacement, status: "fuzzy" }, pageHash: "h:a new theorem about sets" },
+    });
+    const p = await reanchor(a, 3, pages("x", "a new theorem about sets", "y"));
+    expect(p.status).toBe("fuzzy");
+  });
+});

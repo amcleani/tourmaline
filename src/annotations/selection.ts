@@ -110,6 +110,16 @@ export function textAnchor(page: PageText, start: TextPoint, end: TextPoint) {
   };
 }
 
+/**
+ * Merges rectangles into lines in PDF space, where text runs left to right
+ * even on pages displayed rotated (/Rotate 90 tables).
+ */
+export function mergeInPdfSpace(rects: ReadonlyArray<[number, number, number, number]>): Array<[number, number, number, number]> {
+  // Flip y so "top" grows downwards as mergeLineRects expects.
+  const flipped = rects.map(([x0, y0, x1, y1]) => ({ left: x0, top: -y1, width: x1 - x0, height: y1 - y0 }));
+  return mergeLineRects(flipped).map((r) => [r.left, -(r.top + r.height), r.left + r.width, -r.top]);
+}
+
 /** Converts a page-relative CSS rectangle to PDF space. */
 export function cssToPdf(viewport: PageViewport, r: CssRect): [number, number, number, number] {
   const [ax, ay] = viewport.convertToPdfPoint(r.left, r.top);
@@ -159,7 +169,7 @@ export function captureSelection(range: Range, pages: readonly PageInfo[]): Capt
       }
       if (page.index === startPage) end = { item, char: to };
     }
-    for (const r of mergeLineRects(pageRects)) rects.push([page.index, ...cssToPdf(page.viewport, r)]);
+    for (const r of mergeInPdfSpace(pageRects.map((r) => cssToPdf(page.viewport, r)))) rects.push([page.index, ...r]);
     if (pageRects.length) parts.push("\n");
   }
 

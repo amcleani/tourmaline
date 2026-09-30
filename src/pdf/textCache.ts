@@ -44,8 +44,10 @@ export function getPageText(doc: PDFDocumentProxy, index: number): Promise<{ tex
 const pageHashes = new WeakMap<PDFDocumentProxy, Map<number, Promise<string>>>();
 
 /**
- * SHA-256 of a page's normalised text. Two versions of a file whose page has
- * the same hash show the same text there, so annotations keep their geometry.
+ * SHA-256 of a page's text and layout: the normalised text, the page box, and
+ * each text item's position and size (to 0.1 pt). Two versions of a file whose
+ * page has the same hash show the same text in the same place, so annotations
+ * keep their geometry. A re-typeset page (same words, new line breaks) differs.
  */
 export function getPageHash(doc: PDFDocumentProxy, index: number): Promise<string> {
   let cache = pageHashes.get(doc);
@@ -55,7 +57,16 @@ export function getPageHash(doc: PDFDocumentProxy, index: number): Promise<strin
   }
   let entry = cache.get(index);
   if (!entry) {
-    entry = getPageText(doc, index).then(({ text }) => sha256Hex(new TextEncoder().encode(text.text)));
+    entry = Promise.all([getPageText(doc, index), doc.getPage(index + 1)]).then(([{ text, content }, page]) => {
+      const r = (n: number) => Math.round(n * 10) / 10;
+      const layout = content.items
+        .map((item) => ("str" in item ? [...item.transform.slice(2).map(r), r(item.width)].join(",") : ""))
+        .join(";");
+      const box = [...page.view, page.rotate].map(r).join(",");
+      return sha256Hex(new TextEncoder().encode(`${text.text}
+${box}
+${layout}`));
+    });
     entry.catch(() => cache!.delete(index));
     cache.set(index, entry);
   }

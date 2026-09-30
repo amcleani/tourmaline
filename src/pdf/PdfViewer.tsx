@@ -355,6 +355,43 @@ export function PdfViewer({
     };
   }, [doc]);
 
+  // Area capture by keyboard: arrows place and move a rectangle on the
+  // current page, Shift+arrows resize it, Enter captures it.
+  const [keyRect, setKeyRect] = useState<{ page: number; rect: CssRect } | null>(null);
+  useEffect(() => {
+    if (!captureMode) setKeyRect(null);
+  }, [captureMode]);
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!captureMode || !layout || e.target !== e.currentTarget || e.ctrlKey || e.altKey || e.metaKey) return;
+    const el = e.currentTarget;
+    if (e.key === "Enter") {
+      const info = keyRect && mountedPages.current.get(keyRect.page);
+      if (!info || !keyRect || !onCapture) return;
+      e.preventDefault();
+      onCapture(keyRect.page, cssToPdf(info.viewport, keyRect.rect));
+      return;
+    }
+    const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const [dx, dy] = step.map((v) => v * 10);
+    setKeyRect((prev) => {
+      if (!prev) {
+        const page = currentPage(layout, el.scrollTop, el.clientHeight);
+        const w = layout.widths[page];
+        const h = layout.heights[page];
+        const centre = el.scrollTop + el.clientHeight / 2 - layout.tops[page];
+        const rect = { left: w / 4, top: centre - h / 16, width: w / 2, height: h / 8 };
+        return { page, rect: clampRect(rect, w, h) };
+      }
+      const r = prev.rect;
+      const next = e.shiftKey
+        ? { ...r, width: Math.max(10, r.width + dx), height: Math.max(10, r.height + dy) }
+        : { ...r, left: r.left + dx, top: r.top + dy };
+      return { page: prev.page, rect: clampRect(next, layout.widths[prev.page], layout.heights[prev.page]) };
+    });
+  };
+
   const innerWidth = layout ? Math.max(viewport.width, layout.maxWidth + 2 * PADDING) : 0;
   const [first, last] = layout ? visibleRange(layout, scrollTop, viewport.height || 800, 1) : [0, -1];
   const pages = [];
@@ -374,6 +411,7 @@ export function PdfViewer({
         onMarkClick={onMarkClick}
         captureMode={captureMode}
         onCapture={onCapture}
+        keyRect={keyRect?.page === i ? keyRect.rect : null}
         overlay={overlay}
         onRegister={onRegister}
         onSize={onPageSize}
@@ -389,6 +427,7 @@ export function PdfViewer({
       aria-label={name}
       tabIndex={0}
       onScroll={onScroll}
+      onKeyDown={onKeyDown}
     >
       {error && (
         <p className="viewer-error" role="alert">
@@ -417,6 +456,8 @@ interface PageProps {
   onMarkClick?: (id: string | null) => void;
   captureMode: boolean;
   onCapture?: (page: number, rect: PdfRect) => void;
+  /** The rectangle being placed with the keyboard on this page. */
+  keyRect: CssRect | null;
   overlay?: Props["overlay"];
   onRegister: (index: number, info: PageInfo | null) => void;
   onSize: (index: number, size: Size) => void;
@@ -438,6 +479,7 @@ function PageView({
   onMarkClick,
   captureMode,
   onCapture,
+  keyRect,
   overlay,
   onRegister,
   onSize,
@@ -530,7 +572,10 @@ function PageView({
             if (span) itemOf.current.set(span, i);
           }
         });
-        if (!cancelled) setTextReady(true);
+        // Not `cancelled`: a zoom while rendering re-runs this effect, which
+        // only updates the layer, and the page must still become selectable.
+        // The layer is only replaced when the page unmounts.
+        if (textLayer.current === layer) setTextReady(true);
       })
       .catch((err) => console.warn(`Text layer for page ${pageNumber} failed`, err));
     return () => {
@@ -624,7 +669,12 @@ function PageView({
         </div>
       )}
       {captureMode && viewport && onCapture && (
-        <CaptureLayer onDone={(r) => onCapture(index, cssToPdf(viewport, r))} />
+        <CaptureLayer
+          width={width}
+          height={height}
+          keyRect={keyRect}
+          onDone={(r) => onCapture(index, cssToPdf(viewport, r))}
+        />
       )}
       {overlay && viewport && (
         <div
@@ -641,11 +691,35 @@ function PageView({
 }
 
 /** Drag to draw a rectangle on a page (area capture). */
-function CaptureLayer({ onDone }: { onDone: (rect: CssRect) => void }) {
+/** Keeps a rectangle inside a page of the given size. */
+function clampRect(r: CssRect, width: number, height: number): CssRect {
+  const w = Math.min(r.width, width);
+  const h = Math.min(r.height, height);
+  return {
+    left: Math.min(Math.max(r.left, 0), width - w),
+    top: Math.min(Math.max(r.top, 0), height - h),
+    width: w,
+    height: h,
+  };
+}
+
+function CaptureLayer({
+  width,
+  height,
+  keyRect,
+  onDone,
+}: {
+  width: number;
+  height: number;
+  keyRect: CssRect | null;
+  onDone: (rect: CssRect) => void;
+}) {
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const local = (e: React.PointerEvent<HTMLDivElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
-    return [e.clientX - box.left, e.clientY - box.top] as const;
+    // Pointer capture keeps reporting outside the page; stay on it.
+    const clamp = (v: number, max: number) => Math.min(Math.max(v, 0), max);
+    return [clamp(e.clientX - box.left, width), clamp(e.clientY - box.top, height)] as const;
   };
   const rect = drag && {
     left: Math.min(drag.x0, drag.x1),
@@ -674,7 +748,7 @@ function CaptureLayer({ onDone }: { onDone: (rect: CssRect) => void }) {
       }}
       onPointerCancel={() => setDrag(null)}
     >
-      {rect && <div className="capture-rect" style={rect} />}
+      {(rect ?? keyRect) && <div className="capture-rect" style={(rect ?? keyRect)!} />}
     </div>
   );
 }

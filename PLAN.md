@@ -123,7 +123,8 @@ silently dropped).
 
 1. **New version of a paper** (same path now; same JabRef citekey from phase 4):
    inherits the annotations automatically; highlights that can't be re-found
-   are flagged as orphans.
+   are flagged as orphans. If the new file's text doesn't look like the same
+   paper (a generic download name reused), Tourmaline asks first.
 2. **Write-back target**: the vault PDF itself, backed up first.
 3. **Deleting a highlight**: its block is removed from the note on the next
    export; if other notes link to that block, ask first.

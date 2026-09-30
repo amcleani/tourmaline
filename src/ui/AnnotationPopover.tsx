@@ -11,14 +11,20 @@ interface Props {
   focusNote: boolean;
   onNoteFocused: () => void;
   onCategory: (categoryId: string) => void;
-  onNote: (note: string) => void;
+  onNote: (note: string) => Promise<void> | void;
   onDelete: () => void;
   onClose: () => void;
+  /** Lets the app save the draft before the window closes; returns an unregister function. */
+  registerFlush?: (flush: () => Promise<void> | void) => () => void;
 }
 
+/** Typing pauses this long before the note is saved. */
+const SAVE_DELAY_MS = 1000;
+
 // Shown next to the selected annotation: category, note and delete. The note
-// is saved when the field loses focus, on Ctrl+Enter and on closing.
-// Escape closes it. Key it by annotation id so the draft resets.
+// is saved shortly after typing stops, when the field loses focus, on
+// Ctrl+Enter, on closing, and before the window closes. Escape closes it.
+// Key it by annotation id so the draft resets.
 export function AnnotationPopover({
   annotation,
   categories,
@@ -29,12 +35,14 @@ export function AnnotationPopover({
   onNote,
   onDelete,
   onClose,
+  registerFlush,
 }: Props) {
   const [draft, setDraft] = useState(annotation.note);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const saved = useRef(annotation.note);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Take outside changes (undo) unless the user is typing.
   useEffect(() => {
@@ -48,19 +56,27 @@ export function AnnotationPopover({
     onNoteFocused();
   }, [focusNote, onNoteFocused]);
 
-  const save = () => {
-    if (draftRef.current !== saved.current) {
-      saved.current = draftRef.current;
-      onNote(draftRef.current);
-    }
+  const saveRef = useRef<() => Promise<void> | void>(() => undefined);
+  saveRef.current = () => {
+    clearTimeout(timer.current);
+    if (draftRef.current === saved.current) return;
+    saved.current = draftRef.current;
+    return onNote(draftRef.current);
   };
-  // Save when the popover goes away (another annotation selected, page scrolled off).
-  const saveOnUnmount = useRef(save);
-  saveOnUnmount.current = save;
-  useEffect(() => () => saveOnUnmount.current(), []);
+  const save = () => saveRef.current();
+
+  // Save when the popover goes away (another annotation selected, tab
+  // closed, page scrolled off), and let the app flush it on quitting.
+  useEffect(() => {
+    const unregister = registerFlush?.(() => saveRef.current());
+    return () => {
+      unregister?.();
+      void saveRef.current();
+    };
+  }, [registerFlush]);
 
   const close = () => {
-    save();
+    void save();
     onClose();
   };
 
@@ -93,13 +109,12 @@ export function AnnotationPopover({
           <Icon name="close" size={16} />
         </button>
       </div>
-      <div className="category-choices" role="radiogroup" aria-label="Category">
+      <div className="category-choices" role="group" aria-label="Category">
         {live.map((c) => (
           <button
             key={c.id}
             type="button"
-            role="radio"
-            aria-checked={annotation.categoryId === c.id}
+            aria-pressed={annotation.categoryId === c.id}
             className="swatch-button"
             onClick={() => onCategory(c.id)}
             title={`${c.name}${c.hotkey ? ` (${c.hotkey})` : ""}`}
@@ -116,8 +131,12 @@ export function AnnotationPopover({
           value={draft}
           rows={4}
           placeholder="Markdown and $math$"
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={save}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            clearTimeout(timer.current);
+            timer.current = setTimeout(() => void saveRef.current(), SAVE_DELAY_MS);
+          }}
+          onBlur={() => void save()}
         />
       </label>
       <div className="popover-actions">

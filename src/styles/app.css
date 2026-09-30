@@ -557,7 +557,7 @@ kbd {
   cursor: pointer;
 }
 .swatch-button:hover { background: var(--surface-2); }
-.swatch-button[aria-checked="true"] { border-color: var(--text); }
+.swatch-button[aria-pressed="true"] { border-color: var(--text); }
 .swatch {
   display: inline-block;
   width: 18px;
@@ -580,7 +580,8 @@ kbd {
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
   cursor: auto;
 }
-.annotation-item .annotation-popover { position: static; width: auto; margin-top: 8px; box-shadow: none; }
+.panel-editor { padding: 0 6px 8px; border-top: 1px solid var(--border); }
+.panel-editor .annotation-popover { position: static; width: auto; margin-top: 8px; box-shadow: none; }
 .popover-header { display: flex; align-items: center; justify-content: space-between; }
 .popover-header h2 { margin: 0; font-size: 0.9rem; }
 .category-choices { display: flex; flex-wrap: wrap; gap: 2px; margin: 6px 0; }

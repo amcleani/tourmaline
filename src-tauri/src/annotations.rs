@@ -243,7 +243,11 @@ impl Db {
 
     fn annotation(&self, id: &str, file_id: &str) -> Result<Annotation> {
         let conn = self.conn();
-        Ok(conn.query_row(&format!("{SELECT_ANNOTATION} WHERE a.id = ?1"), params![id, file_id], annotation_from)?)
+        let mut a = conn.query_row(&format!("{SELECT_ANNOTATION} WHERE a.id = ?1"), params![id, file_id], annotation_from)?;
+        if a.placement.is_none() {
+            a.fallback = fallback_for(&conn, id, file_id)?;
+        }
+        Ok(a)
     }
 
     pub fn create_annotation(&self, new: &NewAnnotation) -> Result<Annotation> {
@@ -300,11 +304,12 @@ impl Db {
             validate_colour(c)?;
         }
         let changed = self.conn().execute(
-            "UPDATE annotations SET category_id = ?2, colour = ?3, note_md = ?4, updated = ?5 WHERE id = ?1",
+            "UPDATE annotations SET category_id = ?2, colour = ?3, note_md = ?4, updated = ?5
+             WHERE id = ?1 AND deleted_at IS NULL",
             params![id, edit.category_id, edit.colour, edit.note, now_millis()],
         )?;
         if changed == 0 {
-            return Err(Error::Message(format!("no annotation {id}")));
+            return Err(Error::Message(format!("no annotation {id} (deleted?)")));
         }
         self.annotation(id, file_id)
     }
@@ -503,6 +508,18 @@ mod tests {
     }
 
     #[test]
+    fn restoring_on_another_version_offers_a_fallback() {
+        let db = Db::in_memory().unwrap();
+        let v1 = open(&db, "a", "/p/a.pdf", 1);
+        let a = db.create_annotation(&highlight(&v1.work_id, "a", 2)).unwrap();
+        db.delete_annotation(&a.id).unwrap();
+        open(&db, "a2", "/p/a.pdf", 2);
+        let restored = db.restore_annotation(&a.id, "a2").unwrap();
+        assert_eq!(restored.placement, None);
+        assert_eq!(restored.fallback.unwrap().placement.page, 2);
+    }
+
+    #[test]
     fn edits_delete_and_restore() {
         let db = Db::in_memory().unwrap();
         let doc = open(&db, "a", "/p/a.pdf", 1);
@@ -520,6 +537,8 @@ mod tests {
 
         db.delete_annotation(&a.id).unwrap();
         assert!(db.list_annotations(&doc.work_id, "a").unwrap().is_empty());
+        let late = AnnotationEdit { category_id: None, colour: None, note: "late save".into() };
+        assert!(db.update_annotation(&a.id, "a", &late).is_err(), "a deleted annotation can't be edited");
         let restored = db.restore_annotation(&a.id, "a").unwrap();
         assert_eq!(restored.note, "$x^2$");
         assert_eq!(db.list_annotations(&doc.work_id, "a").unwrap().len(), 1);
