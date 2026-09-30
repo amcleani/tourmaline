@@ -1,51 +1,45 @@
-//! Reading documents and describing them for the library.
+//! Reading PDFs from disk and fingerprinting them.
 
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct DocumentInfo {
-    /// SHA-256 of the file contents, so a paper keeps its identity (and later
-    /// its annotations) when it is renamed or moved. Computed by the frontend
-    /// from the same bytes it displays.
-    pub id: String,
+/// A PDF read from disk: its bytes and the SHA-256 of exactly those bytes.
+pub struct ReadFile {
+    pub sha256: String,
     pub path: String,
     pub name: String,
-    pub size: u64,
-    /// Unix milliseconds.
-    pub last_opened: i64,
-    /// Reading position as JSON written by the frontend.
-    pub last_position: Option<String>,
+    pub bytes: Vec<u8>,
 }
 
-pub fn read(path: &Path) -> Result<Vec<u8>> {
+pub fn read(path: &Path) -> Result<ReadFile> {
     ensure_pdf(path)?;
-    Ok(std::fs::read(path)?)
-}
-
-/// Builds the library entry for a document the frontend has just opened.
-pub fn describe(path: &Path, id: String, size: u64) -> Result<DocumentInfo> {
-    ensure_pdf(path)?;
-    let is_sha256 = id.len() == 64 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
-    if !is_sha256 {
-        return Err(Error::Message(format!("invalid document id {id:?}")));
-    }
-    Ok(DocumentInfo {
-        id,
+    let bytes = std::fs::read(path)?;
+    Ok(ReadFile {
+        sha256: sha256_hex(&bytes),
         path: path.to_string_lossy().into_owned(),
         name: path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        size,
-        last_opened: now_millis(),
-        last_position: None,
+        bytes,
     })
+}
+
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Packs a JSON header and the file bytes into one binary IPC response:
+/// a little-endian u32 header length, the UTF-8 JSON, then the bytes.
+pub fn pack(header: &str, bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(4 + header.len() + bytes.len());
+    out.extend_from_slice(&(header.len() as u32).to_le_bytes());
+    out.extend_from_slice(header.as_bytes());
+    out.extend_from_slice(bytes);
+    out
 }
 
 /// The reader only ever needs PDFs; refusing anything else keeps the file
@@ -61,19 +55,11 @@ fn ensure_pdf(path: &Path) -> Result<()> {
     }
 }
 
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs::File;
-
-    const HASH: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    use std::io::Write;
 
     #[test]
     fn refuses_non_pdf_files() {
@@ -81,21 +67,22 @@ mod tests {
         let txt = dir.path().join("notes.txt");
         File::create(&txt).unwrap();
         assert!(read(&txt).is_err());
-        assert!(describe(&txt, HASH.into(), 0).is_err());
     }
 
     #[test]
-    fn describes_with_file_name() {
-        let info = describe(Path::new("/lib/Paper 2023.PDF"), HASH.into(), 42).unwrap();
-        assert_eq!(info.name, "Paper 2023.PDF");
-        assert_eq!(info.size, 42);
+    fn reads_and_hashes() {
+        let dir = tempfile::tempdir().unwrap();
+        let pdf = dir.path().join("Paper 2023.PDF");
+        File::create(&pdf).unwrap().write_all(b"abc").unwrap();
+        let file = read(&pdf).unwrap();
+        assert_eq!(file.name, "Paper 2023.PDF");
+        assert_eq!(file.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(file.bytes, b"abc");
     }
 
     #[test]
-    fn rejects_ids_that_are_not_sha256_hex() {
-        let p = Path::new("/lib/a.pdf");
-        assert!(describe(p, "abc".into(), 0).is_err());
-        assert!(describe(p, HASH.to_uppercase(), 0).is_err());
-        assert!(describe(p, format!("{}/", &HASH[..63]), 0).is_err());
+    fn packs_header_and_bytes() {
+        let packed = pack("{}", b"PDF");
+        assert_eq!(packed, [2, 0, 0, 0, b'{', b'}', b'P', b'D', b'F']);
     }
 }

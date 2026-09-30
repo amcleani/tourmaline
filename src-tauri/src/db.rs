@@ -7,10 +7,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::documents::DocumentInfo;
 use crate::error::Result;
 
-const MIGRATIONS: &[&str] = &[
+/// A random UUID (v4) as SQL, for rows created inside migrations.
+macro_rules! sql_uuid {
+    () => {
+        "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', 1 + abs(random()) % 4, 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))"
+    };
+}
+
+pub(crate) const MIGRATIONS: &[&str] = &[
     // v1: documents the user has opened, keyed by a hash of their contents.
     r#"
     CREATE TABLE documents (
@@ -32,6 +38,110 @@ const MIGRATIONS: &[&str] = &[
         value TEXT NOT NULL
     );
     "#,
+    // v3: a work (the paper) owns annotations and the reading position; each
+    // exact version of its PDF is a file. Existing documents at the same path
+    // were versions of one paper, so they become one work.
+    concat!(
+        r#"
+    CREATE TABLE works (
+        id            TEXT PRIMARY KEY,
+        title         TEXT NOT NULL,
+        citekey       TEXT UNIQUE,
+        last_position TEXT,
+        created       INTEGER NOT NULL
+    );
+    CREATE TABLE files (
+        sha256        TEXT PRIMARY KEY,
+        work_id       TEXT NOT NULL REFERENCES works(id),
+        path          TEXT NOT NULL,
+        name          TEXT NOT NULL,
+        size          INTEGER NOT NULL,
+        origin        TEXT NOT NULL CHECK (origin IN ('opened', 'writeback', 'external')),
+        derived_from  TEXT REFERENCES files(sha256),
+        first_opened  INTEGER NOT NULL,
+        last_opened   INTEGER NOT NULL
+    );
+    CREATE INDEX files_work ON files(work_id);
+    CREATE INDEX files_path ON files(path COLLATE NOCASE);
+    CREATE INDEX files_last_opened ON files(last_opened DESC);
+
+    CREATE TEMP TABLE migrated_works AS
+        SELECT path, "#,
+        sql_uuid!(),
+        r#" AS work_id FROM (SELECT DISTINCT path FROM documents);
+    INSERT INTO works (id, title, last_position, created)
+        SELECT m.work_id, d.name, d.last_position,
+               (SELECT MIN(first_opened) FROM documents WHERE path = d.path)
+        FROM migrated_works m JOIN documents d ON d.path = m.path
+        WHERE d.last_opened = (SELECT MAX(last_opened) FROM documents WHERE path = d.path)
+        GROUP BY m.path;
+    INSERT INTO files (sha256, work_id, path, name, size, origin, derived_from, first_opened, last_opened)
+        SELECT d.id, m.work_id, d.path, d.name, d.size, 'opened', NULL, d.first_opened, d.last_opened
+        FROM documents d JOIN migrated_works m ON m.path = d.path;
+    DROP TABLE migrated_works;
+    DROP TABLE documents;
+
+    -- Hash of each page's normalised text, recorded for pages that carry
+    -- annotations: an unchanged hash in a new version means same geometry.
+    CREATE TABLE file_pages (
+        file_sha256 TEXT NOT NULL REFERENCES files(sha256),
+        page        INTEGER NOT NULL,
+        text_hash   TEXT NOT NULL,
+        PRIMARY KEY (file_sha256, page)
+    );
+
+    CREATE TABLE categories (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        colour     TEXT NOT NULL,
+        callout    TEXT NOT NULL,
+        hotkey     INTEGER UNIQUE CHECK (hotkey BETWEEN 1 AND 9),
+        sort_order INTEGER NOT NULL,
+        deleted_at INTEGER
+    );
+    INSERT INTO categories (id, name, colour, callout, hotkey, sort_order) VALUES
+        ('default-1', 'Highlight',  '#f7d14c', 'quote',     1, 1),
+        ('default-2', 'Important',  '#f28b82', 'important', 2, 2),
+        ('default-3', 'Definition', '#8ab4f8', 'info',      3, 3),
+        ('default-4', 'Question',   '#c58af9', 'question',  4, 4),
+        ('default-5', 'Method',     '#81c995', 'example',   5, 5);
+
+    CREATE TABLE annotations (
+        id          TEXT PRIMARY KEY,
+        work_id     TEXT NOT NULL REFERENCES works(id),
+        kind        TEXT NOT NULL CHECK (kind IN ('highlight', 'area', 'note', 'ink')),
+        category_id TEXT REFERENCES categories(id),
+        colour      TEXT,
+        note_md     TEXT NOT NULL DEFAULT '',
+        quote       TEXT,
+        prefix      TEXT,
+        suffix      TEXT,
+        image_path  TEXT,
+        block_id    TEXT NOT NULL UNIQUE,
+        source      TEXT NOT NULL DEFAULT 'tourmaline' CHECK (source IN ('tourmaline', 'imported')),
+        source_nm   TEXT,
+        created     INTEGER NOT NULL,
+        updated     INTEGER NOT NULL,
+        deleted_at  INTEGER
+    );
+    CREATE INDEX annotations_work ON annotations(work_id);
+
+    -- Where an annotation sits in one version of the file.
+    CREATE TABLE annotation_placements (
+        annotation_id TEXT NOT NULL REFERENCES annotations(id),
+        file_sha256   TEXT NOT NULL REFERENCES files(sha256),
+        page          INTEGER NOT NULL,
+        geometry      TEXT NOT NULL,
+        text_start    INTEGER,
+        text_end      INTEGER,
+        status        TEXT NOT NULL CHECK (status IN ('exact', 'moved', 'fuzzy', 'orphan')),
+        pdf_obj_ref   TEXT,
+        placed_at     INTEGER NOT NULL,
+        PRIMARY KEY (annotation_id, file_sha256)
+    );
+    CREATE INDEX placements_file ON annotation_placements(file_sha256);
+    "#
+    ),
 ];
 
 pub struct Db {
@@ -59,6 +169,11 @@ impl Db {
         Self::init(Connection::open_in_memory()?)
     }
 
+    /// The connection, for the query modules (`library`, `annotations`).
+    pub(crate) fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().expect("database lock poisoned")
+    }
+
     fn init(mut conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         migrate(&mut conn)?;
@@ -66,68 +181,15 @@ impl Db {
         Ok(Self { conn: Mutex::new(conn) })
     }
 
-    /// Records that a document was opened (inserting it the first time).
-    pub fn record_open(&self, doc: &DocumentInfo) -> Result<()> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        conn.execute(
-            "INSERT INTO documents (id, path, name, size, first_opened, last_opened)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-             ON CONFLICT(id) DO UPDATE SET
-                path = excluded.path,
-                name = excluded.name,
-                size = excluded.size,
-                last_opened = excluded.last_opened",
-            params![doc.id, doc.path, doc.name, doc.size as i64, doc.last_opened],
-        )?;
-        Ok(())
-    }
-
-    /// Most recently opened documents, one per path, newest first.
-    pub fn recent(&self, limit: u32) -> Result<Vec<DocumentInfo>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, path, name, size, last_opened, last_position FROM documents d
-             WHERE last_opened = (SELECT MAX(last_opened) FROM documents WHERE path = d.path)
-             ORDER BY last_opened DESC
-             LIMIT ?1",
-        )?;
-        let rows = stmt.query_map([limit], |row| {
-            Ok(DocumentInfo {
-                id: row.get(0)?,
-                path: row.get(1)?,
-                name: row.get(2)?,
-                size: row.get::<_, i64>(3)? as u64,
-                last_opened: row.get(4)?,
-                last_position: row.get(5)?,
-            })
-        })?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
-    }
-
-    /// Reading position saved for a document (opaque JSON owned by the frontend).
-    pub fn last_position(&self, id: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        Ok(conn
-            .query_row("SELECT last_position FROM documents WHERE id = ?1", [id], |r| r.get(0))
-            .optional()?
-            .flatten())
-    }
-
-    pub fn save_position(&self, id: &str, position: &str) -> Result<()> {
-        let conn = self.conn.lock().expect("database lock poisoned");
-        conn.execute("UPDATE documents SET last_position = ?2 WHERE id = ?1", params![id, position])?;
-        Ok(())
-    }
-
     pub fn get_state(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().expect("database lock poisoned");
+        let conn = self.conn();
         Ok(conn
             .query_row("SELECT value FROM app_state WHERE key = ?1", [key], |r| r.get(0))
             .optional()?)
     }
 
     pub fn set_state(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.conn.lock().expect("database lock poisoned");
+        let conn = self.conn();
         conn.execute(
             "INSERT INTO app_state (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -143,9 +205,9 @@ impl Db {
     }
 
     #[cfg(test)]
-    pub fn document_count(&self) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
-        Ok(conn.query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0))?)
+    pub fn count(&self, table: &str) -> Result<i64> {
+        let conn = self.conn();
+        Ok(conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?)
     }
 }
 
@@ -184,6 +246,14 @@ fn backup_daily(conn: &Connection, dir: &Path, date: &str, keep: usize) -> Resul
         std::fs::remove_file(old)?;
     }
     Ok(written)
+}
+
+/// Unix milliseconds.
+pub fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Today's UTC date as YYYY-MM-DD.
@@ -260,53 +330,12 @@ fn migrate(conn: &mut Connection) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn doc(id: &str, path: &str, t: i64) -> DocumentInfo {
-        DocumentInfo {
-            id: id.into(),
-            path: path.into(),
-            name: "x.pdf".into(),
-            size: 10,
-            last_opened: t,
-            last_position: None,
-        }
-    }
+    use crate::library::tests::open;
 
     #[test]
     fn migrates_to_latest_version() {
         let db = Db::in_memory().unwrap();
         assert_eq!(db.schema_version().unwrap(), MIGRATIONS.len() as i64);
-    }
-
-    #[test]
-    fn reopening_updates_instead_of_duplicating() {
-        let db = Db::in_memory().unwrap();
-        db.record_open(&doc("a", "/p/a.pdf", 1)).unwrap();
-        db.record_open(&doc("a", "/p/renamed.pdf", 2)).unwrap();
-        assert_eq!(db.document_count().unwrap(), 1);
-        let recent = db.recent(10).unwrap();
-        assert_eq!(recent[0].path, "/p/renamed.pdf");
-    }
-
-    #[test]
-    fn recent_is_newest_first_and_one_per_path() {
-        let db = Db::in_memory().unwrap();
-        db.record_open(&doc("a", "/p/a.pdf", 1)).unwrap();
-        db.record_open(&doc("b", "/p/b.pdf", 2)).unwrap();
-        // Same path, file contents changed: only the newer entry is listed.
-        db.record_open(&doc("a2", "/p/a.pdf", 3)).unwrap();
-        let ids: Vec<_> = db.recent(10).unwrap().into_iter().map(|d| d.id).collect();
-        assert_eq!(ids, ["a2", "b"]);
-    }
-
-    #[test]
-    fn reading_position_survives_reopening() {
-        let db = Db::in_memory().unwrap();
-        db.record_open(&doc("a", "/p/a.pdf", 1)).unwrap();
-        assert_eq!(db.last_position("a").unwrap(), None);
-        db.save_position("a", r#"{"page":3}"#).unwrap();
-        db.record_open(&doc("a", "/p/a.pdf", 2)).unwrap();
-        assert_eq!(db.last_position("a").unwrap().as_deref(), Some(r#"{"page":3}"#));
-        assert_eq!(db.recent(1).unwrap()[0].last_position.as_deref(), Some(r#"{"page":3}"#));
     }
 
     #[test]
@@ -337,7 +366,7 @@ mod tests {
         drop(fresh);
 
         let db = Db::open(&path).unwrap();
-        db.record_open(&doc("a", "/p/a.pdf", 1)).unwrap();
+        open(&db, "a", "/p/a.pdf", 1);
         drop(db);
 
         let conn = Connection::open(&path).unwrap();
@@ -356,7 +385,7 @@ mod tests {
 
         // Snapshots are complete databases, including rows still in the WAL.
         let copy = Connection::open(backups.join("library-2026-01-03.sqlite3")).unwrap();
-        let n: i64 = copy.query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0)).unwrap();
+        let n: i64 = copy.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
     }
 
@@ -366,10 +395,10 @@ mod tests {
         let path = dir.path().join("library.sqlite3");
         let a = Db::open(&path).unwrap();
         let b = Db::open(&path).unwrap();
-        a.record_open(&doc("a", "/p/a.pdf", 1)).unwrap();
-        b.record_open(&doc("b", "/p/b.pdf", 2)).unwrap();
-        assert_eq!(a.document_count().unwrap(), 2);
-        assert_eq!(b.document_count().unwrap(), 2);
+        open(&a, "a", "/p/a.pdf", 1);
+        open(&b, "b", "/p/b.pdf", 2);
+        assert_eq!(a.count("files").unwrap(), 2);
+        assert_eq!(b.count("files").unwrap(), 2);
     }
 
     #[test]

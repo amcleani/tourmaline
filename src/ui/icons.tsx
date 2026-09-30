@@ -1,4 +1,28 @@
-import { Command, FileText, FolderOpen, Keyboard, MoveHorizontal, PanelLeft, Search, X, ZoomIn, ZoomOut, type LucideIcon } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Command,
+  FileText,
+  FolderOpen,
+  Highlighter,
+  Keyboard,
+  MoveHorizontal,
+  PanelLeft,
+  PanelRight,
+  Plus,
+  Redo2,
+  SquareDashed,
+  StickyNote,
+  Tags,
+  Trash,
+  TriangleAlert,
+  Undo2,
+  X,
+  ZoomIn,
+  ZoomOut,
+  Search,
+  type LucideIcon,
+} from "lucide-react";
 
 // Commands refer to icons by name so the registry stays free of UI imports.
 const ICONS: Record<string, LucideIcon> = {
@@ -12,6 +36,18 @@ const ICONS: Record<string, LucideIcon> = {
   outline: PanelLeft,
   "fit-width": MoveHorizontal,
   search: Search,
+  highlight: Highlighter,
+  area: SquareDashed,
+  annotations: PanelRight,
+  undo: Undo2,
+  redo: Redo2,
+  categories: Tags,
+  note: StickyNote,
+  delete: Trash,
+  warning: TriangleAlert,
+  up: ChevronUp,
+  down: ChevronDown,
+  add: Plus,
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

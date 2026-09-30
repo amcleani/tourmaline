@@ -39,6 +39,7 @@ export interface Session {
   tabs: SessionTab[];
   active: number;
   outlineOpen: boolean;
+  annotationsOpen: boolean;
 }
 
 export function encodeSession(s: Session): string {
@@ -54,7 +55,7 @@ export function decodeSession(json: string | null | undefined): Session | null {
       .filter((t: unknown): t is SessionTab => typeof (t as SessionTab)?.path === "string" && typeof (t as SessionTab)?.name === "string")
       .map((t: SessionTab) => ({ path: t.path, name: t.name }));
     const active = Number.isInteger(o.active) ? Math.min(Math.max(o.active, 0), Math.max(tabs.length - 1, 0)) : 0;
-    return { tabs, active, outlineOpen: o.outlineOpen === true };
+    return { tabs, active, outlineOpen: o.outlineOpen === true, annotationsOpen: o.annotationsOpen === true };
   } catch {
     return null;
   }

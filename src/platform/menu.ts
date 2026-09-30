@@ -1,5 +1,5 @@
 import { MENU_ORDER, type CommandRegistry } from "../commands/registry";
-import { normaliseShortcut, toAccelerator } from "../commands/shortcuts";
+import { isTextEditingShortcut, normaliseShortcut, toAccelerator } from "../commands/shortcuts";
 import { isTauri } from "./index";
 
 // Builds the native menu bar from the command registry. When commands are
@@ -8,12 +8,17 @@ import { isTauri } from "./index";
 
 /**
  * Whether a shortcut is safe as a native accelerator: it needs Ctrl/Alt/Meta,
- * and must not be a caret or editing key, which text fields need (a native
- * accelerator takes the key before the page sees it).
+ * and must not be a caret or editing key or a text-editing shortcut (undo,
+ * copy...), which text fields need (a native accelerator takes the key before
+ * the page sees it).
  */
-const nativeAcceleratorOk = (shortcut: string) => {
+export const nativeAcceleratorOk = (shortcut: string) => {
   const s = normaliseShortcut(shortcut);
-  return /^(Ctrl|Alt|Meta)\+/.test(s) && !/\+(Home|End|Arrow\w+|PageUp|PageDown|Backspace|Delete|Tab)$/.test(s);
+  return (
+    /^(Ctrl|Alt|Meta)\+/.test(s) &&
+    !/\+(Home|End|Arrow\w+|PageUp|PageDown|Backspace|Delete|Tab)$/.test(s) &&
+    !isTextEditingShortcut(s)
+  );
 };
 
 type MenuItemHandle = Awaited<ReturnType<typeof import("@tauri-apps/api/menu").MenuItem.new>>;

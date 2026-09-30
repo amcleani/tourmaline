@@ -1,6 +1,6 @@
-import { CommandRegistry, type Command, type CommandContext } from "../src/commands/registry";
+import { CommandRegistry, type Command, type CommandContext, IDLE_CONTEXT } from "../src/commands/registry";
 
-function setup(ctx: CommandContext = { hasDocument: false, tabCount: 0, findOpen: false, modalOpen: false }) {
+function setup(ctx: CommandContext = IDLE_CONTEXT) {
   let time = 0;
   const context = { current: ctx };
   const registry = new CommandRegistry(() => context.current, () => time);
@@ -23,7 +23,7 @@ describe("CommandRegistry", () => {
     expect(registry.execute("test.cmd")).toBe(false);
     expect(run).not.toHaveBeenCalled();
 
-    context.current = { hasDocument: true, tabCount: 1, findOpen: false, modalOpen: false };
+    context.current = { ...IDLE_CONTEXT, hasDocument: true, tabCount: 1 };
     expect(registry.execute("test.cmd")).toBe(true);
     expect(run).toHaveBeenCalledOnce();
   });
@@ -61,7 +61,7 @@ describe("CommandRegistry", () => {
   });
 
   it("ignores keyboard and menu while a modal dialog is open", () => {
-    const { registry, context, advance } = setup({ hasDocument: true, tabCount: 1, findOpen: false, modalOpen: true });
+    const { registry, context, advance } = setup({ ...IDLE_CONTEXT, hasDocument: true, tabCount: 1, modalOpen: true });
     const run = vi.fn();
     registry.register(command({ run }));
     expect(registry.execute("test.cmd", "keyboard")).toBe(false);

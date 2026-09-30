@@ -1,10 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { CommandRegistry } from "../src/commands/registry";
+import { CommandRegistry, IDLE_CONTEXT } from "../src/commands/registry";
 import { CommandPalette } from "../src/ui/CommandPalette";
 
 function setup() {
-  const registry = new CommandRegistry(() => ({ hasDocument: false, tabCount: 0, findOpen: false, modalOpen: false }));
+  const registry = new CommandRegistry(() => IDLE_CONTEXT);
   const open = vi.fn();
   const zoom = vi.fn();
   registry.register({ id: "file.open", title: "Open…", shortcut: "Mod+O", menu: { menu: "File", group: 1, order: 1 }, run: open });

@@ -130,6 +130,19 @@ export function formatShortcut(shortcut: string): string {
     .join(isMac ? "" : "+");
 }
 
+const TEXT_EDITING_SHORTCUTS = new Set(
+  ["Mod+Z", "Mod+Shift+Z", "Mod+Y", "Mod+A", "Mod+C", "Mod+X", "Mod+V"].map(normaliseShortcut),
+);
+
+/**
+ * Shortcuts text fields use for editing (undo, copy, paste...). Commands bound
+ * to them must leave text fields alone, so they are never native accelerators
+ * and the page handler skips them while typing.
+ */
+export function isTextEditingShortcut(shortcut: string): boolean {
+  return TEXT_EDITING_SHORTCUTS.has(normaliseShortcut(shortcut));
+}
+
 /** Tauri/muda accelerator string for the native menu. */
 export function toAccelerator(shortcut: string): string {
   const names: Record<string, string> = {

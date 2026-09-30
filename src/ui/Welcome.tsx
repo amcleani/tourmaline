@@ -24,7 +24,7 @@ export function Welcome({ recent, onOpen, onOpenRecent }: Props) {
           <h2 id="recent-heading">Recent</h2>
           <ul>
             {recent.map((doc) => (
-              <li key={doc.id}>
+              <li key={doc.workId}>
                 <button type="button" className="recent-item" onClick={() => onOpenRecent(doc)} title={doc.path ?? undefined}>
                   <Icon name="file" />
                   <span className="recent-name">{doc.name}</span>

@@ -13,7 +13,27 @@ export interface CommandContext {
   findOpen: boolean;
   /** A modal dialog is open: keyboard shortcuts and the menu don't act behind it. */
   modalOpen: boolean;
+  /** Text is selected in the document. */
+  hasTextSelection: boolean;
+  annotationSelected: boolean;
+  /** Dragging on a page draws an area to capture. */
+  captureMode: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
 }
+
+/** Context with no document open and nothing going on. */
+export const IDLE_CONTEXT: CommandContext = {
+  hasDocument: false,
+  tabCount: 0,
+  findOpen: false,
+  modalOpen: false,
+  hasTextSelection: false,
+  annotationSelected: false,
+  captureMode: false,
+  canUndo: false,
+  canRedo: false,
+};
 
 export interface MenuPlacement {
   menu: MenuId;

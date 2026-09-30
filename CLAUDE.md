@@ -59,7 +59,12 @@ product requirement. New context the `when` conditions need goes in
   menu and the page can fire; `execute()` drops a repeat of the same command
   from a different source within 150 ms.
 - Global shortcuts are ignored while an `aria-modal` dialog is open, and in
-  text fields for editing keys (Home/End/arrows...).
+  text fields for editing keys (Home/End/arrows...) and text-editing
+  shortcuts (`isTextEditingShortcut`: Ctrl+Z/Y/A/C/X/V), which are also never
+  native accelerators. So Undo is Ctrl+Z everywhere except inside a note field.
+- Plain-letter shortcuts (H, N, A, 1-9, Delete) are fine: they don't fire in
+  text fields. Escape is one command (`edit.cancel`) that closes/cancels
+  whatever is open; a shortcut can belong to only one command.
 - The palette hides commands whose `when` is false.
 - Exception: controls that act on one specific item (the close button on a
   given tab, an entry in a list) may call a handler directly, provided a
@@ -72,9 +77,18 @@ and in jsdom tests. Rust commands live in `src-tauri/src/lib.rs`; file I/O and
 hashing run in `spawn_blocking`. PDF bytes return as a binary
 `tauri::ipc::Response`, not JSON. Rust file commands only accept `.pdf` paths.
 
-**Identity and storage.** A document's id is the SHA-256 of its contents, so
-annotations survive renames/moves (`src-tauri/src/documents.rs`). SQLite lives
-in the app data dir (`library.sqlite3`), accessed through `Db` in `db.rs`.
+**Identity and storage.** A *work* (the paper, UUID) owns annotations and the
+reading position; each exact version of its PDF is a *file* keyed by SHA-256,
+hashed in Rust from the bytes `open_document` returns (one binary response:
+u32 header length, JSON `DocumentInfo`, file bytes; `unpackDocument` in
+`platform/index.ts`). Same bytes anywhere → same work (renames/moves); new
+bytes at a known path → new version of that work (`library.rs`). Annotations
+(`annotations.rs`) have one placement per file; on a new version the frontend
+re-anchors them (`src/annotations/anchor.ts`: page text hash → quote +
+prefix/suffix → orphan) and saves the placements. Deletes are soft. Area
+captures are PNGs in `<data>/attachments/<annotation id>.png`, sent as a raw
+IPC body. SQLite lives in the app data dir (`library.sqlite3`), accessed
+through `Db` in `db.rs` (queries in `library.rs` / `annotations.rs`).
 Schema changes are appended to `MIGRATIONS` (applied by `PRAGMA user_version`);
 never edit an existing migration. On startup, before migrating, a daily
 snapshot goes to `backups/library-<date>.sqlite3` next to the database (14
@@ -89,6 +103,13 @@ canvas + pdf.js text layer per mounted page (CSS px = PDF pt × 96/72 × zoom;
 canvas × devicePixelRatio, capped) and exposes a `ViewerHandle` for
 navigation. Text content is extracted once per page (`src/pdf/textCache.ts`)
 and shared by the text layer and search (`search.ts`, `useSearch.ts`).
+Annotations: `useAnnotations` (state, undo/redo per work) feeds `Mark`s to
+the viewer, drawn under the text layer; clicks hit-test marks in PDF space.
+Text selections become highlights via `captureSelection` in
+`src/annotations/selection.ts` (text layer span k = k-th text item, so DOM
+points map exactly to offsets in `buildPageText`'s normalised text).
+Popovers and the selection toolbar render through the viewer's per-page
+`overlay`, so they scroll with the page.
 pdf.js 6: `render({ canvas, viewport })`, documents are freed with
 `pdf.loadingTask.destroy()`. Focus-mode line detection is
 `src/focus/lines.ts`, checked against the fixtures in `test/fixtures/` by

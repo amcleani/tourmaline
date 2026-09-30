@@ -88,7 +88,7 @@ export function RecentDialog({ recent, onOpen, onClose }: Props) {
           >
             {recent.map((doc, i) => (
               <li
-                key={doc.id}
+                key={doc.workId}
                 id={`${listId}-${i}`}
                 role="option"
                 aria-selected={i === active}

@@ -1,4 +1,5 @@
-import { eventToShortcut, formatShortcut, normaliseShortcut, toAccelerator, toAriaShortcut } from "../src/commands/shortcuts";
+import { eventToShortcut, formatShortcut, isTextEditingShortcut, normaliseShortcut, toAccelerator, toAriaShortcut } from "../src/commands/shortcuts";
+import { nativeAcceleratorOk } from "../src/platform/menu";
 
 const key = (key: string, mods: Partial<Record<"ctrlKey" | "altKey" | "shiftKey" | "metaKey", boolean>> & { code?: string } = {}) => ({
   key,
@@ -66,5 +67,16 @@ describe("shortcuts", () => {
 
   it("rejects shortcuts without a key", () => {
     expect(() => normaliseShortcut("Ctrl+Shift")).toThrow();
+  });
+});
+
+describe("text-editing shortcuts", () => {
+  it("are recognised in any spelling and never become native accelerators", () => {
+    expect(isTextEditingShortcut("mod+z")).toBe(true);
+    expect(isTextEditingShortcut("Mod+Shift+Z")).toBe(true);
+    expect(isTextEditingShortcut("Mod+K")).toBe(false);
+    expect(nativeAcceleratorOk("Mod+Z")).toBe(false);
+    expect(nativeAcceleratorOk("Mod+Shift+A")).toBe(true);
+    expect(nativeAcceleratorOk("Delete")).toBe(false);
   });
 });

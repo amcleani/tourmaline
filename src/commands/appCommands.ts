@@ -22,10 +22,21 @@ export interface AppActions {
   lastPage: () => void;
   nextTab: () => void;
   previousTab: () => void;
+  cancel: () => void;
+  undo: () => void;
+  redo: () => void;
+  toggleAnnotations: () => void;
+  highlight: () => void;
+  editNote: () => void;
+  deleteAnnotation: () => void;
+  captureArea: () => void;
+  editCategories: () => void;
 }
 
 const hasDocument = (ctx: CommandContext) => ctx.hasDocument;
 const severalTabs = (ctx: CommandContext) => ctx.tabCount > 1;
+const hasSelection = (ctx: CommandContext) => ctx.hasDocument && ctx.hasTextSelection;
+const annotationSelected = (ctx: CommandContext) => ctx.hasDocument && ctx.annotationSelected;
 
 // Shortcut notes: avoid Ctrl+Alt (AltGr on many European layouts) and
 // Shift+digit (layout-dependent symbols); see shortcuts.ts.
@@ -66,6 +77,37 @@ export function appCommands(a: AppActions): Command[] {
       shortcut: "Mod+Q",
       menu: { menu: "File", group: 9, order: 1 },
       run: a.quit,
+    },
+
+    // Edit
+    {
+      id: "edit.undo",
+      title: "Undo",
+      keywords: ["annotation", "revert"],
+      shortcut: "Mod+Z",
+      icon: "undo",
+      menu: { menu: "Edit", group: 1, order: 1 },
+      when: (ctx) => ctx.hasDocument && ctx.canUndo,
+      run: a.undo,
+    },
+    {
+      id: "edit.redo",
+      title: "Redo",
+      keywords: ["annotation"],
+      shortcut: "Mod+Y",
+      icon: "redo",
+      menu: { menu: "Edit", group: 1, order: 2 },
+      when: (ctx) => ctx.hasDocument && ctx.canRedo,
+      run: a.redo,
+    },
+    {
+      id: "edit.cancel",
+      title: "Close find bar, stop capturing or deselect",
+      keywords: ["escape", "cancel"],
+      shortcut: "Escape",
+      hideInPalette: true,
+      when: (ctx) => ctx.findOpen || ctx.captureMode || ctx.annotationSelected || ctx.hasTextSelection,
+      run: a.cancel,
     },
 
     // View
@@ -141,6 +183,18 @@ export function appCommands(a: AppActions): Command[] {
       run: a.fitPage,
     },
 
+    {
+      id: "view.toggleAnnotations",
+      title: "Show or hide annotations",
+      keywords: ["sidebar", "highlights", "notes", "list"],
+      shortcut: "Mod+Shift+A",
+      icon: "annotations",
+      toolbar: true,
+      menu: { menu: "View", group: 1, order: 3 },
+      when: hasDocument,
+      run: a.toggleAnnotations,
+    },
+
     // Navigate
     {
       id: "nav.find",
@@ -172,7 +226,6 @@ export function appCommands(a: AppActions): Command[] {
     {
       id: "nav.closeFind",
       title: "Close find bar",
-      shortcut: "Escape",
       menu: { menu: "Navigate", group: 1, order: 4 },
       when: (ctx) => ctx.findOpen,
       run: a.closeFind,
@@ -219,6 +272,57 @@ export function appCommands(a: AppActions): Command[] {
       menu: { menu: "Navigate", group: 3, order: 2 },
       when: severalTabs,
       run: a.previousTab,
+    },
+
+    // Annotate
+    {
+      id: "annot.highlight",
+      title: "Highlight selection",
+      keywords: ["mark", "annotate", "colour"],
+      shortcut: "H",
+      icon: "highlight",
+      toolbar: true,
+      menu: { menu: "Annotate", group: 1, order: 1 },
+      when: hasSelection,
+      run: a.highlight,
+    },
+    {
+      id: "annot.editNote",
+      title: "Add or edit note",
+      keywords: ["comment", "annotation", "write"],
+      shortcut: "N",
+      icon: "note",
+      menu: { menu: "Annotate", group: 1, order: 2 },
+      when: (ctx) => hasSelection(ctx) || annotationSelected(ctx),
+      run: a.editNote,
+    },
+    {
+      id: "annot.captureArea",
+      title: "Capture area",
+      keywords: ["figure", "equation", "image", "screenshot", "rectangle", "region"],
+      shortcut: "A",
+      icon: "area",
+      toolbar: true,
+      menu: { menu: "Annotate", group: 1, order: 3 },
+      when: hasDocument,
+      run: a.captureArea,
+    },
+    {
+      id: "annot.delete",
+      title: "Delete annotation",
+      keywords: ["remove", "highlight"],
+      shortcut: "Delete",
+      menu: { menu: "Annotate", group: 2, order: 1 },
+      when: annotationSelected,
+      run: a.deleteAnnotation,
+    },
+    {
+      id: "annot.categories",
+      title: "Edit categories…",
+      keywords: ["colours", "colors", "callouts", "keys"],
+      icon: "categories",
+      menu: { menu: "Annotate", group: 9, order: 1 },
+      run: a.editCategories,
     },
 
     // Help

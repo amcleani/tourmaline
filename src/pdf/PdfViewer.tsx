@@ -16,6 +16,8 @@ import {
   type Size,
   type ZoomMode,
 } from "./layout";
+import { captureSelection, cssToPdf, type CapturedSelection, type CssRect, type PageInfo } from "../annotations/selection";
+import type { AnnotationKind } from "../annotations/types";
 import type { Target } from "./outline";
 import type { PdfRect } from "./search";
 import { getTextContent } from "./textCache";
@@ -41,12 +43,30 @@ export interface Highlight {
   active: boolean;
 }
 
+/** An annotation as drawn on one page. */
+export interface Mark {
+  id: string;
+  kind: AnnotationKind;
+  rects: PdfRect[];
+  colour: string;
+  selected: boolean;
+}
+
+/** Where a text selection ends, for placing the selection toolbar. */
+export interface SelectionEnd {
+  page: number;
+  rect: PdfRect;
+}
+
 export interface ViewerHandle {
   goToPage(page: number): void;
   goToTarget(target: Target): Promise<void>;
   /** Scrolls a PDF-space rectangle on a page into view if it isn't already. */
   revealRect(page: number, rect: PdfRect): Promise<void>;
   focus(): void;
+  /** The current text selection in the document, if any. */
+  captureSelection(): CapturedSelection | null;
+  clearSelection(): void;
 }
 
 interface Props {
@@ -60,6 +80,15 @@ interface Props {
   /** Ctrl+wheel: ask the owner to zoom one step in (1) or out (-1). */
   onZoomStep: (direction: 1 | -1) => void;
   handleRef?: React.Ref<ViewerHandle>;
+  marks?: ReadonlyMap<number, Mark[]>;
+  /** Clicking a mark selects it; clicking elsewhere on a page passes null. */
+  onMarkClick?: (id: string | null) => void;
+  /** Dragging on a page draws a rectangle instead of selecting text. */
+  captureMode?: boolean;
+  onCapture?: (page: number, rect: PdfRect) => void;
+  onSelectionChange?: (end: SelectionEnd | null) => void;
+  /** Extra content drawn over a page (popovers), positioned with toCss. */
+  overlay?: (page: number, toCss: (rect: PdfRect) => CssRect) => React.ReactNode;
 }
 
 /** Converts a PDF-space rectangle to CSS pixels within the page. */
@@ -71,7 +100,22 @@ function toCssRect(viewport: PageViewport, [x0, y0, x1, y1]: PdfRect) {
 
 const WHEEL_STEP = 50;
 
-export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewChange, onZoomStep, handleRef }: Props) {
+export function PdfViewer({
+  doc,
+  name,
+  zoom,
+  initialAnchor,
+  highlights,
+  onViewChange,
+  onZoomStep,
+  handleRef,
+  marks,
+  onMarkClick,
+  captureMode = false,
+  onCapture,
+  onSelectionChange,
+  overlay,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sizes, setSizes] = useState<Size[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -200,6 +244,61 @@ export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewCh
     });
   }, []);
 
+  // Mounted pages, for reading text selections off their text layers.
+  const mountedPages = useRef(new Map<number, PageInfo>());
+  const onRegister = useCallback((index: number, info: PageInfo | null) => {
+    if (info) mountedPages.current.set(index, info);
+    else mountedPages.current.delete(index);
+  }, []);
+
+  // Report where the selection ends once the mouse is released, so a toolbar
+  // can offer to highlight it.
+  const selectionReport = useRef(onSelectionChange);
+  selectionReport.current = onSelectionChange;
+  useEffect(() => {
+    let pointerDown = false;
+    let last: SelectionEnd | null = null;
+    const emit = (end: SelectionEnd | null) => {
+      if (end === last || (end && last && end.page === last.page && end.rect.every((v, i) => v === last!.rect[i]))) return;
+      last = end;
+      selectionReport.current?.(end);
+    };
+    const measure = () => {
+      const sel = window.getSelection();
+      const el = scrollRef.current;
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !el || !el.contains(sel.anchorNode)) return emit(null);
+      if (pointerDown) return;
+      const rects = [...sel.getRangeAt(0).getClientRects()].filter((r) => r.width > 0 && r.height > 0);
+      const lastRect = rects[rects.length - 1];
+      if (!lastRect) return emit(null);
+      for (const page of mountedPages.current.values()) {
+        const box = page.element.getBoundingClientRect();
+        const x = lastRect.left + lastRect.width / 2;
+        const y = lastRect.top + lastRect.height / 2;
+        if (x < box.left || x > box.right || y < box.top || y > box.bottom) continue;
+        const local = { left: lastRect.left - box.left, top: lastRect.top - box.top, width: lastRect.width, height: lastRect.height };
+        return emit({ page: page.index, rect: cssToPdf(page.viewport, local) });
+      }
+      emit(null);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (scrollRef.current?.contains(e.target as Node)) pointerDown = true;
+    };
+    const onUp = () => {
+      if (!pointerDown) return;
+      pointerDown = false;
+      requestAnimationFrame(measure);
+    };
+    document.addEventListener("selectionchange", measure);
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointerup", onUp, true);
+    return () => {
+      document.removeEventListener("selectionchange", measure);
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointerup", onUp, true);
+    };
+  }, []);
+
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const scrollToOffset = (y: number) => {
@@ -245,6 +344,14 @@ export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewCh
       focus() {
         scrollRef.current?.focus({ preventScroll: true });
       },
+      captureSelection() {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !scrollRef.current?.contains(sel.anchorNode)) return null;
+        return captureSelection(sel.getRangeAt(0), [...mountedPages.current.values()]);
+      },
+      clearSelection() {
+        window.getSelection()?.removeAllRanges();
+      },
     };
   }, [doc]);
 
@@ -263,6 +370,12 @@ export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewCh
         height={layout!.heights[i]}
         zoom={effectiveZoom}
         highlights={highlights?.get(i)}
+        marks={marks?.get(i)}
+        onMarkClick={onMarkClick}
+        captureMode={captureMode}
+        onCapture={onCapture}
+        overlay={overlay}
+        onRegister={onRegister}
         onSize={onPageSize}
       />,
     );
@@ -270,7 +383,7 @@ export function PdfViewer({ doc, name, zoom, initialAnchor, highlights, onViewCh
 
   return (
     <div
-      className="viewer-scroll"
+      className={captureMode ? "viewer-scroll capturing" : "viewer-scroll"}
       ref={scrollRef}
       role="document"
       aria-label={name}
@@ -300,13 +413,36 @@ interface PageProps {
   height: number;
   zoom: number;
   highlights?: Highlight[];
+  marks?: Mark[];
+  onMarkClick?: (id: string | null) => void;
+  captureMode: boolean;
+  onCapture?: (page: number, rect: PdfRect) => void;
+  overlay?: Props["overlay"];
+  onRegister: (index: number, info: PageInfo | null) => void;
   onSize: (index: number, size: Size) => void;
 }
 
 /** Browsers refuse canvases much beyond this many pixels. */
 const MAX_CANVAS_PIXELS = 16_000_000;
 
-function PageView({ doc, index, top, left, width, height, zoom, highlights, onSize }: PageProps) {
+function PageView({
+  doc,
+  index,
+  top,
+  left,
+  width,
+  height,
+  zoom,
+  highlights,
+  marks,
+  onMarkClick,
+  captureMode,
+  onCapture,
+  overlay,
+  onRegister,
+  onSize,
+}: PageProps) {
+  const pageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   // pdf.js refuses to start a render on a canvas that is still busy, and
@@ -369,6 +505,8 @@ function PageView({ doc, index, top, left, width, height, zoom, highlights, onSi
   // Text layer: invisible, selectable text positioned over the canvas; also
   // what screen readers read.
   const textLayer = useRef<TextLayer | null>(null);
+  const itemOf = useRef(new Map<Element, number>());
+  const [textReady, setTextReady] = useState(false);
   useEffect(() => {
     const container = textRef.current;
     if (!page || !viewport || !container) return;
@@ -378,26 +516,44 @@ function PageView({ doc, index, top, left, width, height, zoom, highlights, onSi
     }
     let cancelled = false;
     getTextContent(doc, index)
-      .then((content) => {
+      .then(async (content) => {
         if (cancelled) return;
         const layer = new TextLayer({ textContentSource: content, container, viewport });
         textLayer.current = layer;
-        return layer.render();
+        await layer.render();
+        // The layer makes one span per text item (markers excluded), in order.
+        const spans = layer.textDivs;
+        let k = 0;
+        content.items.forEach((item, i) => {
+          if ("str" in item) {
+            const span = spans[k++];
+            if (span) itemOf.current.set(span, i);
+          }
+        });
+        if (!cancelled) setTextReady(true);
       })
       .catch((err) => console.warn(`Text layer for page ${pageNumber} failed`, err));
     return () => {
       cancelled = true;
     };
   }, [doc, index, page, viewport, pageNumber]);
+
+  useEffect(() => {
+    const element = pageRef.current;
+    const text = textRef.current;
+    if (!textReady || !viewport || !element || !text) return;
+    onRegister(index, { index, element, textLayer: text, viewport, itemOf: itemOf.current });
+    return () => onRegister(index, null);
+  }, [textReady, viewport, index, onRegister]);
   // When the page scrolls away, free what pdf.js cached for drawing it
   // (operator list, decoded images) once any render in flight has settled.
-  const pageRef = useRef<PDFPageProxy | null>(null);
-  pageRef.current = page;
+  const loadedPage = useRef<PDFPageProxy | null>(null);
+  loadedPage.current = page;
   useEffect(
     () => () => {
       textLayer.current?.cancel();
       textLayer.current = null;
-      const loaded = pageRef.current;
+      const loaded = loadedPage.current;
       if (loaded) void lastRender.current.finally(() => loaded.cleanup());
     },
     [],
@@ -415,14 +571,48 @@ function PageView({ doc, index, top, left, width, height, zoom, highlights, onSi
     window.addEventListener("pointerup", done);
   };
 
+  // A click that isn't the end of a text selection selects the smallest mark under it.
+  const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (captureMode || !onMarkClick || !viewport) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const box = e.currentTarget.getBoundingClientRect();
+    const [x, y] = viewport.convertToPdfPoint(e.clientX - box.left, e.clientY - box.top);
+    let hit: { id: string; area: number } | null = null;
+    for (const m of marks ?? []) {
+      for (const [x0, y0, x1, y1] of m.rects) {
+        const area = (x1 - x0) * (y1 - y0);
+        if (x >= x0 && x <= x1 && y >= y0 && y <= y1 && (!hit || area < hit.area)) hit = { id: m.id, area };
+      }
+    }
+    onMarkClick(hit?.id ?? null);
+  };
+
+  const toCss = useCallback((rect: PdfRect) => (viewport ? toCssRect(viewport, rect) : { left: 0, top: 0, width: 0, height: 0 }), [viewport]);
+
   return (
     <div
+      ref={pageRef}
       className="page"
       style={{ top, left, width, height, ["--total-scale-factor" as string]: cssScale }}
       role="region"
       aria-label={`Page ${pageNumber} of ${doc.numPages}`}
+      onClick={onClick}
     >
       <canvas ref={canvasRef} style={{ width, height }} aria-hidden="true" />
+      {viewport && marks && marks.length > 0 && (
+        <div className="mark-layer" aria-hidden="true">
+          {marks.flatMap((m) =>
+            m.rects.map((rect, j) => (
+              <div
+                key={`${m.id}-${j}`}
+                className={`mark mark-${m.kind}${m.selected ? " selected" : ""}`}
+                style={{ ...toCssRect(viewport, rect), ["--mark-colour" as string]: m.colour }}
+              />
+            )),
+          )}
+        </div>
+      )}
       <div ref={textRef} className="textLayer" onPointerDown={onPointerDown} />
       {viewport && highlights && highlights.length > 0 && (
         <div className="highlight-layer" aria-hidden="true">
@@ -433,7 +623,58 @@ function PageView({ doc, index, top, left, width, height, zoom, highlights, onSi
           )}
         </div>
       )}
+      {captureMode && viewport && onCapture && (
+        <CaptureLayer onDone={(r) => onCapture(index, cssToPdf(viewport, r))} />
+      )}
+      {overlay && viewport && (
+        <div
+          className="page-overlay"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {overlay(index, toCss)}
+        </div>
+      )}
       {failed && <p className="page-error">Page {pageNumber} could not be rendered.</p>}
+    </div>
+  );
+}
+
+/** Drag to draw a rectangle on a page (area capture). */
+function CaptureLayer({ onDone }: { onDone: (rect: CssRect) => void }) {
+  const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const local = (e: React.PointerEvent<HTMLDivElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    return [e.clientX - box.left, e.clientY - box.top] as const;
+  };
+  const rect = drag && {
+    left: Math.min(drag.x0, drag.x1),
+    top: Math.min(drag.y0, drag.y1),
+    width: Math.abs(drag.x1 - drag.x0),
+    height: Math.abs(drag.y1 - drag.y0),
+  };
+  return (
+    <div
+      className="capture-layer"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const [x, y] = local(e);
+        setDrag({ x0: x, y0: y, x1: x, y1: y });
+      }}
+      onPointerMove={(e) => {
+        if (!drag) return;
+        const [x, y] = local(e);
+        setDrag({ ...drag, x1: x, y1: y });
+      }}
+      onPointerUp={() => {
+        setDrag(null);
+        if (rect && rect.width > 4 && rect.height > 4) onDone(rect);
+      }}
+      onPointerCancel={() => setDrag(null)}
+    >
+      {rect && <div className="capture-rect" style={rect} />}
     </div>
   );
 }

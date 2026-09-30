@@ -15,7 +15,7 @@ mouse (menus, toolbar, right-click) and by keyboard (shortcuts, command palette)
 | Notes editor | CodeMirror 6 with live MathJax 3 preview |
 | Ink | `perfect-freehand`, pressure from pointer events |
 | Templates | Handlebars (same syntax as the Obsidian Citations plugin) |
-| Storage | SQLite (`rusqlite`), documents keyed by SHA-256 of their contents |
+| Storage | SQLite (`rusqlite`); works (papers) with one file row per SHA-256 version |
 
 ## Principles
 
@@ -56,7 +56,7 @@ mouse (menus, toolbar, right-click) and by keyboard (shortcuts, command palette)
 - **Links**: `{{readerLink}}` (`tourmaline://open?doc=…&hl=…`, default) reopens
   Tourmaline at the highlight. `{{pdfLink}}` (`[[x.pdf#page=5&annotation=412R]]`)
   opens Obsidian's own viewer; needs PDF write-back turned on.
-- **Block IDs** per highlight (`^hl-7f3e`) that never change.
+- **Block IDs** per highlight (`^hl-k3x9q2`) that never change.
 - Multi-line notes and `$$` blocks in callouts get a `>` on every line.
 - Optional CSS snippet in `.obsidian/snippets/` to colour category callouts (off by default).
 
@@ -91,16 +91,47 @@ downloadable OCR model (pix2tex / UniMERNet via ONNX in Rust).
 
 ## Data model
 
+A **work** is a paper; a **file** is one exact version of it (SHA-256 of its
+bytes). Annotations, the reading position and (later) the citekey belong to the
+work, so they survive renames, moves and new versions of the PDF.
+
 ```
-documents   (id = sha256, path, name, size, first_opened, last_opened, last_position)
-categories  (id, name, colour, callout_type, key)
-annotations (id, doc_id, kind: highlight|area|ink|note, page, rects|strokes|box,
-             quote, prefix, suffix, category_id, note_md, tags, image_path,
-             pdf_nm, pdf_obj_ref, block_id, created, updated)
+works        (id uuid, title, citekey, last_position, created)
+files        (sha256, work_id, path, name, size, origin: opened|writeback|external,
+              derived_from, first_opened, last_opened)
+file_pages   (file_sha256, page, text_hash)          -- to tell whether a page changed
+categories   (id, name, colour, callout, hotkey 1-9, sort_order, deleted_at)
+annotations  (id uuidv7 = /NM on write-back, work_id, kind: highlight|area|note|ink,
+              category_id, colour, note_md, quote, prefix, suffix, image_path,
+              block_id UNIQUE, source: tourmaline|imported, source_nm,
+              created, updated, deleted_at)
+annotation_placements (annotation_id, file_sha256, page, geometry JSON in PDF
+              user space, text_start, text_end, status: exact|moved|fuzzy|orphan,
+              pdf_obj_ref)
 ```
 
-Highlights anchor by page + rects, with quote/prefix/suffix to re-find the text
-if the PDF changes.
+No ON DELETE CASCADE anywhere; deletes are soft (`deleted_at`) so export can
+remove the matching block from the note and undo can bring it back. The file
+hash is computed in Rust from the bytes it hands to the viewer.
+
+**Re-anchoring** when a new version is opened: page text hash unchanged → same
+geometry (exact); otherwise find quote + prefix/suffix in the new text, nearest
+the old page first (moved/fuzzy); otherwise orphan (shown in the sidebar, never
+silently dropped).
+
+### Decisions (agreed before phase 2)
+
+1. **New version of a paper** (same path now; same JabRef citekey from phase 4):
+   inherits the annotations automatically; highlights that can't be re-found
+   are flagged as orphans.
+2. **Write-back target**: the vault PDF itself, backed up first.
+3. **Deleting a highlight**: its block is removed from the note on the next
+   export; if other notes link to that block, ask first.
+4. **Imported annotations** (Okular etc.): owned by Tourmaline and editable.
+5. **Note text**: Tourmaline's database is the master; export warns before
+   overwriting edits made inside the managed region.
+6. **Block IDs**: `^hl-` + 6 base36 characters (`^hl-k3x9q2`), never changed.
+7. **Backups**: local only, next to the database.
 
 ## Phases
 

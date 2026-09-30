@@ -20,13 +20,13 @@ describe("reading positions", () => {
 
 describe("session", () => {
   it("round-trips", () => {
-    const s = { tabs: [{ path: "C:/a.pdf", name: "a.pdf" }], active: 0, outlineOpen: true };
+    const s = { tabs: [{ path: "C:/a.pdf", name: "a.pdf" }], active: 0, outlineOpen: true, annotationsOpen: true };
     expect(decodeSession(encodeSession(s))).toEqual(s);
   });
 
   it("drops malformed tabs and clamps the active index", () => {
     const json = JSON.stringify({ v: 1, tabs: [{ path: "a", name: "a" }, { path: 3 }, null], active: 9 });
-    expect(decodeSession(json)).toEqual({ tabs: [{ path: "a", name: "a" }], active: 0, outlineOpen: false });
+    expect(decodeSession(json)).toEqual({ tabs: [{ path: "a", name: "a" }], active: 0, outlineOpen: false, annotationsOpen: false });
     expect(decodeSession("{}")).toBeNull();
   });
 });

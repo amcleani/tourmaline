@@ -1,14 +1,23 @@
+mod annotations;
 mod db;
 mod documents;
 mod error;
+mod library;
 
 use std::path::PathBuf;
 
-use tauri::{ipc::Response, AppHandle, Manager};
+use tauri::{
+    ipc::{InvokeBody, Request, Response},
+    AppHandle, Manager,
+};
 
+use annotations::{Annotation, AnnotationEdit, Category, NewAnnotation, PageHash, PlacementUpdate};
 use db::Db;
-use documents::DocumentInfo;
-use error::Result;
+use error::{Error, Result};
+use library::{DocumentInfo, FileKey};
+
+/// The folder holding the library database and its attachments.
+struct DataDir(PathBuf);
 
 /// Runs blocking work (database, file system) off both the main thread and the
 /// async runtime. Synchronous Tauri commands run on the main thread, so a slow
@@ -16,54 +25,50 @@ use error::Result;
 async fn blocking<T, F>(app: AppHandle, work: F) -> Result<T>
 where
     T: Send + 'static,
-    F: FnOnce(&Db) -> Result<T> + Send + 'static,
+    F: FnOnce(&AppHandle, &Db) -> Result<T> + Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(move || work(&app.state::<Db>()))
+    tauri::async_runtime::spawn_blocking(move || work(&app, &app.state::<Db>()))
         .await
-        .map_err(|e| error::Error::Message(e.to_string()))?
+        .map_err(|e| Error::Message(e.to_string()))?
 }
 
-/// Records that a document was opened. The id is the SHA-256 the frontend
-/// computed from the bytes returned by `read_document`.
+/// Reads a PDF, records it in the library and returns one binary response:
+/// the `DocumentInfo` as JSON (length-prefixed) followed by the file bytes.
+/// Hashing here, on exactly the bytes returned, keeps the id and the
+/// displayed file in step.
 #[tauri::command]
-async fn record_open(app: AppHandle, path: PathBuf, id: String, size: u64) -> Result<DocumentInfo> {
-    blocking(app, move |db| {
-        let mut info = documents::describe(&path, id, size)?;
-        db.record_open(&info)?;
-        info.last_position = db.last_position(&info.id)?;
-        Ok(info)
+async fn open_document(app: AppHandle, path: PathBuf) -> Result<Response> {
+    blocking(app, move |_, db| {
+        let file = documents::read(&path)?;
+        let info = db.record_open(
+            &FileKey { sha256: &file.sha256, path: &file.path, name: &file.name, size: file.bytes.len() as u64 },
+            db::now_millis(),
+        )?;
+        let header = serde_json::to_string(&info).map_err(|e| Error::Message(e.to_string()))?;
+        Ok(Response::new(documents::pack(&header, &file.bytes)))
     })
     .await
 }
 
 #[tauri::command]
-async fn save_position(app: AppHandle, id: String, position: String) -> Result<()> {
-    blocking(app, move |db| db.save_position(&id, &position)).await
+async fn save_position(app: AppHandle, work_id: String, position: String) -> Result<()> {
+    blocking(app, move |_, db| db.save_position(&work_id, &position)).await
 }
 
 #[tauri::command]
 async fn get_state(app: AppHandle, key: String) -> Result<Option<String>> {
-    blocking(app, move |db| db.get_state(&key)).await
+    blocking(app, move |_, db| db.get_state(&key)).await
 }
 
 #[tauri::command]
 async fn set_state(app: AppHandle, key: String, value: String) -> Result<()> {
-    blocking(app, move |db| db.set_state(&key, &value)).await
+    blocking(app, move |_, db| db.set_state(&key, &value)).await
 }
 
-/// Returns the raw file bytes as a binary IPC response (no JSON encoding).
-#[tauri::command]
-async fn read_document(path: PathBuf) -> Result<Response> {
-    let bytes = tauri::async_runtime::spawn_blocking(move || documents::read(&path))
-        .await
-        .map_err(|e| error::Error::Message(e.to_string()))??;
-    Ok(Response::new(bytes))
-}
-
-/// Recently opened documents whose files still exist.
+/// Recently opened papers whose files still exist.
 #[tauri::command]
 async fn recent_documents(app: AppHandle, limit: u32) -> Result<Vec<DocumentInfo>> {
-    blocking(app, move |db| {
+    blocking(app, move |_, db| {
         // Ask for extra rows so files that have since been deleted don't shrink the list.
         let docs = db.recent(limit.saturating_mul(2))?;
         Ok(docs
@@ -71,6 +76,98 @@ async fn recent_documents(app: AppHandle, limit: u32) -> Result<Vec<DocumentInfo
             .filter(|d| std::path::Path::new(&d.path).exists())
             .take(limit as usize)
             .collect())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn list_annotations(app: AppHandle, work_id: String, file_id: String) -> Result<Vec<Annotation>> {
+    blocking(app, move |_, db| db.list_annotations(&work_id, &file_id)).await
+}
+
+#[tauri::command]
+async fn create_annotation(app: AppHandle, annotation: NewAnnotation) -> Result<Annotation> {
+    blocking(app, move |_, db| db.create_annotation(&annotation)).await
+}
+
+#[tauri::command]
+async fn update_annotation(app: AppHandle, id: String, file_id: String, edit: AnnotationEdit) -> Result<Annotation> {
+    blocking(app, move |_, db| db.update_annotation(&id, &file_id, &edit)).await
+}
+
+#[tauri::command]
+async fn delete_annotation(app: AppHandle, id: String) -> Result<()> {
+    blocking(app, move |_, db| db.delete_annotation(&id)).await
+}
+
+#[tauri::command]
+async fn restore_annotation(app: AppHandle, id: String, file_id: String) -> Result<Annotation> {
+    blocking(app, move |_, db| db.restore_annotation(&id, &file_id)).await
+}
+
+#[tauri::command]
+async fn save_placements(
+    app: AppHandle,
+    file_id: String,
+    updates: Vec<PlacementUpdate>,
+    page_hashes: Vec<PageHash>,
+) -> Result<()> {
+    blocking(app, move |_, db| db.save_placements(&file_id, &updates, &page_hashes)).await
+}
+
+#[tauri::command]
+async fn list_categories(app: AppHandle) -> Result<Vec<Category>> {
+    blocking(app, move |_, db| db.list_categories()).await
+}
+
+#[tauri::command]
+async fn save_categories(app: AppHandle, categories: Vec<Category>) -> Result<Vec<Category>> {
+    blocking(app, move |_, db| db.save_categories(&categories)).await
+}
+
+/// Only annotation ids (UUIDs) name attachment files, so a request can't
+/// reach outside the attachments folder.
+fn attachment_path(app: &AppHandle, id: &str) -> Result<(PathBuf, String)> {
+    let id = uuid::Uuid::parse_str(id).map_err(|_| Error::Message(format!("invalid annotation id {id:?}")))?;
+    let relative = format!("attachments/{}.png", id.hyphenated());
+    Ok((app.state::<DataDir>().0.join(&relative), relative))
+}
+
+/// Saves the PNG of an area annotation. The body is the raw PNG; the
+/// annotation id comes in the `annotation-id` header.
+#[tauri::command]
+async fn save_attachment(app: AppHandle, request: Request<'_>) -> Result<String> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err(Error::Message("expected raw PNG bytes".into()));
+    };
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(Error::Message("attachment is not a PNG".into()));
+    }
+    let bytes = bytes.clone();
+    let id = request
+        .headers()
+        .get("annotation-id")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| Error::Message("missing annotation-id header".into()))?
+        .to_owned();
+    blocking(app, move |app, db| {
+        if !db.annotation_exists(&id)? {
+            return Err(Error::Message(format!("no annotation {id}")));
+        }
+        let (path, relative) = attachment_path(app, &id)?;
+        std::fs::create_dir_all(path.parent().expect("attachments folder"))?;
+        std::fs::write(&path, &bytes)?;
+        db.set_annotation_image(&id, &relative)?;
+        Ok(relative)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_attachment(app: AppHandle, id: String) -> Result<Response> {
+    blocking(app, move |app, _| {
+        let (path, _) = attachment_path(app, &id)?;
+        Ok(Response::new(std::fs::read(path)?))
     })
     .await
 }
@@ -99,15 +196,25 @@ pub fn run() {
             let path = dir.join("library.sqlite3");
             eprintln!("Tourmaline library database: {}", path.display());
             app.manage(Db::open(&path)?);
+            app.manage(DataDir(dir));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            record_open,
-            read_document,
+            open_document,
             recent_documents,
             save_position,
             get_state,
-            set_state
+            set_state,
+            list_annotations,
+            create_annotation,
+            update_annotation,
+            delete_annotation,
+            restore_annotation,
+            save_placements,
+            list_categories,
+            save_categories,
+            save_attachment,
+            read_attachment
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tourmaline");
