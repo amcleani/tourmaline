@@ -1,0 +1,10 @@
+# LaTeX artifacts if pdflatex is run here by hand (the build script uses a temp dir).
+*.aux
+*.log
+*.out
+*.toc
+*.pdf
+*.png
+*.synctex.gz
+*.fls
+*.fdb_latexmk

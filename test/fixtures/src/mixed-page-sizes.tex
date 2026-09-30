@@ -1,0 +1,71 @@
+% Fixture: mixed-page-sizes
+% Four pages with different MediaBoxes and orientations:
+%   1. A4 portrait            595.28 x 841.89 pt
+%   2. A4 landscape           841.89 x 595.28 pt (a real landscape MediaBox)
+%   3. US Letter portrait     612    x 792    pt
+%   4. US Letter portrait MediaBox with /Rotate 90 (pdflscape), so a viewer
+%      shows it as 792 x 612 pt with the text running left to right.
+% KOMA-Script's typearea changes the paper size between pages
+% (\KOMAoptions + \recalctypearea; pagesize writes the PDF page size).
+\documentclass[10pt,paper=a4,pagesize,DIV=12]{scrartcl}
+\input{fixture-common}
+\usepackage{pdflscape}
+\usepackage{tikz}
+\pagestyle{plain}
+
+\begin{document}
+
+% ------------------------------------------------------------------- page 1
+\section{A portrait A4 page}
+
+This first page uses the international A4 size in portrait orientation. It
+is the most common page size for papers written outside North America, and
+the size that most layout code implicitly assumes.
+
+A reader that computes page offsets from the first page alone will place
+every later page of this document in the wrong position, because none of the
+following pages has the same dimensions as this one.
+
+\clearpage
+% ------------------------------------------------------------------- page 2
+\KOMAoptions{paper=landscape}
+\recalctypearea
+\section{A landscape A4 page}
+
+This second page is wider than it is tall. Wide tables and large diagrams
+are often set on such pages in appendices and supplementary material.
+
+\begin{center}
+  \begin{tikzpicture}[x=10mm,y=10mm]
+    \draw (0,0) rectangle (22,4);
+    \foreach \x in {2,6,10,14,18} \draw (\x,0.5) rectangle (\x+2,3.5);
+  \end{tikzpicture}
+\end{center}
+
+The page keeps its landscape shape in the file itself, so no rotation is
+needed to display it the right way up.
+
+\clearpage
+% ------------------------------------------------------------------- page 3
+\KOMAoptions{paper=letter,paper=portrait}
+\recalctypearea
+\section{A portrait US Letter page}
+
+This third page uses the North American letter size, which is slightly
+wider and shorter than A4. Documents assembled from several sources often
+mix the two sizes without anyone noticing.
+
+\clearpage
+% ------------------------------------------------------------------- page 4
+\begin{landscape}
+\section{A rotated letter page}
+
+This fourth page is stored as a portrait letter page with a rotation of
+ninety degrees, the way many tools produce landscape pages. Its text runs
+along the long edge of the paper once the rotation is applied.
+
+The width and height reported for this page therefore depend on whether the
+rotation is taken into account.
+\end{landscape}
+
+\end{document}

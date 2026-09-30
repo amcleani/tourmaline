@@ -12,6 +12,7 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "build:fixtures": "node scripts/build-fixtures.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

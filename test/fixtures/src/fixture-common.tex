@@ -1,0 +1,12 @@
+% Shared settings for every Tourmaline fixture. \input this right after
+% \documentclass.
+%
+% Reproducible output: no creation date, no random trailer id, no pdfTeX
+% banner, so rebuilding with the same TeX Live gives byte-identical PDFs.
+\pdfinfoomitdate=1
+\pdftrailerid{}
+\pdfsuppressptexinfo=-1
+% Map every glyph (including the fi/fl/ffi ligatures) to Unicode so that
+% text extraction does not depend on font-specific guesswork.
+\input{glyphtounicode}
+\pdfgentounicode=1
