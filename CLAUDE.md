@@ -125,8 +125,13 @@ pdf.js 6: `render({ canvas, viewport })`, documents are freed with
 (`src/notes/NoteEditor.tsx`) with formulas previewed in place
 (`mathPreview.ts`, a state field because display math replaces line breaks)
 and shown rendered elsewhere by `NoteView` (markdown-it, `notes/markdown.ts`).
-Both find math with `src/math/delimiters.ts` (Obsidian's `$`/`$$` rules) so
-they always agree. MathJax 4 is used directly (`src/math/engine.ts`, lazily
+Math is a node of each markdown parser (`notes/mathSyntax.ts` for
+CodeMirror's, an inline rule in `notes/markdown.ts` for markdown-it), so each
+parser decides what is code, a link or a quote; both ask `mathAt` in
+`src/math/delimiters.ts` for Obsidian's `$`/`$$` rules, and
+`test/notes.test.ts` checks they agree case by case. Never find math with a
+separate scan of the raw text. PDF text selections are only those inside a
+`.textLayer` (a note editor on a popover is inside the viewer too). MathJax 4 is used directly (`src/math/engine.ts`, lazily
 loaded; `@mathjax/src/js/...` imports, CHTML output), set up like the user's
 Obsidian (`settings.ts`): the built-in MathJax 3 look (TeX font, its default
 and autoloaded packages, never `html`/`require`) unless latest-mathjax is

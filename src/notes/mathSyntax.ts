@@ -18,7 +18,7 @@ export const mathSyntax: MarkdownConfig = {
         if (next !== DOLLAR) return -1;
         const span = mathAt(cx.slice(pos, cx.end), 0);
         if (span) return cx.addElement(cx.elt("Math", pos, pos + span.to));
-        // An unclosed $$ is plain text as a pair, as in findMath.
+        // An unclosed $$ is plain text as a pair, as in the sidebar (notes/markdown.ts).
         return cx.char(pos + 1) === DOLLAR ? pos + 2 : -1;
       },
     },

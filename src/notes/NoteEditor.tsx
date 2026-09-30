@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { autocompletion } from "@codemirror/autocomplete";
+import { autocompletion, nextSnippetField, prevSnippetField, snippetKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -74,7 +74,9 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
             ]),
           ),
           history(),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
+          // Escape belongs to the popover (close), except to close the completion list.
+          keymap.of([...defaultKeymap.filter((b) => b.key !== "Escape"), ...historyKeymap]),
+          snippetKeymap.of([{ key: "Tab", run: nextSnippetField, shift: prevSnippetField }]),
           markdown({ extensions: [mathSyntax] }),
           syntaxHighlighting(highlight),
           mathPreview(),

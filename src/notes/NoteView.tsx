@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { mathGeneration, onMathChange, renderMath } from "../math/engine";
 import { renderNote } from "./markdown";
 
+function blockLinks(e: React.MouseEvent) {
+  if ((e.target as HTMLElement).closest("a")) e.preventDefault();
+}
+
 /** Re-renders when the math settings (preamble, font) change. */
 export function useMathGeneration(): number {
   return useSyncExternalStore(onMathChange, mathGeneration);
@@ -33,10 +37,9 @@ export function NoteView({ text, className }: { text: string; className?: string
       ref={ref}
       className={`note-view${className ? ` ${className}` : ""}`}
       dangerouslySetInnerHTML={{ __html: rendered.html }}
-      // Links would navigate the app's own window away.
-      onClick={(e) => {
-        if ((e.target as HTMLElement).closest("a")) e.preventDefault();
-      }}
+      // Links would navigate the app's own window away (middle-click: open a new one).
+      onClick={blockLinks}
+      onAuxClick={blockLinks}
     />
   );
 }

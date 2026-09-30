@@ -1,10 +1,12 @@
 // Live preview of math in the note editor, like Obsidian's: each formula is
 // drawn in place with MathJax, and turns back into its TeX while the cursor
-// is in it (or next to it), so moving into a formula edits it.
+// is in it (or next to it), so moving into a formula edits it. Formulas are
+// the markdown parser's Math nodes (mathSyntax.ts), so code stays code.
 
 import { StateEffect, StateField, type EditorState, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
-import { findMath } from "../math/delimiters";
+import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
+import type { SyntaxNode } from "@lezer/common";
 import { mathGeneration, renderMath } from "../math/engine";
 
 class MathWidget extends WidgetType {
@@ -20,13 +22,16 @@ class MathWidget extends WidgetType {
     return other.tex === this.tex && other.display === this.display && other.generation === this.generation;
   }
 
-  toDOM() {
+  toDOM(view: EditorView) {
     const el = document.createElement("span");
     el.className = this.display ? "cm-math display" : "cm-math";
     // The source shows until MathJax is ready.
     el.textContent = this.display ? `$$${this.tex}$$` : `$${this.tex}$`;
     renderMath(this.tex, this.display)
-      .then((node) => el.replaceChildren(node))
+      .then((node) => {
+        el.replaceChildren(node);
+        view.requestMeasure(); // the formula's height differs from its source's
+      })
       .catch((e) => console.error("Could not render math", e));
     return el;
   }
@@ -48,10 +53,41 @@ interface PreviewState {
 
 const sourceMark = Decoration.mark({ class: "cm-math-source" });
 
+interface Formula {
+  from: number;
+  to: number;
+  tex: string;
+  display: boolean;
+}
+
+function inQuote(node: SyntaxNode): boolean {
+  for (let n: SyntaxNode | null = node.parent; n; n = n.parent) if (n.name === "Blockquote") return true;
+  return false;
+}
+
+/** The formulas in the note, with their TeX (exported for tests). */
+export function formulas(state: EditorState): Formula[] {
+  const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
+  const out: Formula[] = [];
+  tree.iterate({
+    enter: (node) => {
+      if (node.name !== "Math") return;
+      const raw = state.sliceDoc(node.from, node.to);
+      const display = raw.startsWith("$$");
+      let tex = display ? raw.slice(2, -2) : raw.slice(1, -1);
+      // In a quote or callout, later lines of the formula start with "> ".
+      if (inQuote(node.node)) tex = tex.replace(/\n[ \t]*(?:>[ \t]?)+/g, "\n");
+      out.push({ from: node.from, to: node.to, tex, display });
+      return false;
+    },
+  });
+  return out;
+}
+
 function decorate(state: EditorState, focused: boolean): DecorationSet {
   const generation = mathGeneration();
   const ranges = [];
-  for (const span of findMath(state.doc.toString())) {
+  for (const span of formulas(state)) {
     const editing = focused && state.selection.ranges.some((r) => r.from <= span.to && r.to >= span.from);
     ranges.push(
       editing

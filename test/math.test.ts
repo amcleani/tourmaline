@@ -1,46 +1,10 @@
 import { CompletionContext } from "@codemirror/autocomplete";
 import { EditorState } from "@codemirror/state";
 import { texCompletionSource } from "../src/math/completions";
-import { findMath } from "../src/math/delimiters";
 import { parseMacros } from "../src/math/preamble";
 import { configureMath, DEFAULT_MATH, renderMath, texNames } from "../src/math/engine";
 
 import preamble from "./fixtures/math/preamble.sty?raw";
-const tex = (text: string) => findMath(text).map((s) => (s.display ? `$$${s.tex}$$` : s.tex));
-
-describe("findMath", () => {
-  it("finds inline and display math", () => {
-    expect(tex("Let $x^2$ be\n$$\n\\int f\n$$\nand $y$.")).toEqual(["x^2", "$$\n\\int f\n$$", "y"]);
-    const [s] = findMath("a $x$ b");
-    expect([s.from, s.to]).toEqual([2, 5]);
-  });
-
-  it("follows Obsidian's rules for inline dollars", () => {
-    expect(tex("costs $5 and $10")).toEqual([]);
-    expect(tex("$ x$ and $x $")).toEqual([]);
-    expect(tex("a \\$ sign and $y$")).toEqual(["y"]);
-    expect(tex("$a \\$ b$")).toEqual(["a \\$ b"]);
-    expect(tex("$a$5 then $b$")).toEqual(["a$5 then $b"]);
-  });
-
-  it("does not cross a blank line", () => {
-    expect(tex("$a\n\nb$")).toEqual([]);
-    expect(tex("$a\nb$")).toEqual(["a\nb"]);
-  });
-
-  it("skips code", () => {
-    expect(tex("`$x$` and $y$")).toEqual(["y"]);
-    expect(tex("``a ` $x$`` $y$")).toEqual(["y"]);
-    expect(tex("```\n$x$\n```\n$y$")).toEqual(["y"]);
-    expect(tex("~~~tex\n$$x$$\n")).toEqual([]);
-  });
-
-  it("leaves unclosed delimiters as text", () => {
-    expect(tex("$$x")).toEqual([]);
-    expect(tex("$x")).toEqual([]);
-  });
-});
-
 describe("parseMacros", () => {
   const macros = new Map(parseMacros(preamble).map((m) => [m.name, m]));
 

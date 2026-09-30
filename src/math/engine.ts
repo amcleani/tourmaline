@@ -134,14 +134,22 @@ async function build(config: MathConfig, previous: Engine | null): Promise<Engin
 export async function configureMath(config: MathConfig): Promise<string | null> {
   const previous = engine;
   const next = (async () => build(config, previous ? await previous.catch(() => null) : null))();
-  engine = next;
+  engine = forgetOnFailure(next);
   generation++;
   for (const l of listeners) l();
   return (await next).preambleError;
 }
 
 function current(): Promise<Engine> {
-  return (engine ??= build(DEFAULT_MATH, null));
+  return (engine ??= forgetOnFailure(build(DEFAULT_MATH, null)));
+}
+
+/** A failed build (say, a chunk that didn't load) is retried on the next use. */
+function forgetOnFailure(build: Promise<Engine>): Promise<Engine> {
+  build.catch(() => {
+    if (engine === build) engine = null;
+  });
+  return build;
 }
 
 /** Changes whenever the settings do, so rendered formulas know to redraw. */

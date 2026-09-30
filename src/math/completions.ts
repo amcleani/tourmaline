@@ -86,8 +86,9 @@ export async function texCompletionSource(context: CompletionContext): Promise<C
   if (env) {
     return { from: env.text.indexOf("{") + 1 + env.from, options: (await completions()).environments, validFor: /^[a-zA-Z]*\*?$/ };
   }
-  const word = context.matchBefore(/\\[a-zA-Z]*/);
-  // `\\` is a TeX line break, not the start of a command.
+  // A lone `\` waits for a letter (or Ctrl+Space): `text\` then Enter is a
+  // markdown line break, and `\\` is a TeX one.
+  const word = context.matchBefore(context.explicit ? /\\[a-zA-Z]*/ : /\\[a-zA-Z]+/);
   if (!word || context.state.sliceDoc(word.from - 1, word.from) === "\\") return null;
   return { from: word.from, options: (await completions()).macros, validFor: /^\\[a-zA-Z]*$/ };
 }

@@ -14,11 +14,13 @@ export function useVaultMath(vault: string | null, report: (message: string) => 
     if (!vault) return;
     let cancelled = false;
     let applied = "";
+    let failed = "";
     let lastLoad = 0;
     const load = async () => {
       lastLoad = Date.now();
       try {
         const settings = await readMathSettings(vault);
+        failed = "";
         const key = JSON.stringify(settings);
         if (cancelled || key === applied) return;
         applied = key;
@@ -26,7 +28,10 @@ export function useVaultMath(vault: string | null, report: (message: string) => 
         const error = await configureMath(mathConfigFor(settings));
         if (error && !cancelled) report(`The math preamble has an error, so macros after it are missing: ${error}`);
       } catch (e) {
-        if (!cancelled) report(`Could not read the vault's math settings: ${e instanceof Error ? e.message : String(e)}`);
+        // Say it once, not on every return to the window while the vault is unavailable.
+        const message = `Could not read the vault's math settings: ${e instanceof Error ? e.message : String(e)}`;
+        if (!cancelled && message !== failed) report(message);
+        failed = message;
       }
     };
     void load();

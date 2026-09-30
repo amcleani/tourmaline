@@ -266,7 +266,7 @@ export function PdfViewer({
     const measure = () => {
       const sel = window.getSelection();
       const el = scrollRef.current;
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !el || !el.contains(sel.anchorNode)) return emit(null);
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !el || !isPageTextSelection(sel, el)) return emit(null);
       if (pointerDown) return;
       const rects = [...sel.getRangeAt(0).getClientRects()].filter((r) => r.width > 0 && r.height > 0);
       const lastRect = rects[rects.length - 1];
@@ -346,7 +346,8 @@ export function PdfViewer({
       },
       captureSelection() {
         const sel = window.getSelection();
-        if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !scrollRef.current?.contains(sel.anchorNode)) return null;
+        const el = scrollRef.current;
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !el || !isPageTextSelection(sel, el)) return null;
         return captureSelection(sel.getRangeAt(0), [...mountedPages.current.values()]);
       },
       clearSelection() {
@@ -751,4 +752,18 @@ function CaptureLayer({
       {(rect ?? keyRect) && <div className="capture-rect" style={(rect ?? keyRect)!} />}
     </div>
   );
+}
+
+/**
+ * Whether a selection is PDF text in this viewer: both ends in a page's text
+ * layer. Text selected in a note editor on a popover (also inside the viewer)
+ * is not.
+ */
+function isPageTextSelection(sel: Selection, viewer: HTMLElement): boolean {
+  const inTextLayer = (node: Node | null) => {
+    const element = node instanceof Element ? node : node?.parentElement;
+    const layer = element?.closest(".textLayer");
+    return !!layer && viewer.contains(layer);
+  };
+  return inTextLayer(sel.anchorNode) && inTextLayer(sel.focusNode);
 }

@@ -1,76 +1,56 @@
 // Markdown for notes, rendered like Obsidian's reading view: soft line breaks
-// kept, no raw HTML, and math found by the same rules as the editor
-// (math/delimiters.ts). Formulas come out as empty placeholders showing their
-// source; NoteView fills them with MathJax.
+// kept, no raw HTML. Math is an inline rule using the same `$` rules as the
+// editor (math/delimiters.ts), so markdown-it itself decides what is code,
+// a link or a quote. Formulas come out as placeholders showing their source;
+// NoteView fills them with MathJax.
 
-import MarkdownIt, { type StateCore, type Token } from "markdown-it";
-import { findMath, type MathSpan } from "../math/delimiters";
+import MarkdownIt from "markdown-it";
+import { mathAt } from "../math/delimiters";
 
-// The math is swapped for private-use markers before markdown sees it, so
-// markdown can't mangle the TeX (underscores, asterisks, backslashes).
-const MARKER = /\uE000(\d+)\uE001/g;
+export interface NoteMath {
+  tex: string;
+  display: boolean;
+}
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: true });
 
-md.core.ruler.push("tourmaline_math", (state) => {
-  const spans = (state.env as { math: MathSpan[] }).math;
-  const source = (text: string) => text.replace(MARKER, (_, i) => delimited(spans[Number(i)]));
-  for (const block of state.tokens) {
-    if (block.type !== "inline" || !block.children) continue;
-    const out: Token[] = [];
-    for (const tok of block.children) {
-      if (tok.attrs) tok.attrs = tok.attrs.map(([k, v]) => [k, typeof v === "string" ? source(v) : v]);
-      if (tok.type !== "text" || !tok.content.includes("\uE000")) {
-        out.push(tok);
-        continue;
-      }
-      let last = 0;
-      for (const m of tok.content.matchAll(MARKER)) {
-        if (m.index > last) out.push(textToken(state, tok.content.slice(last, m.index)));
-        const math = new state.Token("math", "", 0);
-        math.meta = { index: Number(m[1]) };
-        out.push(math);
-        last = m.index + m[0].length;
-      }
-      if (last < tok.content.length) out.push(textToken(state, tok.content.slice(last)));
-    }
-    block.children = out;
+// After `escape`, so `\$` stays a dollar sign; `$` ends markdown-it's text runs.
+md.inline.ruler.after("escape", "math", (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x24 /* $ */) return false;
+  const span = mathAt(state.src, state.pos);
+  if (!span) {
+    // An unclosed $$ is plain text as a pair (so its second $ opens nothing).
+    if (state.src.charCodeAt(state.pos + 1) !== 0x24) return false;
+    if (!silent) state.push("text", "", 0).content = "$$";
+    state.pos += 2;
+    return true;
   }
+  if (!silent) {
+    const token = state.push("math", "", 0);
+    token.meta = { tex: span.tex, display: span.display } satisfies NoteMath;
+  }
+  state.pos = span.to;
+  return true;
 });
 
-function textToken(state: StateCore, content: string): Token {
-  const t = new state.Token("text", "", 0);
-  t.content = content;
-  return t;
-}
-
 md.renderer.rules.math = (tokens, idx, _options, env) => {
-  const i = (tokens[idx].meta as { index: number }).index;
-  const span = (env as { math: MathSpan[] }).math[i];
-  return `<span class="note-math${span.display ? " display" : ""}" data-math="${i}">${md.utils.escapeHtml(
-    delimited(span),
+  const math = tokens[idx].meta as unknown as NoteMath;
+  const list = (env as { math: NoteMath[] }).math;
+  list.push(math);
+  const delim = math.display ? "$$" : "$";
+  return `<span class="note-math${math.display ? " display" : ""}" data-math="${list.length - 1}">${md.utils.escapeHtml(
+    delim + math.tex + delim,
   )}</span>`;
 };
-
-function delimited(span: MathSpan): string {
-  const delim = span.display ? "$$" : "$";
-  return delim + span.tex + delim;
-}
 
 export interface RenderedNote {
   html: string;
   /** The formulas, indexed by the placeholders' `data-math`. */
-  math: MathSpan[];
+  math: NoteMath[];
 }
 
 export function renderNote(text: string): RenderedNote {
-  const math = findMath(text);
-  let marked = "";
-  let last = 0;
-  math.forEach((s, i) => {
-    marked += text.slice(last, s.from) + `\uE000${i}\uE001`;
-    last = s.to;
-  });
-  marked += text.slice(last);
-  return { html: md.render(marked, { math }), math };
+  const env = { math: [] as NoteMath[] };
+  const html = md.render(text, env);
+  return { html, math: env.math };
 }
