@@ -933,7 +933,12 @@ export function App() {
       }
       const command = registry.commandForEvent(e);
       if (!command) return;
-      if (isTypingTarget(e.target) && command.shortcut && isTextEditingShortcut(command.shortcut)) return;
+      if (command.shortcut && isTextEditingShortcut(command.shortcut)) {
+        if (isTypingTarget(e.target)) return;
+        // Ctrl+C, Ctrl+Z... keep their usual meaning when the command can't run
+        // (Ctrl+C with text selected in the page copies the text).
+        if (!registry.isEnabled(command.id)) return;
+      }
       e.preventDefault();
       registry.execute(command.id, "keyboard");
     };

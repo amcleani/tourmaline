@@ -348,9 +348,11 @@ export function appCommands(a: AppActions): Command[] {
       id: "annot.copyMarkdown",
       title: "Copy as Markdown",
       keywords: ["obsidian", "callout", "quote", "clipboard", "export", "note"],
-      shortcut: "Mod+Shift+C",
+      // Ctrl+C copies selected text as usual; with an annotation selected
+      // (and no text), it copies the annotation.
+      shortcut: "Mod+C",
       menu: { menu: "Annotate", group: 2, order: 2 },
-      when: annotationSelected,
+      when: (ctx) => annotationSelected(ctx) && !ctx.hasTextSelection,
       run: a.copyMarkdown,
     },
     {

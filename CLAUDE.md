@@ -65,6 +65,8 @@ product requirement. New context the `when` conditions need goes in
   text fields for editing keys (Home/End/arrows...) and text-editing
   shortcuts (`isTextEditingShortcut`: Ctrl+Z/Y/A/C/X/V), which are also never
   native accelerators. So Undo is Ctrl+Z everywhere except inside a note field.
+  When such a command can't run, the key keeps its usual meaning: Ctrl+C
+  copies the selected annotation as Markdown, else the selected text.
 - Plain-letter shortcuts (H, N, A, 1-9, Delete) are fine: they don't fire in
   text fields. Escape is one command (`edit.cancel`) that closes/cancels
   whatever is open; a shortcut can belong to only one command.
