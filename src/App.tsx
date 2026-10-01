@@ -6,6 +6,7 @@ import { isTextEditingShortcut } from "./commands/shortcuts";
 import { colourOf, type Annotation, type Category } from "./annotations/types";
 import { useAnnotations } from "./annotations/useAnnotations";
 import { usePdfImport } from "./annotations/usePdfImport";
+import { annotationsToWrite } from "./annotations/writeback";
 import { looksLikeSamePaper, textSample } from "./annotations/version";
 import { DEFAULT_ZOOM, decodePosition, decodeSession, encodePosition, encodeSession } from "./app/session";
 import { nextZoom, type Anchor } from "./pdf/layout";
@@ -30,6 +31,7 @@ import {
   openPdfFromUrl,
   pickAndOpenPdf,
   quitApp,
+  saveAnnotationsToPdf,
   recentDocuments,
   saveCategories,
   savedVault,
@@ -59,6 +61,7 @@ import { SelectionToolbar } from "./ui/SelectionToolbar";
 import { ShortcutsDialog } from "./ui/ShortcutsDialog";
 import { TabBar } from "./ui/TabBar";
 import { VersionDialog } from "./ui/VersionDialog";
+import { WriteBackDialog } from "./ui/WriteBackDialog";
 import { Toolbar } from "./ui/Toolbar";
 import { Welcome } from "./ui/Welcome";
 
@@ -88,7 +91,7 @@ interface Tab {
   citekeyDeclined: string | null;
 }
 
-type Dialog = "palette" | "shortcuts" | "goto" | "recent" | "categories" | "entry" | null;
+type Dialog = "palette" | "shortcuts" | "goto" | "recent" | "categories" | "entry" | "writeback" | null;
 
 const SAVE_POSITION_MS = 800;
 let tabCounter = 0;
@@ -731,6 +734,7 @@ export function App() {
         category: categories.find((c) => c.id === a.categoryId),
         pageLabel: pageLabelOf(tab, a),
         entry: entry ? citationVariables(entry) : undefined,
+        fileName: tab?.name,
       });
       await copyText(markdown);
       setNotice("Copied as Markdown: paste it into a note");
@@ -755,6 +759,35 @@ export function App() {
     }
   };
 
+  // ---- Saving annotations into the PDF ----------------------------------------
+
+  /** Whether the user said not to ask before writing into PDFs. */
+  const [writeBackConfirmed, setWriteBackConfirmed] = useState(false);
+  useEffect(() => {
+    getState("writeback.confirmed")
+      .then((v) => setWriteBackConfirmed(v === "yes"))
+      .catch(() => {});
+  }, []);
+
+  const saveIntoPdf = async () => {
+    const tab = latest.current.activeTab;
+    if (!tab?.path || !tab.fileId || !tab.workId || tab.pendingVersion) return;
+    try {
+      // Notes still being typed, and every queued change, go in too.
+      await Promise.all([...draftFlushers.current].map((flush) => flush()));
+      await latest.current.notes.settled();
+      const list = annotationsToWrite(latest.current.notes.current(), categories);
+      await saveAnnotationsToPdf(tab.path, tab.fileId, tab.workId, list);
+      // Show the file as it now is (same pages; the annotations are now in it).
+      const ready = await prepare(await openPdfAtPath(tab.path));
+      installReady(tab.key, ready);
+      refreshRecent();
+      setNotice(`Saved ${list.length === 1 ? "1 annotation" : `${list.length} annotations`} into ${tab.name}`);
+    } catch (e) {
+      reportError("Could not save the annotations into the PDF", e);
+    }
+  };
+
   // ---- Commands --------------------------------------------------------------
 
   useEffect(() => {
@@ -770,6 +803,7 @@ export function App() {
       canRedo: notes.canRedo,
       hasBibliography: bibliography !== null,
       hasCitekey: !!activeTab?.citekey,
+      canSaveIntoPdf: isTauri() && !!activeTab?.path && !versionPending,
     };
     registry.notifyContextChanged();
   }, [
@@ -785,6 +819,7 @@ export function App() {
     notes.canRedo,
     bibliography,
     activeTab?.citekey,
+    activeTab?.path,
     registry,
   ]);
 
@@ -799,6 +834,8 @@ export function App() {
     highlightSelection,
     copyAnnotation,
     openLiteratureNote,
+    saveIntoPdf,
+    writeBackConfirmed,
   });
   latest.current = {
     activeTab,
@@ -810,6 +847,8 @@ export function App() {
     highlightSelection,
     copyAnnotation,
     openLiteratureNote,
+    saveIntoPdf,
+    writeBackConfirmed,
   };
 
   useEffect(() => {
@@ -909,6 +948,10 @@ export function App() {
       },
       editCategories: () => setDialog("categories"),
       linkEntry: () => setDialog("entry"),
+      saveIntoPdf: () => {
+        if (latest.current.writeBackConfirmed) void latest.current.saveIntoPdf();
+        else setDialog("writeback");
+      },
       openNote: () => latest.current.openLiteratureNote(),
       copyMarkdown: () => latest.current.copyAnnotation("markdown"),
       copyLink: () => latest.current.copyAnnotation("link"),
@@ -1153,6 +1196,21 @@ export function App() {
               })
               .catch((e) => reportError("Could not separate the papers", e));
           }}
+        />
+      )}
+      {dialog === "writeback" && activeTab && (
+        <WriteBackDialog
+          name={activeTab.name}
+          count={annotationsToWrite(notes.annotations, categories).length}
+          onSave={(dontAskAgain) => {
+            setDialog(null);
+            if (dontAskAgain) {
+              setWriteBackConfirmed(true);
+              void setState("writeback.confirmed", "yes").catch((e) => console.error("Could not save the setting", e));
+            }
+            void saveIntoPdf();
+          }}
+          onCancel={() => setDialog(null)}
         />
       )}
       {dialog === "entry" && bibliography && activeTab && (

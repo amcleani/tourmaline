@@ -168,6 +168,22 @@ build registers the scheme for the current user at startup) and are resolved
 by `locate_work`. The only external URLs the app opens are `obsidian://`
 (opener scope in capabilities).
 
+**Annotations in the PDF file.** `src/annotations/importPdf.ts` turns the
+PDF's own annotations (pdf.js `getAnnotations`) into Tourmaline annotations;
+`/NM` comes from Rust (`pdf_annotations.rs`, lopdf) because pdf.js doesn't
+expose it. `usePdfImport` runs it once per file per session after the
+annotations load (`import_annotations` skips keys the work already has,
+deleted too; `imported_keys` also returns `nm:<id>` for every annotation so
+write-back's own output isn't imported back) and returns the pdf.js ids to
+hide: `hidePdfAnnotations` sets `noView`/`noPrint` in the document's
+annotation storage and pages render with `AnnotationMode.ENABLE_STORAGE`
+(captures too). Write-back is `writeback.rs` (lopdf `IncrementalDocument`;
+the output must start with the original bytes) behind
+`save_annotations_to_pdf`, which checks the file is still the open version,
+backs it up, writes beside it and renames; `record_writeback` adds the new
+version with copied placements and their `pdf_obj_ref`. Never test it on
+the vault: use copies in `.dev-data/`.
+
 **Security.** CSP is set in `src-tauri/tauri.conf.json` (includes
 `'wasm-unsafe-eval'` for pdf.js decoders); window permissions are in
 `src-tauri/capabilities/default.json` — add a permission there when using a new

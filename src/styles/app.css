@@ -442,6 +442,8 @@ kbd {
 .palette-title mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; }
 .palette-empty { padding: 12px; color: var(--text-muted); }
 
+label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+
 /* Bibliography entry picker */
 .entry-picker { width: min(720px, calc(100vw - 32px)); }
 .entry-picker-hint { margin: 0; padding: 6px 14px; font-size: 0.85em; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }

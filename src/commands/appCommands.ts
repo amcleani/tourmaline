@@ -4,6 +4,7 @@ export interface AppActions {
   openFile: () => Promise<void>;
   openRecent: () => void;
   closeTab: () => void;
+  saveIntoPdf: () => void;
   chooseVault: () => Promise<void>;
   linkEntry: () => void;
   openNote: () => Promise<void>;
@@ -75,6 +76,15 @@ export function appCommands(a: AppActions): Command[] {
       // Any tab, including one whose file couldn't be opened.
       when: (ctx) => ctx.tabCount > 0,
       run: a.closeTab,
+    },
+    {
+      id: "file.saveIntoPdf",
+      title: "Save annotations into PDF",
+      keywords: ["write", "export", "embed", "okular", "acrobat", "obsidian", "pdfLink"],
+      shortcut: "Mod+S",
+      menu: { menu: "File", group: 2, order: 1 },
+      when: (ctx) => ctx.hasDocument && ctx.canSaveIntoPdf,
+      run: a.saveIntoPdf,
     },
     {
       id: "file.chooseVault",

@@ -256,6 +256,7 @@ export async function toNewAnnotations(
         textStart: text?.textStart ?? null,
         textEnd: text?.textEnd ?? null,
         status: "exact",
+        pdfRef: f.pdfId,
       },
       pageHashes: [{ page: f.page, hash: await getPageHash(pdf, f.page) }],
       sourceNm: f.key,

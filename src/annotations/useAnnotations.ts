@@ -350,6 +350,8 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
   return {
     annotations,
     reanchoring,
+    /** The list as of the last change, even before React re-renders (after `settled`). */
+    current: useCallback(() => listRef.current, []),
     /** The open document's annotations have been loaded. */
     loaded: !!workId && loadedFor === `${workId}:${fileId}`,
     highlight,

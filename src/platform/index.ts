@@ -13,6 +13,7 @@ import type {
 } from "../annotations/types";
 import type { VaultMathSettings } from "../math/settings";
 import type { VaultSettings } from "../vault/notes";
+import type { WriteAnnotation } from "../annotations/writeback";
 import { sha256Hex } from "../util/hash";
 import { MemoryLibrary } from "./memoryLibrary";
 
@@ -124,6 +125,25 @@ export async function createAnnotation(annotation: NewAnnotation): Promise<Annot
 export async function importAnnotations(annotations: NewAnnotation[]): Promise<ImportResult> {
   if (!isTauri()) return memoryLibrary().import(annotations);
   return invoke<ImportResult>("import_annotations", { annotations: annotations as unknown as Record<string, unknown>[] });
+}
+
+/**
+ * Writes annotations into the PDF on disk (backed up first, appended as an
+ * incremental update). Resolves to the file's new version.
+ */
+export async function saveAnnotationsToPdf(
+  path: string,
+  fileId: string,
+  workId: string,
+  annotations: WriteAnnotation[],
+): Promise<DocumentInfo> {
+  if (!isTauri()) throw new Error("saving into the PDF needs the desktop app");
+  return invoke<DocumentInfo>("save_annotations_to_pdf", {
+    path,
+    fileId,
+    workId,
+    annotations: annotations as unknown as Record<string, unknown>[],
+  });
 }
 
 /** Keys of the annotations already imported into a paper (deleted ones too). */

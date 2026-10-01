@@ -39,7 +39,8 @@ mouse (menus, toolbar, right-click) and by keyboard (shortcuts, command palette)
 - Math: `preamble.sty` at the vault root defines custom macros (loaded by the
   obsidian-latex plugin); latest-mathjax plugin with the `newcm` font; LaTeX
   Suite snippets.
-- PDF++ is being retired — no compatibility needed. Existing
+- PDF++ is being retired — no compatibility needed. (Its links name Okular
+  annotations by /NM, which Tourmaline keeps when importing.) Existing
   `[[x.pdf#page=N&annotation=ID]]` links work in Obsidian's core viewer.
 
 ## Obsidian integration
@@ -88,6 +89,21 @@ the PDF or inferred from headings), citation popups and figure/equation previews
 two-column ordering from the gap between columns, with full-width elements in
 place; per-paper switch to disable column detection; overlay with fixed eye
 height; formulas/figures count as one step.
+
+**Importing (4b)**: annotations other programs saved in a PDF become
+Tourmaline's on first open: text markup → highlights with their quote,
+sticky notes/free text → notes, squares/circles → areas; replies join their
+parent's note; colour → the category nearest in hue. Once per paper, keyed
+by /NM (else position); deleting one keeps it deleted. pdf.js stops drawing
+the originals. Ink is left drawn until phase 7.
+
+**Write-back (4b)**: File › Save annotations into PDF (Ctrl+S), asked before
+the first use, never automatic. Original bytes backed up to
+`<data>/backups/pdf/<sha256>.pdf`; changes appended as an incremental update
+(lopdf) and moved over the file. Imported annotations update their own
+object; Tourmaline's are named by their id; deleted ones leave the page. The
+result is a `writeback` version of the work with placements copied, each
+remembering its object (`{{pdfLink}}` = `[[x.pdf#page=N&annotation=412R]]`).
 
 **Annotations**: user-defined colour categories (name, colour, key 1–9, callout
 type); area capture to PNG in the vault's attachment folder (`Obsidian/Attatchments`);
@@ -161,7 +177,7 @@ silently dropped).
 | 2 | **Annotations**: highlights, categories, notes, area capture, sidebar | Highlights survive restart and file rename ✅ |
 | 3 | **Notes editor**: CodeMirror + MathJax + preamble + autocomplete | Formulas render as in Obsidian ✅ |
 | 4a | **Vault**: read vault settings, match PDFs to JabRef entries, Handlebars templates, `tourmaline://` links | `BaconDorrC.pdf` is matched to its entry; Copy as Markdown gives a callout whose `tourmaline://` link reopens the highlight ✅ |
-| 4b | **PDF annotations**: import existing annotations; optional write-back and `{{pdfLink}}` | — |
+| 4b | **PDF annotations**: import existing annotations; optional write-back and `{{pdfLink}}` | The Okular highlights in `BaconDorrC.pdf` appear in the sidebar and can be edited; Save annotations into PDF puts Tourmaline's into a copy, and Obsidian shows them |
 | 4c | **Export**: merge into notes preserving edits; template editor with live preview | Highlight in `Goodman2023GG` → appears in `@Goodman2023GG.md` without touching the user's text → link reopens Tourmaline there |
 | 5 | **Focus mode** | A two-column arXiv paper reads in order |
 | 6 | **Smart navigation**: citation/figure/equation popups, back/forward, split view | Hovering "[12]" shows the reference |

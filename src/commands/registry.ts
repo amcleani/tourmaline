@@ -24,6 +24,8 @@ export interface CommandContext {
   hasBibliography: boolean;
   /** The open paper is linked to a bibliography entry. */
   hasCitekey: boolean;
+  /** Annotations can be saved into the open file (desktop app, file on disk). */
+  canSaveIntoPdf: boolean;
 }
 
 /** Context with no document open and nothing going on. */
@@ -39,6 +41,7 @@ export const IDLE_CONTEXT: CommandContext = {
   canRedo: false,
   hasBibliography: false,
   hasCitekey: false,
+  canSaveIntoPdf: false,
 };
 
 export interface MenuPlacement {

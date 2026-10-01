@@ -21,6 +21,10 @@ pub struct Placement {
     pub text_end: Option<i64>,
     /// exact | moved | fuzzy | orphan
     pub status: String,
+    /// The PDF object this annotation is in this file ("412R"): an imported
+    /// annotation's original, or what write-back wrote. For `{{pdfLink}}`.
+    #[serde(default)]
+    pub pdf_ref: Option<String>,
 }
 
 /// The most recent placement on another version of the file, for re-anchoring.
@@ -48,6 +52,8 @@ pub struct Annotation {
     pub image_path: Option<String>,
     pub block_id: String,
     pub source: String,
+    /// Imported from a PDF: "nm:<its /NM>" or "pos:…" (see importPdf.ts).
+    pub source_nm: Option<String>,
     pub created: i64,
     pub updated: i64,
     /// Where it sits in the file asked about; None if not placed there yet.
@@ -131,7 +137,7 @@ pub struct Category {
 
 const SELECT_ANNOTATION: &str = "SELECT a.id, a.work_id, a.kind, a.category_id, a.colour, a.note_md, a.quote, a.prefix,
             a.suffix, a.image_path, a.block_id, a.source, a.created, a.updated,
-            p.page, p.geometry, p.text_start, p.text_end, p.status
+            p.page, p.geometry, p.text_start, p.text_end, p.status, a.source_nm, p.pdf_obj_ref
      FROM annotations a
      LEFT JOIN annotation_placements p ON p.annotation_id = a.id AND p.file_sha256 = ?2";
 
@@ -146,6 +152,7 @@ fn placement_from(row: &Row, first: usize) -> rusqlite::Result<Option<Placement>
         text_start: row.get(first + 2)?,
         text_end: row.get(first + 3)?,
         status: row.get(first + 4)?,
+        pdf_ref: None,
     }))
 }
 
@@ -163,9 +170,13 @@ fn annotation_from(row: &Row) -> rusqlite::Result<Annotation> {
         image_path: row.get(9)?,
         block_id: row.get(10)?,
         source: row.get(11)?,
+        source_nm: row.get(19)?,
         created: row.get(12)?,
         updated: row.get(13)?,
-        placement: placement_from(row, 14)?,
+        placement: match placement_from(row, 14)? {
+            Some(p) => Some(Placement { pdf_ref: row.get(20)?, ..p }),
+            None => None,
+        },
         fallback: None,
     })
 }
@@ -220,12 +231,14 @@ fn validate_colour(colour: &str) -> Result<()> {
 fn upsert_placement(tx: &Transaction, annotation_id: &str, file_id: &str, p: &Placement, now: i64) -> Result<()> {
     validate_placement(p)?;
     tx.execute(
-        "INSERT INTO annotation_placements (annotation_id, file_sha256, page, geometry, text_start, text_end, status, placed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO annotation_placements (annotation_id, file_sha256, page, geometry, text_start, text_end, status,
+                                            placed_at, pdf_obj_ref)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(annotation_id, file_sha256) DO UPDATE SET
             page = excluded.page, geometry = excluded.geometry, text_start = excluded.text_start,
-            text_end = excluded.text_end, status = excluded.status, placed_at = excluded.placed_at",
-        params![annotation_id, file_id, p.page, p.geometry.to_string(), p.text_start, p.text_end, p.status, now],
+            text_end = excluded.text_end, status = excluded.status, placed_at = excluded.placed_at,
+            pdf_obj_ref = COALESCE(excluded.pdf_obj_ref, pdf_obj_ref)",
+        params![annotation_id, file_id, p.page, p.geometry.to_string(), p.text_start, p.text_end, p.status, now, p.pdf_ref],
     )?;
     Ok(())
 }
@@ -324,10 +337,15 @@ impl Db {
         self.annotation(&id, &new.file_id)
     }
 
-    /// The source keys of everything imported into a work, deleted or not.
+    /// The keys of PDF annotations a work already has, deleted or not: what
+    /// it imported, and "nm:<id>" for every annotation (write-back names the
+    /// annotations it writes by their id).
     pub fn imported_keys(&self, work_id: &str) -> Result<Vec<String>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT source_nm FROM annotations WHERE work_id = ?1 AND source_nm IS NOT NULL")?;
+        let mut stmt = conn.prepare(
+            "SELECT source_nm FROM annotations WHERE work_id = ?1 AND source_nm IS NOT NULL
+             UNION ALL SELECT 'nm:' || id FROM annotations WHERE work_id = ?1",
+        )?;
         let rows = stmt.query_map([work_id], |r| r.get(0))?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
@@ -512,6 +530,7 @@ pub(crate) mod tests {
 
     fn placement(page: u32) -> Placement {
         Placement {
+            pdf_ref: None,
             page,
             geometry: json!({ "rects": [[page, 10, 20, 30, 40]] }),
             text_start: Some(5),
@@ -559,6 +578,7 @@ pub(crate) mod tests {
         assert_eq!(again.existing, ["okular-1", "okular-2"]);
         assert_eq!(db.list_annotations(&doc.work_id, "a").unwrap().len(), 2);
         let mut keys = db.imported_keys(&doc.work_id).unwrap();
+        keys.retain(|k| !k.starts_with("nm:"));
         keys.sort();
         assert_eq!(keys, ["okular-1", "okular-2", "okular-3"]);
         // Another paper with the same keys gets its own copies.

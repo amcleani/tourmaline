@@ -17,6 +17,8 @@ export interface Placement {
   textStart: number | null;
   textEnd: number | null;
   status: PlacementStatus;
+  /** The PDF object it is in this file ("412R"): an imported original, or written back. */
+  pdfRef?: string | null;
 }
 
 export interface Fallback {
@@ -43,6 +45,8 @@ export interface Annotation {
   imagePath: string | null;
   blockId: string;
   source: "tourmaline" | "imported";
+  /** Imported: "nm:<the PDF's /NM>", or "pos:…" when it had none. */
+  sourceNm?: string | null;
   created: number;
   updated: number;
   placement: Placement | null;

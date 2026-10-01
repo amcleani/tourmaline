@@ -248,6 +248,76 @@ impl Db {
         Ok(info)
     }
 
+    /// PDF objects (refs) in `file_id` of annotations since deleted, which
+    /// write-back takes off their pages.
+    pub fn writeback_removals(&self, work_id: &str, file_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT p.pdf_obj_ref FROM annotations a
+             JOIN annotation_placements p ON p.annotation_id = a.id AND p.file_sha256 = ?2
+             WHERE a.work_id = ?1 AND a.deleted_at IS NOT NULL AND p.pdf_obj_ref IS NOT NULL",
+        )?;
+        let rows = stmt.query_map(params![work_id, file_id], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Records the file write-back produced from `old`: a new version of the
+    /// same work whose annotations sit exactly where they did (the text is
+    /// unchanged), now with the PDF objects they were written as.
+    pub fn record_writeback(
+        &self,
+        old: &str,
+        new: &FileKey,
+        refs: &std::collections::HashMap<String, String>,
+        removed: &[String],
+    ) -> Result<DocumentInfo> {
+        let now = now_millis();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let (work, sample): (String, Option<String>) = tx
+            .query_row("SELECT work_id, text_sample FROM files WHERE sha256 = ?1", [old], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?
+            .ok_or_else(|| Error::Message(format!("no file {old}")))?;
+        tx.execute(
+            "INSERT INTO files (sha256, work_id, path, name, size, origin, derived_from, text_sample, first_opened, last_opened)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'writeback', ?6, ?7, ?8, ?8)
+             ON CONFLICT(sha256) DO UPDATE SET path = excluded.path, name = excluded.name, last_opened = excluded.last_opened",
+            params![new.sha256, work, new.path, new.name, new.size as i64, old, sample, now],
+        )?;
+        tx.execute(
+            "INSERT INTO file_paths (sha256, path, last_seen) VALUES (?1, ?2, ?3)
+             ON CONFLICT(sha256, path) DO UPDATE SET last_seen = excluded.last_seen",
+            params![new.sha256, new.path, now],
+        )?;
+        tx.execute(
+            "INSERT OR IGNORE INTO file_pages (file_sha256, page, text_hash)
+             SELECT ?2, page, text_hash FROM file_pages WHERE file_sha256 = ?1",
+            params![old, new.sha256],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO annotation_placements
+                (annotation_id, file_sha256, page, geometry, text_start, text_end, status, pdf_obj_ref, placed_at)
+             SELECT annotation_id, ?2, page, geometry, text_start, text_end, status, pdf_obj_ref, ?3
+             FROM annotation_placements WHERE file_sha256 = ?1",
+            params![old, new.sha256, now],
+        )?;
+        for (id, pdf_ref) in refs {
+            tx.execute(
+                "UPDATE annotation_placements SET pdf_obj_ref = ?3 WHERE annotation_id = ?1 AND file_sha256 = ?2",
+                params![id, new.sha256, pdf_ref],
+            )?;
+        }
+        for pdf_ref in removed {
+            tx.execute(
+                "UPDATE annotation_placements SET pdf_obj_ref = NULL WHERE file_sha256 = ?1 AND pdf_obj_ref = ?2",
+                params![new.sha256, pdf_ref],
+            )?;
+        }
+        let info = tx.query_row(&format!("{SELECT_INFO} WHERE f.sha256 = ?1"), [new.sha256], info_from_row)?;
+        tx.commit()?;
+        Ok(info)
+    }
+
     /// A work's files, most recently opened first.
     pub fn work_files(&self, work_id: &str) -> Result<Vec<DocumentInfo>> {
         let conn = self.conn();
@@ -400,6 +470,32 @@ pub(crate) mod tests {
         assert!(db.link_citekey("b", "Key").is_err());
         assert_eq!(open(&db, "b", "/lib/b.pdf", 3).work_id, b.work_id);
         assert_eq!(db.work_files(&a.work_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_written_file_is_a_new_version_with_the_same_placements() {
+        let db = Db::in_memory().unwrap();
+        let v1 = open(&db, "a", "/lib/a.pdf", 1);
+        db.set_text_sample("a", "sample").unwrap();
+        let kept = db.create_annotation(&crate::annotations::tests::highlight(&v1.work_id, "a", 2)).unwrap();
+        let gone = db.create_annotation(&crate::annotations::tests::highlight(&v1.work_id, "a", 3)).unwrap();
+        db.conn()
+            .execute("UPDATE annotation_placements SET pdf_obj_ref = '9R' WHERE annotation_id = ?1", [&gone.id])
+            .unwrap();
+        db.delete_annotation(&gone.id).unwrap();
+        assert_eq!(db.writeback_removals(&v1.work_id, "a").unwrap(), ["9R"]);
+
+        let refs = std::collections::HashMap::from([(kept.id.clone(), "12R".to_string())]);
+        let key = FileKey { sha256: "a2", path: "/lib/a.pdf", name: "a.pdf", size: 11 };
+        let v2 = db.record_writeback("a", &key, &refs, &["9R".into()]).unwrap();
+        assert_eq!(v2.work_id, v1.work_id);
+        assert_eq!(v2.previous_version, None, "same text: nothing to confirm");
+        let list = db.list_annotations(&v1.work_id, "a2").unwrap();
+        let p = list[0].placement.as_ref().unwrap();
+        assert_eq!((p.page, p.status.as_str(), p.pdf_ref.as_deref()), (2, "exact", Some("12R")));
+        assert!(db.writeback_removals(&v1.work_id, "a2").unwrap().is_empty());
+        // Opening the written file finds it.
+        assert_eq!(open(&db, "a2", "/lib/a.pdf", 5).work_id, v1.work_id);
     }
 
     #[test]

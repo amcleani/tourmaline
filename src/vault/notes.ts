@@ -49,11 +49,14 @@ export interface HighlightInput {
   pageLabel: string;
   /** The Citations plugin's variables for the paper, if it has an entry. */
   entry?: Record<string, unknown>;
+  /** The PDF's file name, for {{pdfLink}}. */
+  fileName?: string;
 }
 
 /** Everything a highlight template can use: the paper's fields, then the highlight's. */
-export function highlightVariables({ annotation: a, category, pageLabel, entry }: HighlightInput): Record<string, unknown> {
+export function highlightVariables({ annotation: a, category, pageLabel, entry, fileName }: HighlightInput): Record<string, unknown> {
   const page = a.placement && a.placement.status !== "orphan" ? a.placement.page : null;
+  const pdfRef = page === null ? null : a.placement?.pdfRef;
   return {
     ...entry,
     quote: a.quote ?? "",
@@ -69,8 +72,10 @@ export function highlightVariables({ annotation: a, category, pageLabel, entry }
     colour: a.colour ?? category?.colour ?? "",
     blockId: a.blockId,
     readerLink: readerLink(a.workId, { blockId: a.blockId }),
-    // Filled in by later phases: PDF write-back (pdfLink) and area images.
-    pdfLink: "",
+    // Opens Obsidian's own PDF viewer at the annotation; needs it to be in the
+    // file (imported from it, or saved into it).
+    pdfLink: pdfRef && fileName ? `[[${fileName}#page=${page! + 1}&annotation=${pdfRef}]]` : "",
+    // Area images go into the vault on export (phase 4c).
     image: "",
     created: new Date(a.created).toISOString().slice(0, 10),
   };

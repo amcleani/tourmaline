@@ -4,6 +4,7 @@ mod documents;
 mod error;
 mod library;
 mod pdf_annotations;
+mod writeback;
 mod vault;
 
 use std::path::PathBuf;
@@ -184,6 +185,55 @@ async fn pdf_annotation_names(
     .await
 }
 
+/// Writes a paper's annotations into its PDF (File › Save annotations into
+/// PDF). The file must still be the version `file_id`. Its bytes are first
+/// backed up to `<data>/backups/pdf/<sha256>.pdf`; the changes are appended
+/// as an incremental update, written beside the file and moved over it.
+/// Returns the new version, which the tab then shows.
+#[tauri::command]
+async fn save_annotations_to_pdf(
+    app: AppHandle,
+    path: PathBuf,
+    file_id: String,
+    work_id: String,
+    annotations: Vec<writeback::WriteAnnotation>,
+) -> Result<DocumentInfo> {
+    blocking(app, move |app, db| {
+        let file = documents::read(&path)?;
+        if file.sha256 != file_id {
+            return Err(Error::Message(format!(
+                "{} has changed since it was opened; reopen it first",
+                path.display()
+            )));
+        }
+        let backups = app.state::<DataDir>().0.join("backups").join("pdf");
+        std::fs::create_dir_all(&backups)?;
+        let backup = backups.join(format!("{file_id}.pdf"));
+        if !backup.exists() {
+            std::fs::write(&backup, &file.bytes)?;
+        }
+        let removed = db.writeback_removals(&work_id, &file_id)?;
+        let written = writeback::write_annotations(&file.bytes, &annotations, &removed)?;
+        let temp = path.with_extension("pdf.tourmaline-saving");
+        std::fs::write(&temp, &written.bytes)?;
+        if let Err(e) = std::fs::rename(&temp, &path) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(Error::Message(format!(
+                "could not replace {} ({e}); if another program has it open, close it and try again",
+                path.display()
+            )));
+        }
+        let sha = documents::sha256_hex(&written.bytes);
+        db.record_writeback(
+            &file_id,
+            &FileKey { sha256: &sha, path: &file.path, name: &file.name, size: written.bytes.len() as u64 },
+            &written.refs,
+            &removed,
+        )
+    })
+    .await
+}
+
 /// Keys of the annotations already imported into a paper (deleted ones too).
 #[tauri::command]
 async fn imported_keys(app: AppHandle, work_id: String) -> Result<Vec<String>> {
@@ -331,6 +381,7 @@ pub fn run() {
             create_annotation,
             import_annotations,
             imported_keys,
+            save_annotations_to_pdf,
             pdf_annotation_names,
             update_annotation,
             delete_annotation,
