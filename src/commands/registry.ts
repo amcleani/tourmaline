@@ -26,6 +26,8 @@ export interface CommandContext {
   hasCitekey: boolean;
   /** An Obsidian vault has been chosen and its settings read. */
   hasVault: boolean;
+  /** Focus mode is on for the open document. */
+  focusMode: boolean;
   /** Annotations can be saved into the open file (desktop app, file on disk). */
   canSaveIntoPdf: boolean;
 }
@@ -44,6 +46,7 @@ export const IDLE_CONTEXT: CommandContext = {
   hasBibliography: false,
   hasCitekey: false,
   hasVault: false,
+  focusMode: false,
   canSaveIntoPdf: false,
 };
 

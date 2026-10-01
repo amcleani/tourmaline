@@ -80,6 +80,18 @@ describe("two columns", () => {
     ]);
   });
 
+  it("reads side-by-side author blocks before the columns", () => {
+    // Each author's name and affiliation is centred in its column, level with the other's.
+    const author = (lines: string[], centre: number) =>
+      lines.flatMap((t, i) => words(t, centre - (t.length * 5 + (t.split(" ").length - 1) * 3) / 2, 700 - i * 14));
+    const a1 = ["Ada Author", "Some University"];
+    const a2 = ["Bea Writer", "Other Institute"];
+    const l = left.map((t, i) => words(t, 72, y(i)));
+    const r = right.map((t, i) => words(t, 320, y(i)));
+    const result = detectLines([...author(a1, 147), ...author(a2, 395), ...interleave(l, r).flat()]);
+    expect(result.lines.map((l) => l.text)).toEqual([...a1, ...a2, ...left, ...right]);
+  });
+
   it("can be told to ignore columns", () => {
     const l = left.map((t, i) => words(t, 72, y(i)));
     const r = right.map((t, i) => words(t, 320, y(i)));

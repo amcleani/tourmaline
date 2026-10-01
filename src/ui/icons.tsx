@@ -3,6 +3,7 @@ import {
   ChevronUp,
   Command,
   FileText,
+  Focus,
   FolderOpen,
   Highlighter,
   Keyboard,
@@ -50,6 +51,7 @@ const ICONS: Record<string, LucideIcon> = {
   down: ChevronDown,
   add: Plus,
   export: NotebookPen,
+  focus: Focus,
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

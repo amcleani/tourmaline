@@ -120,9 +120,23 @@ points map exactly to offsets in `buildPageText`'s normalised text).
 Popovers and the selection toolbar render through the viewer's per-page
 `overlay`, so they scroll with the page.
 pdf.js 6: `render({ canvas, viewport })`, documents are freed with
-`pdf.loadingTask.destroy()`. Focus-mode line detection is
-`src/focus/lines.ts`, checked against the fixtures in `test/fixtures/` by
-`test/readingOrder.test.ts`.
+`pdf.loadingTask.destroy()`.
+
+**Focus mode.** `src/focus/lines.ts` orders a page's lines (columns from the
+gutter, full-width elements and side-by-side author blocks in place, stacked
+formulas as one line), checked against the fixtures in `test/fixtures/` by
+`test/readingOrder.test.ts`. `steps.ts` (pure, `test/steps.test.ts`) turns
+them into steps: 1-3 lines within a block (a change of type size or extra
+space starts one), or sentences (characters placed within text items, our
+own splitter: abbreviations, initials, headings without a full stop);
+figures and tables are the empty band beside their caption; lone page
+numbers are skipped. `useFocusSteps` builds them for the whole document
+(lines cached per document and column setting). The viewer dims every page
+except the step (`focus` prop, an SVG mask that clicks pass through) and
+`scrollToEye` puts it at the eye line. Up/Down step only when the document
+has focus; a plain-key shortcut whose command can't run keeps its usual
+meaning (so the arrows scroll outside focus mode). Settings: app state
+`focus.settings`; per-paper column switch `focus.columns:<work id>`.
 
 **Notes and math.** Notes are markdown edited in CodeMirror 6
 (`src/notes/NoteEditor.tsx`) with formulas previewed in place

@@ -88,10 +88,15 @@ copy BibTeX. Watch the `.bib` for changes.
 the PDF or inferred from headings), citation popups and figure/equation previews
 (PDF links first, text-pattern fallback), back/forward.
 
-**Focus mode**: 1–3 lines or one sentence; lines grouped from pdf.js text items;
-two-column ordering from the gap between columns, with full-width elements in
-place; per-paper switch to disable column detection; overlay with fixed eye
-height; formulas/figures count as one step.
+**Focus mode** (View › Focus mode, F; toolbar): 1–3 lines or one sentence
+(S changes it); lines grouped from pdf.js text items; two-column ordering
+from the gap between columns, with full-width elements and side-by-side
+author blocks in place; per-paper switch to disable column detection;
+everything but the step dimmed, the step kept at a fixed eye line (near the
+top, upper third or middle); formulas and figures (the band beside a
+caption) count as one step; page numbers skipped. Up/Down step, a click
+picks a step, scrolling away and pressing Down carries on from the eye line;
+a floating bar has every control; the step is read out to screen readers.
 
 **Importing (4b)**: annotations other programs saved in a PDF become
 Tourmaline's on first open: text markup → highlights with their quote,

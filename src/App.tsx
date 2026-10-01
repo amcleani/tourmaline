@@ -43,6 +43,8 @@ import {
   type OpenedDocument,
 } from "./platform";
 import { useVaultMath } from "./math/useVaultMath";
+import { stepAt, stepUnder, type StepUnit } from "./focus/steps";
+import { useFocusSteps } from "./focus/useFocusSteps";
 import { citationVariables } from "./vault/bibliography";
 import { parseReaderLink, readerLink } from "./vault/links";
 import { DEFAULT_EXPORT_SETTINGS, NoteFormatError, parseExportSettings, type ExportSettings, type SectionInput } from "./vault/export";
@@ -58,6 +60,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { EntryPicker } from "./ui/EntryPicker";
 import { ExportSettingsDialog } from "./ui/ExportSettingsDialog";
 import { FindBar } from "./ui/FindBar";
+import { EYE_HEIGHTS, FocusBar, STEP_UNITS } from "./ui/FocusBar";
 import { GoToPageDialog } from "./ui/GoToPageDialog";
 import { OutlinePanel } from "./ui/OutlinePanel";
 import { RecentDialog } from "./ui/RecentDialog";
@@ -882,6 +885,128 @@ export function App() {
     }
   };
 
+  // ---- Focus mode ----------------------------------------------------------------
+
+  const [focusOn, setFocusOn] = useState(false);
+  const [focusSettings, setFocusSettings] = useState<{ unit: StepUnit; eye: number }>({ unit: 1, eye: 0.35 });
+  useEffect(() => {
+    getState("focus.settings")
+      .then((json) => {
+        const v = json ? (JSON.parse(json) as { unit?: unknown; eye?: unknown }) : {};
+        const unit = STEP_UNITS.find((u) => u.value === v.unit)?.value;
+        const eye = EYE_HEIGHTS.find((h) => h.value === v.eye)?.value;
+        setFocusSettings((prev) => ({ unit: unit ?? prev.unit, eye: eye ?? prev.eye }));
+      })
+      .catch((e) => console.error("Could not load the focus settings", e));
+  }, []);
+  /** Papers whose columns focus mode ignores (an odd layout read wrongly). */
+  const [noColumns, setNoColumns] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (!activeWork) return;
+    getState(`focus.columns:${activeWork}`)
+      .then((v) =>
+        setNoColumns((prev) => {
+          if (prev.has(activeWork) === (v === "off")) return prev;
+          const next = new Set(prev);
+          if (v === "off") next.add(activeWork);
+          else next.delete(activeWork);
+          return next;
+        }),
+      )
+      .catch(() => {});
+  }, [activeWork]);
+  const detectColumns = !(activeWork && noColumns.has(activeWork));
+  const focusActive = focusOn && activePdf !== null && !versionPending;
+  const steps = useFocusSteps(activePdf, focusActive, focusSettings.unit, detectColumns, reportError);
+  const [stepIndex, setStepIndex] = useState<number | null>(null);
+  /** Where to start once the steps are (re)built: the reader's eye, or the current step's place. */
+  const focusAnchor = useRef<{ page: number; y: number } | null>(null);
+  /** When focus mode last scrolled: a step press during its scroll doesn't count as the reader scrolling away. */
+  const focusScrolledAt = useRef(0);
+  const step = steps && stepIndex !== null ? (steps[stepIndex] ?? null) : null;
+
+  // Nothing carries over between tabs.
+  useEffect(() => {
+    setFocusOn(false);
+    setStepIndex(null);
+  }, [activeKey]);
+
+  useEffect(() => {
+    if (!steps) return;
+    const anchor = focusAnchor.current;
+    focusAnchor.current = null;
+    if (anchor) setStepIndex(steps.length ? stepAt(steps, anchor.page, anchor.y) : null);
+    else setStepIndex((i) => (i === null || !steps.length ? null : Math.min(i, steps.length - 1)));
+  }, [steps]);
+
+  // The current step goes to the eye line.
+  useEffect(() => {
+    if (!step) return;
+    const [page, ...rect] = step.rects[0];
+    focusScrolledAt.current = Date.now();
+    void viewerRef.current?.scrollToEye(page, rect as PdfRect, focusSettings.eye);
+  }, [step, focusSettings.eye]);
+
+  const focusRects = useMemo(() => {
+    if (!focusActive || !steps) return null;
+    const byPage = new Map<number, PdfRect[]>();
+    for (const [page, ...rect] of step?.rects ?? []) byPage.set(page, [...(byPage.get(page) ?? []), rect as PdfRect]);
+    return byPage;
+  }, [focusActive, steps, step]);
+
+  /** Starts the steps again from the current step's place (after the step size or columns change). */
+  const keepFocusPlace = () => {
+    const s = latest.current.step;
+    if (s) focusAnchor.current = { page: s.rects[0][0], y: s.rects[0][4] + 1 };
+  };
+
+  const saveFocusSettings = (next: { unit: StepUnit; eye: number }) => {
+    if (next.unit !== focusSettings.unit) keepFocusPlace();
+    setFocusSettings(next);
+    void setState("focus.settings", JSON.stringify(next)).catch((e) => console.error("Could not save the focus settings", e));
+  };
+
+  const setColumnsFor = (on: boolean) => {
+    const work = latest.current.activeTab?.workId;
+    if (!work) return;
+    keepFocusPlace();
+    setNoColumns((prev) => {
+      const next = new Set(prev);
+      if (on) next.delete(work);
+      else next.add(work);
+      return next;
+    });
+    void setState(`focus.columns:${work}`, on ? "on" : "off").catch((e) => console.error("Could not save the column setting", e));
+    setNotice(on ? "Columns are detected in this paper" : "Columns are ignored in this paper: each line is read straight across");
+  };
+
+  const toggleFocus = async () => {
+    if (latest.current.focusActive) {
+      setFocusOn(false);
+      setStepIndex(null);
+      return;
+    }
+    // Start at the line under the eye line.
+    const point = await viewerRef.current?.pointAt(latest.current.focusSettings.eye);
+    focusAnchor.current = point ? { page: point.page, y: point.y } : { page: latest.current.status?.page ?? 0, y: Infinity };
+    setFocusOn(true);
+  };
+
+  const moveStep = async (by: 1 | -1) => {
+    const { steps: list, stepIndex: at, focusSettings: settings } = latest.current;
+    if (!list?.length) return;
+    const current = at === null ? null : list[at];
+    // The reader scrolled elsewhere: carry on from what is at the eye line.
+    if (current && Date.now() - focusScrolledAt.current > 1000) {
+      const [page, ...rect] = current.rects[0];
+      if (!(await viewerRef.current?.isInView(page, rect as PdfRect))) {
+        const point = await viewerRef.current?.pointAt(settings.eye);
+        if (point) return setStepIndex(stepAt(list, point.page, point.y));
+      }
+    }
+    setStepIndex(at === null ? 0 : Math.min(Math.max(at + by, 0), list.length - 1));
+  };
+
   // ---- Commands --------------------------------------------------------------
 
   useEffect(() => {
@@ -898,6 +1023,7 @@ export function App() {
       hasBibliography: bibliography !== null,
       hasCitekey: !!activeTab?.citekey,
       hasVault: vault !== null && vaultSettings !== null,
+      focusMode: focusActive,
       canSaveIntoPdf: isTauri() && !!activeTab?.path && !versionPending,
     };
     registry.notifyContextChanged();
@@ -906,6 +1032,7 @@ export function App() {
     tabs.length,
     findOpen,
     dialog,
+    focusActive,
     question,
     vault,
     vaultSettings,
@@ -935,6 +1062,16 @@ export function App() {
     saveIntoPdf,
     exportToVault,
     writeBackConfirmed,
+    focusActive,
+    focusSettings,
+    steps,
+    stepIndex,
+    step,
+    toggleFocus,
+    moveStep,
+    saveFocusSettings,
+    setColumnsFor,
+    detectColumns,
   });
   latest.current = {
     activeTab,
@@ -949,6 +1086,16 @@ export function App() {
     saveIntoPdf,
     exportToVault,
     writeBackConfirmed,
+    focusActive,
+    focusSettings,
+    steps,
+    stepIndex,
+    step,
+    toggleFocus,
+    moveStep,
+    saveFocusSettings,
+    setColumnsFor,
+    detectColumns,
   };
 
   useEffect(() => {
@@ -1017,6 +1164,7 @@ export function App() {
           viewerRef.current?.clearSelection();
           setSelectionEnd(null);
         } else if (ctx.findOpen) closeFind();
+        else if (ctx.focusMode) void latest.current.toggleFocus();
       },
       undo: async () => {
         const id = await latest.current.notes.undo();
@@ -1055,6 +1203,24 @@ export function App() {
       openNote: () => latest.current.openLiteratureNote(),
       exportToVault: () => void latest.current.exportToVault(),
       exportSettings: () => setDialog("exportSettings"),
+      toggleFocus: () => void latest.current.toggleFocus(),
+      focusNext: () => void latest.current.moveStep(1),
+      focusPrevious: () => void latest.current.moveStep(-1),
+      focusStepSize: () => {
+        const { focusSettings: f, saveFocusSettings: save } = latest.current;
+        const i = STEP_UNITS.findIndex((u) => u.value === f.unit);
+        const unit = STEP_UNITS[(i + 1) % STEP_UNITS.length];
+        save({ ...f, unit: unit.value });
+        setNotice(`Focus steps: ${unit.label}`);
+      },
+      focusEyeLine: () => {
+        const { focusSettings: f, saveFocusSettings: save } = latest.current;
+        const i = EYE_HEIGHTS.findIndex((h) => h.value === f.eye);
+        const eye = EYE_HEIGHTS[(i + 1) % EYE_HEIGHTS.length];
+        save({ ...f, eye: eye.value });
+        setNotice(`Focus eye line: ${eye.label}`);
+      },
+      focusColumns: () => latest.current.setColumnsFor(!latest.current.detectColumns),
       copyMarkdown: () => latest.current.copyAnnotation("markdown"),
       copyLink: () => latest.current.copyAnnotation("link"),
     }).map((c) => registry.register(c));
@@ -1087,6 +1253,15 @@ export function App() {
       }
       const command = registry.commandForEvent(e);
       if (!command) return;
+      const plain = !(e.ctrlKey || e.altKey || e.metaKey) && !/^F\d{1,2}$/.test(e.key);
+      // A plain key whose command can't run keeps its usual meaning (the
+      // arrows scroll unless focus mode is on).
+      if (plain && !registry.isEnabled(command.id)) return;
+      // Arrows belong to lists, trees and toolbars that have focus; they step
+      // only from the document itself.
+      if (/^Arrow/.test(e.key) && e.target instanceof HTMLElement && e.target !== document.body && !e.target.closest(".viewer-scroll")) {
+        return;
+      }
       if (command.shortcut && isTextEditingShortcut(command.shortcut)) {
         if (isTypingTarget(e.target)) return;
         // Ctrl+C, Ctrl+Z... keep their usual meaning when the command can't run
@@ -1237,6 +1412,12 @@ export function App() {
               onSelectionChange={setSelectionEnd}
               overlay={overlay}
               hiddenAnnotations={hiddenPdfAnnotations}
+              focus={focusRects}
+              onPageClick={(page, x, y) => {
+                if (!focusActive || !steps) return;
+                const i = stepUnder(steps, page, x, y);
+                if (i !== -1) setStepIndex(i);
+              }}
             />
           ) : activeTab ? (
             <div className="tab-placeholder" role={activeTab.status === "error" ? "alert" : "status"}>
@@ -1250,6 +1431,27 @@ export function App() {
               Drag over the page, or use the arrow keys (Shift+arrows to resize) and Enter, to capture an area. Escape
               or A to stop.
             </div>
+          )}
+          {focusActive && (
+            <FocusBar
+              unit={focusSettings.unit}
+              eye={focusSettings.eye}
+              detectColumns={detectColumns}
+              position={
+                !steps
+                  ? "Finding the lines…"
+                  : steps.length === 0
+                    ? "No text to step through"
+                    : `Step ${(stepIndex ?? 0) + 1} of ${steps.length}`
+              }
+              announcement={step ? (step.kind === "figure" ? "Figure" : step.text) : ""}
+              onUnit={(unit) => saveFocusSettings({ ...focusSettings, unit })}
+              onEye={(eye) => saveFocusSettings({ ...focusSettings, eye })}
+              onColumns={setColumnsFor}
+              onPrevious={() => registry.execute("focus.previous", "other")}
+              onNext={() => registry.execute("focus.next", "other")}
+              onExit={() => registry.execute("view.focusMode", "other")}
+            />
           )}
         </main>
         {activePdf && annotationsOpen && (

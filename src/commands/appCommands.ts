@@ -9,6 +9,12 @@ export interface AppActions {
   linkEntry: () => void;
   openNote: () => Promise<void>;
   exportToVault: () => void;
+  toggleFocus: () => void;
+  focusNext: () => void;
+  focusPrevious: () => void;
+  focusStepSize: () => void;
+  focusEyeLine: () => void;
+  focusColumns: () => void;
   exportSettings: () => void;
   quit: () => Promise<void>;
   zoomIn: () => void;
@@ -233,6 +239,62 @@ export function appCommands(a: AppActions): Command[] {
       menu: { menu: "View", group: 1, order: 3 },
       when: hasDocument,
       run: a.toggleAnnotations,
+    },
+
+    // Focus mode (View menu)
+    {
+      id: "view.focusMode",
+      title: "Focus mode",
+      keywords: ["reading", "ruler", "line", "sentence", "concentrate", "dim", "guide"],
+      shortcut: "F",
+      icon: "focus",
+      toolbar: true,
+      menu: { menu: "View", group: 3, order: 1 },
+      when: hasDocument,
+      run: a.toggleFocus,
+    },
+    {
+      id: "focus.next",
+      title: "Focus: next step",
+      keywords: ["down", "forward", "line", "sentence"],
+      shortcut: "ArrowDown",
+      menu: { menu: "View", group: 3, order: 2 },
+      when: (ctx) => ctx.hasDocument && ctx.focusMode,
+      run: a.focusNext,
+    },
+    {
+      id: "focus.previous",
+      title: "Focus: previous step",
+      keywords: ["up", "back", "line", "sentence"],
+      shortcut: "ArrowUp",
+      menu: { menu: "View", group: 3, order: 3 },
+      when: (ctx) => ctx.hasDocument && ctx.focusMode,
+      run: a.focusPrevious,
+    },
+    {
+      id: "focus.stepSize",
+      title: "Focus: change step size",
+      keywords: ["lines", "sentence", "one", "two", "three"],
+      shortcut: "S",
+      menu: { menu: "View", group: 3, order: 4 },
+      when: (ctx) => ctx.hasDocument && ctx.focusMode,
+      run: a.focusStepSize,
+    },
+    {
+      id: "focus.eyeLine",
+      title: "Focus: change eye line",
+      keywords: ["height", "position", "top", "middle", "third"],
+      menu: { menu: "View", group: 3, order: 5 },
+      when: (ctx) => ctx.hasDocument && ctx.focusMode,
+      run: a.focusEyeLine,
+    },
+    {
+      id: "focus.columns",
+      title: "Focus: detect columns in this paper (on/off)",
+      keywords: ["two-column", "layout", "reading order", "gutter"],
+      menu: { menu: "View", group: 3, order: 6 },
+      when: hasDocument,
+      run: a.focusColumns,
     },
 
     // Navigate

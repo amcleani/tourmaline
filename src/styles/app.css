@@ -12,6 +12,7 @@
   --danger-text: #8a1c12;
   --page-bg: #d9d9d4;
   --overlay: rgb(0 0 0 / 0.35);
+  --focus-dim: rgb(24 24 28 / 0.62);
   --radius: 6px;
   --ui-scale: 1;
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
@@ -552,6 +553,14 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+/* Focus mode: the page is dimmed except the current step. Clicks and selection go through. */
+.focus-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.focus-dim { fill: var(--focus-dim); }
 .page-overlay {
   position: absolute;
   inset: 0;
@@ -793,3 +802,27 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
   :focus-visible { outline-color: Highlight; }
 }
 .link-list { margin: 6px 0; padding-left: 20px; max-height: 30vh; overflow: auto; overflow-wrap: anywhere; }
+
+/* Focus mode controls, floating over the bottom of the document. */
+.focus-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 8px;
+  max-width: calc(100% - 32px);
+  padding: 6px 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+}
+.focus-bar .checkbox { margin: 0; }
+.focus-position { min-width: 8em; text-align: center; font-variant-numeric: tabular-nums; color: var(--text-muted); font-size: 0.9em; }
+.focus-field { font-size: 0.9em; }

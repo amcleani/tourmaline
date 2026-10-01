@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnnotationMode, TextLayer, type PDFDocumentProxy, type PDFPageProxy, type RenderTask } from "pdfjs-dist";
 import type { PageViewport } from "pdfjs-dist/types/src/display/page_viewport";
 import {
@@ -64,6 +64,15 @@ export interface ViewerHandle {
   /** Scrolls a PDF-space rectangle on a page into view if it isn't already. */
   revealRect(page: number, rect: PdfRect): Promise<void>;
   focus(): void;
+  /**
+   * Scrolls so a PDF-space rectangle's top sits at `fraction` of the window's
+   * height (focus mode's eye line); smoothly unless the user prefers less motion.
+   */
+  scrollToEye(page: number, rect: PdfRect, fraction: number): Promise<void>;
+  /** The point of the document at `fraction` of the window's height, in PDF space. */
+  pointAt(fraction: number): Promise<{ page: number; x: number; y: number } | null>;
+  /** Whether part of a PDF-space rectangle on a page is in view. */
+  isInView(page: number, rect: PdfRect): Promise<boolean>;
   /** The current text selection in the document, if any. */
   captureSelection(): CapturedSelection | null;
   clearSelection(): void;
@@ -91,6 +100,10 @@ interface Props {
   overlay?: (page: number, toCss: (rect: PdfRect) => CssRect) => React.ReactNode;
   /** pdf.js ids of annotations in the file that Tourmaline draws itself (imported ones). */
   hiddenAnnotations?: ReadonlySet<string>;
+  /** Focus mode: every page is dimmed except these rectangles (by page). Null when off. */
+  focus?: ReadonlyMap<number, PdfRect[]> | null;
+  /** A click on a page that isn't on a mark or the end of a selection, in PDF space. */
+  onPageClick?: (page: number, x: number, y: number) => void;
 }
 
 /**
@@ -102,6 +115,25 @@ export function hidePdfAnnotations(doc: PDFDocumentProxy, ids: Iterable<string>)
 }
 
 const NO_IDS: ReadonlySet<string> = new Set();
+const NO_RECTS: readonly PdfRect[] = [];
+
+/** Focus mode's dimming of a page, with holes where the current step is. Clicks go through. */
+function FocusLayer({ width, height, rects }: { width: number; height: number; rects: CssRect[] }) {
+  // useId's ":r1:" isn't usable in url(#…).
+  const id = `focus-${useId().replace(/[^\w-]/g, "")}`;
+  const pad = 3;
+  return (
+    <svg className="focus-layer" width={width} height={height} aria-hidden="true">
+      <mask id={id}>
+        <rect width={width} height={height} fill="white" />
+        {rects.map((r, i) => (
+          <rect key={i} x={r.left - pad} y={r.top - pad} width={r.width + 2 * pad} height={r.height + 2 * pad} rx={3} fill="black" />
+        ))}
+      </mask>
+      <rect width={width} height={height} className="focus-dim" mask={`url(#${id})`} />
+    </svg>
+  );
+}
 
 /** Converts a PDF-space rectangle to CSS pixels within the page. */
 function toCssRect(viewport: PageViewport, [x0, y0, x1, y1]: PdfRect) {
@@ -128,6 +160,8 @@ export function PdfViewer({
   onSelectionChange,
   overlay,
   hiddenAnnotations = NO_IDS,
+  focus = null,
+  onPageClick,
 }: Props) {
   // Before the pages' render effects run (layout effects come first).
   useLayoutEffect(() => hidePdfAnnotations(doc, hiddenAnnotations), [doc, hiddenAnnotations]);
@@ -359,6 +393,36 @@ export function PdfViewer({
       focus() {
         scrollRef.current?.focus({ preventScroll: true });
       },
+      async scrollToEye(pageIndex, rect, fraction) {
+        const l = layoutRef.current;
+        const el = scrollRef.current;
+        if (!l || !el) return;
+        const page = await doc.getPage(pageIndex + 1);
+        const r = toCssRect(page.getViewport({ scale: l.zoom * PDF_TO_CSS }), rect);
+        const top = Math.max(0, l.tops[pageIndex] + r.top - fraction * el.clientHeight);
+        const calm = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+        if (typeof el.scrollTo === "function") el.scrollTo({ top, behavior: calm ? "auto" : "smooth" });
+        else el.scrollTop = top;
+      },
+      async pointAt(fraction) {
+        const l = layoutRef.current;
+        const el = scrollRef.current;
+        if (!l || !el) return null;
+        const anchor = anchorAt(l, el.scrollTop + fraction * el.clientHeight);
+        const page = await doc.getPage(anchor.page + 1);
+        const vp = page.getViewport({ scale: l.zoom * PDF_TO_CSS });
+        const [x, y] = vp.convertToPdfPoint(vp.width / 2, anchor.fraction * vp.height);
+        return { page: anchor.page, x, y };
+      },
+      async isInView(pageIndex, rect) {
+        const l = layoutRef.current;
+        const el = scrollRef.current;
+        if (!l || !el) return false;
+        const page = await doc.getPage(pageIndex + 1);
+        const r = toCssRect(page.getViewport({ scale: l.zoom * PDF_TO_CSS }), rect);
+        const top = l.tops[pageIndex] + r.top;
+        return top + r.height > el.scrollTop && top < el.scrollTop + el.clientHeight;
+      },
       captureSelection() {
         const sel = window.getSelection();
         const el = scrollRef.current;
@@ -430,6 +494,8 @@ export function PdfViewer({
         keyRect={keyRect?.page === i ? keyRect.rect : null}
         overlay={overlay}
         hiddenAnnotations={hiddenAnnotations}
+        focusRects={focus ? (focus.get(i) ?? NO_RECTS) : null}
+        onPageClick={onPageClick}
         onRegister={onRegister}
         onSize={onPageSize}
       />,
@@ -478,6 +544,9 @@ interface PageProps {
   overlay?: Props["overlay"];
   /** Only its identity matters: the page redraws when it changes. */
   hiddenAnnotations: ReadonlySet<string>;
+  /** Focus mode: what stays lit on this page (null: not in focus mode). */
+  focusRects: readonly PdfRect[] | null;
+  onPageClick?: Props["onPageClick"];
   onRegister: (index: number, info: PageInfo | null) => void;
   onSize: (index: number, size: Size) => void;
 }
@@ -501,6 +570,8 @@ function PageView({
   keyRect,
   overlay,
   hiddenAnnotations,
+  focusRects,
+  onPageClick,
   onRegister,
   onSize,
 }: PageProps) {
@@ -639,11 +710,13 @@ function PageView({
 
   // A click that isn't the end of a text selection selects the smallest mark under it.
   const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (captureMode || !onMarkClick || !viewport) return;
+    if (captureMode || !viewport) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return;
     const box = e.currentTarget.getBoundingClientRect();
     const [x, y] = viewport.convertToPdfPoint(e.clientX - box.left, e.clientY - box.top);
+    onPageClick?.(index, x, y);
+    if (!onMarkClick) return;
     let hit: { id: string; area: number } | null = null;
     for (const m of marks ?? []) {
       for (const [x0, y0, x1, y1] of m.rects) {
@@ -680,6 +753,7 @@ function PageView({
         </div>
       )}
       <div ref={textRef} className="textLayer" onPointerDown={onPointerDown} />
+      {viewport && focusRects && <FocusLayer width={width} height={height} rects={focusRects.map((r) => toCssRect(viewport, r))} />}
       {viewport && highlights && highlights.length > 0 && (
         <div className="highlight-layer" aria-hidden="true">
           {highlights.flatMap((h, i) =>

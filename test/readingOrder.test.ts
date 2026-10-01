@@ -6,6 +6,7 @@
 // detected column count must match.
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { detectLines } from "../src/focus/lines";
+import { buildSteps } from "../src/focus/steps";
 
 interface Anchor {
   text: string;
@@ -58,5 +59,31 @@ describe.each(fixtures.map((e): [string, Expected] => [e.file, e]))("%s", (file,
     }
     expect(missing, `anchors on ${file} p.${pageNo}`).toEqual([]);
     expect(result.columns, `columns on ${file} p.${pageNo}`).toBe(page.columns);
+  });
+});
+
+describe("focus steps on two-column.pdf", () => {
+  it("are sentences in reading order, with figures as steps", async () => {
+    const pdf = await getDocument({ data: fixtureBytes("two-column.pdf") }).promise;
+    const pages = [];
+    for (let i = 0; i < pdf.numPages; i++) {
+      const p = await pdf.getPage(i + 1);
+      const content = await p.getTextContent();
+      pages.push({ page: i, lines: detectLines(content.items).lines, items: content.items, rotation: p.rotate, top: p.view[3] });
+    }
+    const steps = buildSteps(pages, "sentence");
+    const sentences = steps.map((s) => s.text);
+    const order = [
+      "Column-Aware Reading Order for Scholarly Documents",
+      "Abstract",
+      "1 Introduction",
+      "A two-column page is read as two narrow pages placed side by side.",
+      "2 Related Work",
+      "Wide elements such as this figure are read where they sit, before the columns below.",
+      "3 Approach",
+    ].map((s) => sentences.indexOf(s));
+    expect(order.every((i) => i !== -1)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(steps.filter((s) => s.kind === "figure").length).toBeGreaterThanOrEqual(2);
   });
 });

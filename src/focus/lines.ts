@@ -338,6 +338,42 @@ function splitWideGroups(leftCol: Fragment[], rightCol: Fragment[]): Fragment[][
   return groups;
 }
 
+/**
+ * Side-by-side blocks heading both columns, such as two authors' names and
+ * affiliations above the text: each column starts with at least two short
+ * lines centred in it, at the same height as the other's. They are read
+ * before the columns (left block, then right), not with them.
+ */
+function headerBlocks(leftCol: Fragment[], rightCol: Fragment[]): { left: Fragment[]; right: Fragment[] } | null {
+  const byTop = (p: Fragment, q: Fragment) => q.baseline - p.baseline || p.x0 - q.x0;
+  const leading = (col: Fragment[]) => {
+    if (col.length === 0) return [];
+    const x0 = Math.min(...col.map((f) => f.x0));
+    const x1 = Math.max(...col.map((f) => f.x1));
+    const width = x1 - x0;
+    const centre = (x0 + x1) / 2;
+    const run: Fragment[] = [];
+    for (const f of col.slice().sort(byTop)) {
+      const centred = Math.abs((f.x0 + f.x1) / 2 - centre) < 0.2 * width && f.x1 - f.x0 < 0.8 * width;
+      if (!centred) break;
+      run.push(f);
+    }
+    return run;
+  };
+  const span = (run: Fragment[]) => [Math.min(...run.map((f) => f.y0)), Math.max(...run.map((f) => f.y1))];
+  let left = leading(leftCol);
+  let right = leading(rightCol);
+  if (left.length < 2 || right.length < 2) return null;
+  // Only the lines level with the other side's block ("Abstract" under the
+  // left author is not part of it).
+  const [l0, l1] = span(left);
+  const [r0, r1] = span(right);
+  const size = Math.max(...[...left, ...right].map((f) => f.size));
+  left = left.filter((f) => f.y1 > r0 - size && f.y0 < r1 + size);
+  right = right.filter((f) => f.y1 > l0 - size && f.y0 < l1 + size);
+  return left.length >= 2 && right.length >= 2 ? { left, right } : null;
+}
+
 /** Orders fragments for reading, given an optional gutter. */
 function order(fragments: Fragment[], gutter: number | null): Ordered[] {
   const byTop = (p: Fragment, q: Fragment) => q.baseline - p.baseline || p.x0 - q.x0;
@@ -349,18 +385,35 @@ function order(fragments: Fragment[], gutter: number | null): Ordered[] {
   const grouped = new Set(groups.flat());
   leftCol = leftCol.filter((f) => !grouped.has(f));
   rightCol = rightCol.filter((f) => !grouped.has(f));
-  const spanning = [...fragments.filter((f) => f.x0 < gutter && f.x1 > gutter), ...groups.map(combine)].sort(byTop);
+  const spanning = [...fragments.filter((f) => f.x0 < gutter && f.x1 > gutter), ...groups.map(combine)];
+
+  // Full-width elements, each read where it sits: what to emit there.
+  const wides = spanning.map((f) => ({ baseline: f.baseline, emit: [{ ...f, column: -1 as const }] as Ordered[] }));
+  const header = headerBlocks(leftCol, rightCol);
+  if (header) {
+    const inHeader = new Set([...header.left, ...header.right]);
+    leftCol = leftCol.filter((f) => !inHeader.has(f));
+    rightCol = rightCol.filter((f) => !inHeader.has(f));
+    wides.push({
+      baseline: Math.min(...[...inHeader].map((f) => f.baseline)),
+      emit: [
+        ...header.left.sort(byTop).map((f) => ({ ...f, column: 0 as const })),
+        ...header.right.sort(byTop).map((f) => ({ ...f, column: 1 as const })),
+      ],
+    });
+  }
+  wides.sort((a, b) => b.baseline - a.baseline);
 
   const out: Ordered[] = [];
   let upper = Infinity; // baseline of the previous full-width element
   const band = (col: Fragment[], lower: number) =>
     col.filter((f) => f.baseline < upper && f.baseline >= lower).sort(byTop);
 
-  for (const wide of [...spanning, null]) {
+  for (const wide of [...wides, null]) {
     const lower = wide ? wide.baseline : -Infinity;
     out.push(...band(leftCol, lower).map((f) => ({ ...f, column: 0 as const })));
     out.push(...band(rightCol, lower).map((f) => ({ ...f, column: 1 as const })));
-    if (wide) out.push({ ...wide, column: -1 });
+    if (wide) out.push(...wide.emit);
     upper = lower;
   }
   return out;
