@@ -36,9 +36,9 @@ export function ConfirmDialog({ title, children, confirmLabel, danger, onConfirm
           }
         }}
       >
-        <header className="dialog-header">
+        <div className="dialog-header">
           <h2 id={`${id}-title`}>{title}</h2>
-        </header>
+        </div>
         <div className="dialog-body">
           <div id={`${id}-body`}>{children}</div>
           <div className="dialog-actions">

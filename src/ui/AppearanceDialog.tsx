@@ -35,12 +35,12 @@ export function AppearanceDialog({ appearance, onChange, onClose }: Props) {
           }
         }}
       >
-        <header className="dialog-header">
+        <div className="dialog-header">
           <h2 id="appearance-title">Appearance</h2>
           <button type="button" className="button" onClick={onClose}>
             Close
           </button>
-        </header>
+        </div>
         <div className="dialog-body">
           <fieldset className="fieldset">
             <legend>Theme</legend>

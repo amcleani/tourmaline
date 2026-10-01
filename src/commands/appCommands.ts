@@ -31,10 +31,13 @@ export interface AppActions {
   toggleOutline: () => void;
   showPalette: () => void;
   showShortcuts: () => void;
+  showAbout: () => void;
+  checkForUpdates: () => void;
   find: () => void;
   findNext: () => void;
   findPrevious: () => void;
   closeFind: () => void;
+  selectMatch: () => Promise<void>;
   goToPage: () => void;
   firstPage: () => void;
   lastPage: () => void;
@@ -411,9 +414,18 @@ export function appCommands(a: AppActions): Command[] {
       run: a.findPrevious,
     },
     {
+      id: "nav.selectMatch",
+      title: "Select the found text",
+      keywords: ["find", "match", "highlight", "keyboard", "selection"],
+      shortcut: "Alt+Enter",
+      menu: { menu: "Navigate", group: 1, order: 4 },
+      when: (ctx) => ctx.findOpen,
+      run: a.selectMatch,
+    },
+    {
       id: "nav.closeFind",
       title: "Close find bar",
-      menu: { menu: "Navigate", group: 1, order: 4 },
+      menu: { menu: "Navigate", group: 1, order: 5 },
       when: (ctx) => ctx.findOpen,
       run: a.closeFind,
     },
@@ -582,6 +594,20 @@ export function appCommands(a: AppActions): Command[] {
       icon: "keyboard",
       menu: { menu: "Help", group: 1, order: 1 },
       run: a.showShortcuts,
+    },
+    {
+      id: "help.checkUpdates",
+      title: "Check for updates…",
+      keywords: ["update", "upgrade", "new version", "install", "release"],
+      menu: { menu: "Help", group: 2, order: 1 },
+      run: a.checkForUpdates,
+    },
+    {
+      id: "help.about",
+      title: "About Tourmaline",
+      keywords: ["version", "updates"],
+      menu: { menu: "Help", group: 2, order: 2 },
+      run: a.showAbout,
     },
   ];
 }

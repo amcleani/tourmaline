@@ -13,11 +13,13 @@ interface Props {
 export function RecentDialog({ recent, onOpen, onClose }: Props) {
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    listRef.current?.focus();
+    // The list, or with nothing in it, the Close button.
+    (listRef.current ?? closeRef.current)?.focus();
     return () => previous?.focus?.();
   }, []);
 
@@ -66,13 +68,19 @@ export function RecentDialog({ recent, onOpen, onClose }: Props) {
         aria-modal="true"
         aria-labelledby="recent-title"
         onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onClose();
+          }
+        }}
       >
-        <header className="dialog-header">
+        <div className="dialog-header">
           <h2 id="recent-title">Open recent</h2>
-          <button type="button" className="button" onClick={onClose}>
+          <button ref={closeRef} type="button" className="button" onClick={onClose}>
             Close
           </button>
-        </header>
+        </div>
         {recent.length === 0 ? (
           <p className="dialog-body muted">No recent documents.</p>
         ) : (

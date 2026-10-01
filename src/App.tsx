@@ -11,6 +11,7 @@ import { useAnnotations } from "./annotations/useAnnotations";
 import { usePdfImport } from "./annotations/usePdfImport";
 import { annotationsToWrite } from "./annotations/writeback";
 import { looksLikeSamePaper, textSample } from "./annotations/version";
+import { useUpdates } from "./app/useUpdates";
 import { DEFAULT_APPEARANCE, PAGE_COLOURS, THEMES, applyAppearance, cycle, parseAppearance, percent, stepScale, type Appearance } from "./app/appearance";
 import { DEFAULT_ZOOM, decodePosition, decodeSession, encodePosition, encodeSession } from "./app/session";
 import { clampZoom, nextZoom, type Anchor } from "./pdf/layout";
@@ -36,6 +37,7 @@ import {
   linkCitekey,
   listCategories,
   locateWork,
+  onOpenFiles,
   onReaderLinks,
   onWindowClose,
   openExternal,
@@ -70,6 +72,7 @@ import { useVault } from "./vault/useVault";
 import { installNativeMenu } from "./platform/menu";
 import { AnnotationPopover } from "./ui/AnnotationPopover";
 import { AppearanceDialog } from "./ui/AppearanceDialog";
+import { AboutDialog } from "./ui/AboutDialog";
 import { AnnotationsPanel } from "./ui/AnnotationsPanel";
 import { CategoriesDialog } from "./ui/CategoriesDialog";
 import { CommandPalette } from "./ui/CommandPalette";
@@ -118,7 +121,7 @@ interface Tab {
   citekeyDeclined: string | null;
 }
 
-type Dialog = "palette" | "shortcuts" | "appearance" | "goto" | "recent" | "categories" | "entry" | "writeback" | "exportSettings" | null;
+type Dialog = "palette" | "shortcuts" | "appearance" | "about" | "goto" | "recent" | "categories" | "entry" | "writeback" | "exportSettings" | null;
 
 const SAVE_POSITION_MS = 800;
 
@@ -350,31 +353,33 @@ export function App() {
   }, []);
 
   // Saves are delayed while scrolling; write any pending ones before the
-  // window closes (Ctrl+Q, File > Quit or the close button).
+  // window closes (Ctrl+Q, File > Quit or the close button) or an update
+  // restarts the app.
+  const saveEverything = useCallback(async () => {
+    // Unsaved note drafts first, then everything queued for the library.
+    await Promise.all([...draftFlushers.current].map((flush) => flush()));
+    await annotationsSettled.current();
+    const pending = [...saveTimers.current.keys()];
+    saveTimers.current.forEach((timer) => clearTimeout(timer));
+    saveTimers.current.clear();
+    await Promise.all(
+      pending.map((key) => {
+        const tab = tabsRef.current.find((t) => t.key === key);
+        return tab ? persistPosition(tab) : undefined;
+      }),
+    );
+  }, [persistPosition]);
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
     let disposed = false;
-    onWindowClose(async () => {
-      // Unsaved note drafts first, then everything queued for the library.
-      await Promise.all([...draftFlushers.current].map((flush) => flush()));
-      await annotationsSettled.current();
-      const pending = [...saveTimers.current.keys()];
-      saveTimers.current.forEach((timer) => clearTimeout(timer));
-      saveTimers.current.clear();
-      await Promise.all(
-        pending.map((key) => {
-          const tab = tabsRef.current.find((t) => t.key === key);
-          return tab ? persistPosition(tab) : undefined;
-        }),
-      );
-    })
+    onWindowClose(saveEverything)
       .then((u) => (disposed ? u() : (unsubscribe = u)))
       .catch((e) => console.error("Could not watch for the window closing", e));
     return () => {
       disposed = true;
       unsubscribe?.();
     };
-  }, [persistPosition]);
+  }, [saveEverything]);
 
   const onViewChange = useCallback(
     (key: string, view: ViewState) => {
@@ -738,6 +743,27 @@ export function App() {
     };
   }, [openReaderLink]);
 
+  // PDFs opened from Explorer ("Open with Tourmaline"), once the last
+  // session's tabs are back so they don't replace them.
+  useEffect(() => {
+    if (!sessionLoaded) return;
+    let unsubscribe: (() => void) | null = null;
+    let disposed = false;
+    onOpenFiles((paths) => {
+      for (const path of paths) {
+        openPdfAtPath(path)
+          .then(showDocument)
+          .catch((err) => reportError(`Could not open ${path}`, err));
+      }
+    })
+      .then((u) => (disposed ? u() : (unsubscribe = u)))
+      .catch((e) => console.error("Could not listen for files to open", e));
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, [sessionLoaded, showDocument, reportError]);
+
   // Once the linked paper is showing with its annotations, go to the target.
   useEffect(() => {
     const target = pendingReveal;
@@ -918,6 +944,10 @@ export function App() {
       exporting.current = false;
     }
   };
+
+  const updates = useUpdates(saveEverything);
+  const updatesRef = useRef(updates);
+  updatesRef.current = updates;
 
   // ---- Appearance (View › Appearance) ----------------------------------------------
 
@@ -1469,7 +1499,31 @@ export function App() {
           reportError("Could not copy the text", e);
         }
       },
+      selectMatch: async () => {
+        const m = latest.current.search.activeMatch;
+        if (!m) {
+          setNotice("Nothing found to select");
+          return;
+        }
+        if (!(await viewerRef.current?.selectText(m.page, m.start, m.end))) {
+          setNotice("Couldn't select that text");
+          return;
+        }
+        const key = (id: string) => {
+          const s = registry.get(id)?.shortcut;
+          return s ? formatShortcut(s) : null;
+        };
+        const highlight = key("annot.highlight");
+        setNotice(
+          `Selected. ${highlight ? `${highlight} highlights it, ` : ""}Shift+arrows (Ctrl+Shift by word) change where it ends.`,
+        );
+      },
       showAppearance: () => setDialog("appearance"),
+      showAbout: () => setDialog("about"),
+      checkForUpdates: () => {
+        setDialog("about");
+        void updatesRef.current.check(true);
+      },
       cycleTheme: () => {
         const a = appearanceRef.current;
         const theme = cycle(THEMES, a.theme);
@@ -1651,48 +1705,55 @@ export function App() {
   return (
     <RegistryContext.Provider value={registry}>
       <div className="app">
-        <Toolbar registry={registry}>
-          {activePdf && status && (
-            <>
+        <header className="app-header">
+          <Toolbar registry={registry}>
+            {updates.status.kind === "available" && (
+              <button type="button" className="toolbar-text-button" onClick={() => registry.execute("help.about", "toolbar")}>
+                Update to {updates.status.update.version}
+              </button>
+            )}
+            {activePdf && status && (
+              <>
+                <button
+                  type="button"
+                  className="toolbar-text-button"
+                  onClick={() => registry.execute("nav.goToPage", "toolbar")}
+                  title={`Go to page${goToPageHint}`}
+                  aria-label={`Page ${currentPage + 1} of ${pageCount}. Go to page`}
+                >
+                  {pageLabel && pageLabel !== String(currentPage + 1) ? `${pageLabel} (${currentPage + 1})` : currentPage + 1} /{" "}
+                  {pageCount}
+                </button>
+                <span className="toolbar-status">{Math.round(status.zoom * 100)}%</span>
+              </>
+            )}
+            {activePdf && activeTab && bibliography && (
               <button
                 type="button"
-                className="toolbar-text-button"
-                onClick={() => registry.execute("nav.goToPage", "toolbar")}
-                title={`Go to page${goToPageHint}`}
-                aria-label={`Page ${currentPage + 1} of ${pageCount}. Go to page`}
+                className={`toolbar-text-button toolbar-citekey${activeTab.citekey ? "" : " unlinked"}`}
+                onClick={() => registry.execute("file.linkEntry", "toolbar")}
+                title={
+                  activeTab.citekey
+                    ? `${bibliography.get(activeTab.citekey)?.fields.title ?? "Not in the bibliography any more"}. Link to another entry…`
+                    : "Link to bibliography entry…"
+                }
+                aria-label={
+                  activeTab.citekey
+                    ? `Bibliography entry ${activeTab.citekey}. Link to another entry`
+                    : "Not linked to a bibliography entry. Link to bibliography entry"
+                }
               >
-                {pageLabel && pageLabel !== String(currentPage + 1) ? `${pageLabel} (${currentPage + 1})` : currentPage + 1} /{" "}
-                {pageCount}
+                {activeTab.citekey ? `@${activeTab.citekey}` : "No entry"}
               </button>
-              <span className="toolbar-status">{Math.round(status.zoom * 100)}%</span>
-            </>
-          )}
-          {activePdf && activeTab && bibliography && (
-            <button
-              type="button"
-              className={`toolbar-text-button toolbar-citekey${activeTab.citekey ? "" : " unlinked"}`}
-              onClick={() => registry.execute("file.linkEntry", "toolbar")}
-              title={
-                activeTab.citekey
-                  ? `${bibliography.get(activeTab.citekey)?.fields.title ?? "Not in the bibliography any more"}. Link to another entry…`
-                  : "Link to bibliography entry…"
-              }
-              aria-label={
-                activeTab.citekey
-                  ? `Bibliography entry ${activeTab.citekey}. Link to another entry`
-                  : "Not linked to a bibliography entry. Link to bibliography entry"
-              }
-            >
-              {activeTab.citekey ? `@${activeTab.citekey}` : "No entry"}
-            </button>
-          )}
-        </Toolbar>
-        <TabBar
-          tabs={tabs.map((t) => ({ key: t.key, title: t.name, detail: t.path }))}
-          activeKey={activeKey}
-          onActivate={setActiveKey}
-          onClose={closeTab}
-        />
+            )}
+          </Toolbar>
+          <TabBar
+            tabs={tabs.map((t) => ({ key: t.key, title: t.name, detail: t.path }))}
+            activeKey={activeKey}
+            onActivate={setActiveKey}
+            onClose={closeTab}
+          />
+        </header>
         {error && (
           <div className="error" role="alert">
             {error}
@@ -1712,6 +1773,16 @@ export function App() {
             </aside>
           )}
           <main className="document-area">
+            {activeTab && <h1 className="visually-hidden">{activeTab.name}</h1>}
+            {contextMenu && (
+              <ContextMenu
+                registry={registry}
+                entries={contextMenu.entries}
+                at={contextMenu.at}
+                label={contextMenu.kind === "selection" ? "Selected text" : contextMenu.kind === "annotation" ? "Annotation" : "Page"}
+                onClose={closeContextMenu}
+              />
+            )}
             {activePdf && findOpen && (
               <FindBar
                 query={search.query}
@@ -1722,6 +1793,7 @@ export function App() {
                 onNext={() => registry.execute("nav.findNext", "other")}
                 onPrevious={() => registry.execute("nav.findPrevious", "other")}
                 onClose={() => registry.execute("nav.closeFind", "other")}
+                onSelect={() => registry.execute("nav.selectMatch", "other")}
                 focusToken={findFocusToken}
               />
             )}
@@ -1852,16 +1924,17 @@ export function App() {
             </aside>
           )}
         </div>
-        {contextMenu && (
-          <ContextMenu
-            registry={registry}
-            entries={contextMenu.entries}
-            at={contextMenu.at}
-            label={contextMenu.kind === "selection" ? "Selected text" : contextMenu.kind === "annotation" ? "Annotation" : "Page"}
-            onClose={closeContextMenu}
+        {dialog === "palette" && <CommandPalette registry={registry} onClose={() => setDialog(null)} />}
+        {dialog === "about" && (
+          <AboutDialog
+            status={updates.status}
+            onCheck={() => void updates.check(true)}
+            onInstall={() => void updates.install()}
+            auto={updates.auto}
+            onAutoChange={updates.setAuto}
+            onClose={() => setDialog(null)}
           />
         )}
-        {dialog === "palette" && <CommandPalette registry={registry} onClose={() => setDialog(null)} />}
         {dialog === "appearance" && <AppearanceDialog appearance={appearance} onChange={changeAppearance} onClose={() => setDialog(null)} />}
         {dialog === "shortcuts" && (
           <ShortcutsDialog

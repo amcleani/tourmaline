@@ -23,7 +23,8 @@ import { captureSelection, cssToPdf, type CapturedSelection, type CssRect, type 
 import type { AnnotationKind } from "../annotations/types";
 import type { Target } from "./outline";
 import type { PdfRect } from "./search";
-import { getTextContent } from "./textCache";
+import { matchRects } from "./search";
+import { getPageText, getTextContent } from "./textCache";
 import { PDF_TO_CSS } from "./units";
 
 export interface ZoomSpec {
@@ -88,12 +89,19 @@ export interface ViewerHandle {
   isInView(page: number, rect: PdfRect): Promise<boolean>;
   /** The current text selection in the document, if any. */
   captureSelection(): CapturedSelection | null;
+  /**
+   * Selects text of a page by keyboard (a find match): from `start` to `end` in
+   * its normalised text (buildPageText). Scrolls it into view; false if it couldn't.
+   */
+  selectText(page: number, start: number, end: number): Promise<boolean>;
   clearSelection(): void;
 }
 
 interface Props {
   doc: PDFDocumentProxy;
   name: string;
+  /** Added to each page's name, to tell panes showing the same paper apart ("second pane"). */
+  paneLabel?: string;
   zoom: ZoomSpec;
   /** Where to open; read once when the viewer mounts. */
   initialAnchor?: Anchor | null;
@@ -186,6 +194,7 @@ const PINCH_SETTLE = 150;
 export function PdfViewer({
   doc,
   name,
+  paneLabel,
   zoom,
   initialAnchor,
   highlights,
@@ -453,6 +462,17 @@ export function PdfViewer({
       const l = layoutRef.current;
       if (l) scrollToOffset(l.tops[Math.min(Math.max(page, 0), l.tops.length - 1)] - PADDING / 2);
     };
+    const revealRect = async (pageIndex: number, rect: PdfRect) => {
+      const l = layoutRef.current;
+      const el = scrollRef.current;
+      if (!l || !el) return;
+      const page = await doc.getPage(pageIndex + 1);
+      const r = toCssRect(page.getViewport({ scale: l.zoom * PDF_TO_CSS }), rect);
+      const top = l.tops[pageIndex] + r.top;
+      if (top < el.scrollTop || top + r.height > el.scrollTop + el.clientHeight) {
+        scrollToOffset(top - el.clientHeight / 3);
+      }
+    };
     return {
       goToPage,
       goToAnchor(anchor) {
@@ -477,17 +497,7 @@ export function PdfViewer({
           goToPage(pageIndex);
         }
       },
-      async revealRect(pageIndex, rect) {
-        const l = layoutRef.current;
-        const el = scrollRef.current;
-        if (!l || !el) return;
-        const page = await doc.getPage(pageIndex + 1);
-        const r = toCssRect(page.getViewport({ scale: l.zoom * PDF_TO_CSS }), rect);
-        const top = l.tops[pageIndex] + r.top;
-        if (top < el.scrollTop || top + r.height > el.scrollTop + el.clientHeight) {
-          scrollToOffset(top - el.clientHeight / 3);
-        }
-      },
+      revealRect,
       focus() {
         scrollRef.current?.focus({ preventScroll: true });
       },
@@ -530,6 +540,37 @@ export function PdfViewer({
       clearSelection() {
         window.getSelection()?.removeAllRanges();
       },
+      async selectText(pageIndex, start, end) {
+        const { text, content } = await getPageText(doc, pageIndex);
+        const sources = text.source.slice(start, end).filter((s): s is [number, number] => s !== null);
+        if (sources.length === 0) return false;
+        const [firstItem, firstChar] = sources[0];
+        const [lastItem, lastChar] = sources[sources.length - 1];
+        // The page's text layer must be there: scroll to the text and wait for it.
+        const [first] = matchRects(text, content.items, { page: pageIndex, start, end });
+        if (first) await revealRect(pageIndex, first);
+        let info: PageInfo | undefined;
+        for (let tries = 0; tries < 40; tries++) {
+          info = mountedPages.current.get(pageIndex);
+          if (info && info.itemOf.size > 0) break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        if (!info) return false;
+        const spanOf = (item: number) => [...info.itemOf].find(([, i]) => i === item)?.[0];
+        const textIn = (span: Element | undefined) =>
+          span ? (document.createTreeWalker(span, NodeFilter.SHOW_TEXT).nextNode() as Text | null) : null;
+        const from = textIn(spanOf(firstItem));
+        const to = textIn(spanOf(lastItem));
+        if (!from || !to) return false;
+        const range = document.createRange();
+        range.setStart(from, Math.min(firstChar, from.length));
+        range.setEnd(to, Math.min(lastChar + 1, to.length));
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        scrollRef.current?.focus({ preventScroll: true });
+        return true;
+      },
     };
   }, [doc]);
 
@@ -540,6 +581,16 @@ export function PdfViewer({
     if (!captureMode) setKeyRect(null);
   }, [captureMode]);
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Shift+Left/Right (Ctrl: by word) moves the end of a selection of page
+    // text, so text selected by keyboard (Select match) can be adjusted.
+    if (e.shiftKey && !e.altKey && !e.metaKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && scrollRef.current && isPageTextSelection(sel, scrollRef.current)) {
+        e.preventDefault();
+        sel.modify("extend", e.key === "ArrowRight" ? "forward" : "backward", e.ctrlKey ? "word" : "character");
+        return;
+      }
+    }
     if (!captureMode || !layout || e.target !== e.currentTarget || e.ctrlKey || e.altKey || e.metaKey) return;
     const el = e.currentTarget;
     if (e.key === "Enter") {
@@ -584,6 +635,7 @@ export function PdfViewer({
         width={layout!.widths[i]}
         height={layout!.heights[i]}
         zoom={effectiveZoom}
+        paneLabel={paneLabel}
         pixelRatio={pixelRatio}
         highlights={highlights?.get(i)}
         marks={marks?.get(i)}
@@ -639,6 +691,7 @@ interface PageProps {
   width: number;
   height: number;
   zoom: number;
+  paneLabel?: string;
   pixelRatio: number;
   highlights?: Highlight[];
   marks?: Mark[];
@@ -671,6 +724,7 @@ function PageView({
   width,
   height,
   zoom,
+  paneLabel,
   pixelRatio,
   highlights,
   marks,
@@ -876,7 +930,7 @@ function PageView({
       className="page"
       style={{ top, left, width, height, ["--total-scale-factor" as string]: cssScale }}
       role="region"
-      aria-label={`Page ${pageNumber} of ${doc.numPages}`}
+      aria-label={`Page ${pageNumber} of ${doc.numPages}${paneLabel ? ` (${paneLabel})` : ""}`}
       onClick={onClick}
       onContextMenu={onContextMenu}
     >

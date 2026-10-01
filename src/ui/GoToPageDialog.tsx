@@ -56,9 +56,9 @@ export function GoToPageDialog({ pageCount, current, labels, onGo, onClose }: Pr
           }
         }}
       >
-        <header className="dialog-header">
+        <div className="dialog-header">
           <h2 id="goto-title">Go to page</h2>
-        </header>
+        </div>
         <form
           className="dialog-body"
           onSubmit={(e) => {

@@ -27,9 +27,9 @@ export function VersionDialog({ name, onSame, onDifferent }: Props) {
           }
         }}
       >
-        <header className="dialog-header">
+        <div className="dialog-header">
           <h2 id="version-title">Same paper?</h2>
-        </header>
+        </div>
         <div className="dialog-body">
           <p id="version-body">
             “{name}” has changed since you last opened it, and its text looks like a different paper. Should it keep the

@@ -218,12 +218,12 @@ export function ShortcutsDialog({ registry, overrides, onChange, onEditCategorie
           }
         }}
       >
-        <header className="dialog-header">
+        <div className="dialog-header">
           <h2 id="shortcuts-title">Keyboard shortcuts</h2>
           <button type="button" className="button" onClick={onClose}>
             Close
           </button>
-        </header>
+        </div>
         <div className="dialog-body">
           <label className="field-label" htmlFor="shortcut-search">
             Search commands and shortcuts
@@ -249,7 +249,7 @@ export function ShortcutsDialog({ registry, overrides, onChange, onEditCategorie
             </section>
           ))}
         </div>
-        <footer className="dialog-footer">
+        <div className="dialog-footer">
           <button
             type="button"
             className="button"
@@ -261,7 +261,7 @@ export function ShortcutsDialog({ registry, overrides, onChange, onEditCategorie
           >
             Reset all shortcuts
           </button>
-        </footer>
+        </div>
       </div>
     </div>
   );

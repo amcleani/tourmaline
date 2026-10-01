@@ -6,6 +6,9 @@ import { getPageText } from "./textCache";
 
 export interface FoundMatch {
   page: number;
+  /** Where it is in the page's normalised text (buildPageText). */
+  start: number;
+  end: number;
   rects: PdfRect[];
 }
 
@@ -50,7 +53,7 @@ export function useDocumentSearch(doc: PDFDocumentProxy | null, fromPage: number
         if (cancelled) return;
         try {
           const { text, content } = await getPageText(doc, page);
-          const found = findInPage(text, page, query).map((m) => ({ page, rects: matchRects(text, content.items, m) }));
+          const found = findInPage(text, page, query).map((m) => ({ page, start: m.start, end: m.end, rects: matchRects(text, content.items, m) }));
           if (found.length) byPage.set(page, found);
           if (!chosen && found.length) {
             chosen = true;

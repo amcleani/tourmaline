@@ -55,6 +55,7 @@ export function TabBar({ tabs, activeKey, onActivate, onClose }: Props) {
               aria-selected={selected}
               tabIndex={selected ? 0 : -1}
               className="tab-label"
+              aria-keyshortcuts="Delete"
               title={tab.detail ?? tab.title}
               onClick={() => onActivate(tab.key)}
               onAuxClick={(e) => e.button === 1 && onClose(tab.key)}
@@ -62,11 +63,12 @@ export function TabBar({ tabs, activeKey, onActivate, onClose }: Props) {
             >
               {tab.title}
             </button>
+            {/* For the mouse; the keyboard closes a tab with Delete or the Close tab command. */}
             <button
               type="button"
               className="tab-close"
               tabIndex={-1}
-              aria-label={`Close ${tab.title}`}
+              aria-hidden="true"
               title={`Close tab${closeHint}`}
               onClick={() => onClose(tab.key)}
             >

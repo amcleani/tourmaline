@@ -93,9 +93,9 @@ export function CategoriesDialog({ categories, onSave, onClose }: Props) {
           }
         }}
       >
-        <header className="dialog-header">
+        <div className="dialog-header">
           <h2 id="categories-title">Categories</h2>
-        </header>
+        </div>
         <form
           className="dialog-body"
           onSubmit={(e) => {

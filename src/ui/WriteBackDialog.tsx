@@ -34,9 +34,9 @@ export function WriteBackDialog({ name, count, onSave, onCancel }: Props) {
           }
         }}
       >
-        <header className="dialog-header">
+        <div className="dialog-header">
           <h2 id={`${id}-title`}>Save annotations into the PDF?</h2>
-        </header>
+        </div>
         <div className="dialog-body">
           <div id={`${id}-body`}>
             <p>

@@ -161,9 +161,9 @@ export function ExportSettingsDialog({ settings, preview, citations, onSave, onC
           }
         }}
       >
-        <header className="dialog-header">
+        <div className="dialog-header">
           <h2 id={field("title")}>Export settings</h2>
-        </header>
+        </div>
         <form
           className="dialog-body"
           onSubmit={(e) => {

@@ -2,16 +2,17 @@ mod annotations;
 mod db;
 mod documents;
 mod error;
+mod launch;
 mod library;
 mod pdf_annotations;
 mod writeback;
 mod vault;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tauri::{
     ipc::{InvokeBody, Request, Response},
-    AppHandle, Manager,
+    AppHandle, Emitter, Manager, State,
 };
 
 use annotations::{
@@ -399,15 +400,26 @@ async fn read_attachment(app: AppHandle, id: String) -> Result<Response> {
     .await
 }
 
+/// The PDFs the app was started with (once: later calls get none).
+#[tauri::command]
+fn take_launch_files(files: State<'_, launch::LaunchFiles>) -> Vec<String> {
+    std::mem::take(&mut *files.0.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         // Must be registered first. A second launch focuses the running window
         // instead of starting another process on the same library database.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.set_focus();
+            }
+            // "Open with Tourmaline" while it runs: the running window opens the file.
+            let files = launch::pdf_args(&args, Path::new(&cwd));
+            if !files.is_empty() {
+                let _ = app.emit("open-files", files);
             }
         }))
         // tourmaline:// links from notes. A link clicked while the app runs
@@ -416,6 +428,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        // Help › Check for updates: signed releases from GitHub (plugins.updater in tauri.conf.json).
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // Installers register the scheme; a development build registers
             // itself for the current user so links can be tried.
@@ -438,9 +453,13 @@ pub fn run() {
             eprintln!("Tourmaline library database: {}", path.display());
             app.manage(Db::open(&path)?);
             app.manage(DataDir(dir));
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let files = launch::pdf_args(&std::env::args().collect::<Vec<_>>(), &cwd);
+            app.manage(launch::LaunchFiles(std::sync::Mutex::new(files)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            take_launch_files,
             open_document,
             set_text_sample,
             detach_file,

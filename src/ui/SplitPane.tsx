@@ -89,6 +89,7 @@ export function SplitPane({ tabs, tab, onTab, zoom, onZoom, initialAnchor, marks
           key={`${tab.key}:${tab.fileId}`}
           doc={tab.pdf}
           name={`${tab.name} (second pane)`}
+          paneLabel="second pane"
           zoom={zoom}
           initialAnchor={initialAnchor}
           onViewChange={(v) => {

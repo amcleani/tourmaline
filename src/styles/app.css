@@ -115,6 +115,7 @@ kbd {
 
 .muted { color: var(--text-muted); }
 
+.app-header { flex: none; }
 .app {
   display: flex;
   flex-direction: column;
@@ -561,6 +562,10 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .dialog-body { overflow: auto; padding: 4px 16px 16px; }
 .dialog-body h3 { font-size: 0.95rem; margin: 16px 0 6px; color: var(--text-muted); }
 .dialog.small { width: min(360px, calc(100vw - 32px)); }
+.checkbox-label { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.update-status:empty { display: none; }
+.update-notes p { white-space: pre-wrap; }
+.button[aria-disabled="true"] { opacity: 0.5; cursor: default; }
 .field-label { display: block; margin: 12px 0 6px; }
 .text-input {
   width: 100%;

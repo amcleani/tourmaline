@@ -26,14 +26,26 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true,
+    "publisher": "amcleani",
+    "shortDescription": "A PDF reader for academic research",
+    "category": "Education",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
   },
   "plugins": {
     "deep-link": {
@@ -41,6 +53,15 @@
         "schemes": [
           "tourmaline"
         ]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFCNjk4QTY1RkY1QzkwREYKUldUZmtGei9aWXBwcTExb3hHZk1FTDBib2d6RTAxN3JDYWlZRUUzdUk0RzhUOXRjOVkwdW13a1kK",
+      "endpoints": [
+        "https://github.com/amcleani/tourmaline/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

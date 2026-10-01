@@ -335,6 +335,19 @@ export async function onReaderLinks(handler: (url: string) => void): Promise<() 
   return unlisten;
 }
 
+/**
+ * PDFs handed to the app by Windows ("Open with Tourmaline"): those it was
+ * started with, then any opened while it runs.
+ */
+export async function onOpenFiles(handler: (paths: string[]) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<string[]>("open-files", (e) => handler(e.payload));
+  const atStart = await invoke<string[]>("take_launch_files");
+  if (atStart.length > 0) handler(atStart);
+  return unlisten;
+}
+
 export async function copyText(text: string): Promise<void> {
   if (isTauri()) {
     const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
@@ -413,6 +426,44 @@ export async function setUiScale(scale: number): Promise<void> {
   } else {
     document.documentElement.style.zoom = scale === 1 ? "" : String(scale);
   }
+}
+
+export interface AvailableUpdate {
+  version: string;
+  /** The release notes, if any. */
+  notes: string | null;
+  /** Downloads and installs it, then starts the new version. `progress` gets 0-1 while downloading (when the size is known). */
+  install(progress?: (fraction: number) => void): Promise<void>;
+}
+
+/** A newer signed release, if there is one (the endpoint is plugins.updater in tauri.conf.json). */
+export async function checkForUpdate(): Promise<AvailableUpdate | null> {
+  if (!isTauri()) return null;
+  const { check } = await import("@tauri-apps/plugin-updater");
+  const update = await check();
+  if (!update) return null;
+  return {
+    version: update.version,
+    notes: update.body?.trim() || null,
+    async install(progress) {
+      let total = 0;
+      let done = 0;
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") total = event.data.contentLength ?? 0;
+        else if (event.event === "Progress" && total > 0) progress?.(Math.min(1, (done += event.data.chunkLength) / total));
+      });
+      // On Windows the installer has taken over by now; elsewhere, restart into the new version.
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
+    },
+  };
+}
+
+/** Tourmaline's version ("0.1.0"). */
+export async function appVersion(): Promise<string> {
+  if (!isTauri()) return "development";
+  const { getVersion } = await import("@tauri-apps/api/app");
+  return getVersion();
 }
 
 export async function quitApp(): Promise<void> {
