@@ -89,9 +89,16 @@ type Listener = () => void;
 /** Window in which a second trigger of the same command from a different source is ignored. */
 const DUPLICATE_WINDOW_MS = 150;
 
+/** Shortcuts the user chose (Help › Keyboard shortcuts), by command id; null removes a command's shortcut. */
+export type ShortcutOverrides = Readonly<Record<string, string | null>>;
+
 export class CommandRegistry {
+  /** Commands as registered (with their default shortcuts). */
+  private originals = new Map<string, Command>();
+  /** The same, with the shortcut in effect. */
   private commands = new Map<string, Command>();
   private byShortcut = new Map<string, string>();
+  private overrides: ShortcutOverrides = {};
   private listeners = new Set<Listener>();
   private lastRun: { id: string; source: ExecutionSource; at: number } | null = null;
   private version = 0;
@@ -103,26 +110,99 @@ export class CommandRegistry {
   ) {}
 
   register(command: Command): () => void {
-    if (this.commands.has(command.id)) throw new Error(`Duplicate command id "${command.id}"`);
+    if (this.originals.has(command.id)) throw new Error(`Duplicate command id "${command.id}"`);
     if (command.shortcut) {
+      // Two default shortcuts the same is a mistake in the code (a user's choice is checked by the editor).
       const key = normaliseShortcut(command.shortcut);
-      const existing = this.byShortcut.get(key);
-      if (existing) throw new Error(`Shortcut ${key} is used by both "${existing}" and "${command.id}"`);
-      this.byShortcut.set(key, command.id);
+      for (const other of this.originals.values()) {
+        if (other.shortcut && normaliseShortcut(other.shortcut) === key) {
+          throw new Error(`Shortcut ${key} is used by both "${other.id}" and "${command.id}"`);
+        }
+      }
     }
-    this.commands.set(command.id, command);
+    this.originals.set(command.id, command);
+    this.rebind();
     this.structureVersion++;
     this.emit();
     return () => this.unregister(command.id);
   }
 
   unregister(id: string) {
-    const command = this.commands.get(id);
-    if (!command) return;
-    if (command.shortcut) this.byShortcut.delete(normaliseShortcut(command.shortcut));
-    this.commands.delete(id);
+    if (!this.originals.delete(id)) return;
+    this.rebind();
     this.structureVersion++;
     this.emit();
+  }
+
+  /** The shortcuts the user chose, replacing the defaults of those commands (ids not registered yet are kept for later). */
+  setOverrides(overrides: ShortcutOverrides) {
+    this.overrides = { ...overrides };
+    this.rebind();
+    this.structureVersion++;
+    this.emit();
+  }
+
+  private recording = false;
+  /**
+   * While the shortcut editor listens for a key, the native menu drops its
+   * accelerators: Windows hands an accelerator's key to the menu, never to the page.
+   */
+  setRecording(on: boolean) {
+    if (this.recording === on) return;
+    this.recording = on;
+    this.structureVersion++;
+    this.emit();
+  }
+
+  isRecording(): boolean {
+    return this.recording;
+  }
+
+  getOverrides(): ShortcutOverrides {
+    return this.overrides;
+  }
+
+  /** A command's shortcut before the user changed it. */
+  defaultShortcut(id: string): string | undefined {
+    return this.originals.get(id)?.shortcut;
+  }
+
+  /** The command a shortcut runs now, if any. */
+  commandForShortcut(shortcut: string): Command | undefined {
+    const id = this.byShortcut.get(normaliseShortcut(shortcut));
+    return id ? this.commands.get(id) : undefined;
+  }
+
+  // The user's shortcuts first, then the defaults of the other commands; a
+  // default the user gave to another command is dropped.
+  private rebind() {
+    this.byShortcut.clear();
+    this.commands.clear();
+    const effective = new Map<string, string | undefined>();
+    for (const id of this.originals.keys()) {
+      if (!Object.hasOwn(this.overrides, id)) continue;
+      const chosen = this.overrides[id];
+      let key: string | undefined;
+      try {
+        key = chosen ? normaliseShortcut(chosen) : undefined;
+      } catch {
+        key = undefined; // Unreadable (edited by hand): no shortcut.
+      }
+      if (key && this.byShortcut.has(key)) key = undefined;
+      if (key) this.byShortcut.set(key, id);
+      effective.set(id, key);
+    }
+    for (const [id, original] of this.originals) {
+      if (effective.has(id)) continue;
+      let key = original.shortcut ? normaliseShortcut(original.shortcut) : undefined;
+      if (key && this.byShortcut.has(key)) key = undefined;
+      if (key) this.byShortcut.set(key, id);
+      effective.set(id, key);
+    }
+    for (const [id, original] of this.originals) {
+      const key = effective.get(id);
+      this.commands.set(id, key === original.shortcut || (!key && !original.shortcut) ? original : { ...original, shortcut: key });
+    }
   }
 
   get(id: string): Command | undefined {

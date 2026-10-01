@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import type { SearchStatus } from "../pdf/useSearch";
+import { useShortcutHint } from "../commands/useShortcut";
 
 interface Props {
   query: string;
@@ -17,6 +18,8 @@ interface Props {
 
 export function FindBar({ query, onQueryChange, count, active, status, onNext, onPrevious, onClose, focusToken }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const nextHint = useShortcutHint("nav.findNext");
+  const previousHint = useShortcutHint("nav.findPrevious");
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -54,10 +57,10 @@ export function FindBar({ query, onQueryChange, count, active, status, onNext, o
       <span className="findbar-count" aria-live="polite">
         {summary}
       </span>
-      <button type="button" className="icon-button" onClick={onPrevious} disabled={count === 0} aria-label="Previous match (Shift+F3)" title="Previous match (Shift+F3)">
+      <button type="button" className="icon-button" onClick={onPrevious} disabled={count === 0} aria-label={`Previous match${previousHint}`} title={`Previous match${previousHint}`}>
         <ChevronUp size={16} aria-hidden="true" />
       </button>
-      <button type="button" className="icon-button" onClick={onNext} disabled={count === 0} aria-label="Next match (F3)" title="Next match (F3)">
+      <button type="button" className="icon-button" onClick={onNext} disabled={count === 0} aria-label={`Next match${nextHint}`} title={`Next match${nextHint}`}>
         <ChevronDown size={16} aria-hidden="true" />
       </button>
       <button type="button" className="icon-button" onClick={onClose} aria-label="Close find bar (Escape)" title="Close (Escape)">

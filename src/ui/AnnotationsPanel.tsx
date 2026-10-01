@@ -4,6 +4,7 @@ import { readAttachment } from "../platform";
 import { colourOf, type Annotation, type Category } from "../annotations/types";
 import { NoteView } from "../notes/NoteView";
 import { Icon } from "./icons";
+import { useShortcut } from "../commands/useShortcut";
 
 interface Props {
   annotations: readonly Annotation[];
@@ -35,6 +36,7 @@ export function AnnotationsPanel({
   onEditNote,
   inlineEditor,
 }: Props) {
+  const highlightKey = useShortcut("annot.highlight");
   const [query, setQuery] = useState("");
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const listId = useId();
@@ -131,7 +133,7 @@ export function AnnotationsPanel({
       )}
       {annotations.length === 0 ? (
         <p className="panel-status muted">
-          No annotations yet. Select text and press H (or a category key 1–9), or use Annotate › Capture area.
+          No annotations yet. Select text and {highlightKey ? `press ${highlightKey} (or a category key)` : "use Annotate › Highlight selection"}, or use Annotate › Capture area.
         </p>
       ) : visible.length === 0 ? (
         <p className="panel-status muted">No annotations match.</p>

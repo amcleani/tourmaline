@@ -78,7 +78,7 @@ async function buildMenu(registry: CommandRegistry): Promise<Map<string, MenuIte
         const shortcut = command.shortcut;
         const item = await MenuItem.new({
           text: command.title,
-          accelerator: shortcut && nativeAcceleratorOk(shortcut) ? toAccelerator(shortcut) : undefined,
+          accelerator: shortcut && nativeAcceleratorOk(shortcut) && !registry.isRecording() ? toAccelerator(shortcut) : undefined,
           enabled: registry.isEnabled(command.id),
           action: () => registry.execute(command.id, "menu"),
         });

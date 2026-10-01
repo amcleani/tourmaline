@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { CommandRegistry, IDLE_CONTEXT, isTypingTarget, type CommandContext } from "./commands/registry";
+import { CommandRegistry, IDLE_CONTEXT, isTypingTarget, type CommandContext, type ShortcutOverrides } from "./commands/registry";
+import { parseOverrides } from "./commands/keymap";
 import { appCommands } from "./commands/appCommands";
-import { isTextEditingShortcut } from "./commands/shortcuts";
+import { formatShortcut, isTextEditingShortcut } from "./commands/shortcuts";
+import { RegistryContext } from "./commands/useShortcut";
 import { colourOf, type Annotation, type Category } from "./annotations/types";
 import { useAnnotations } from "./annotations/useAnnotations";
 import { usePdfImport } from "./annotations/usePdfImport";
@@ -898,6 +900,27 @@ export function App() {
     }
   };
 
+  // ---- Keyboard shortcuts the user chose (Help › Keyboard shortcuts) ---------------
+
+  const [shortcutOverrides, setShortcutOverrides] = useState<ShortcutOverrides>({});
+  useEffect(() => {
+    getState("shortcuts")
+      .then((json) => {
+        const saved = parseOverrides(json);
+        setShortcutOverrides(saved);
+        registry.setOverrides(saved);
+      })
+      .catch((e) => console.error("Could not load the keyboard shortcuts", e));
+  }, [registry]);
+  const changeShortcuts = useCallback(
+    (next: ShortcutOverrides) => {
+      setShortcutOverrides(next);
+      registry.setOverrides(next);
+      void setState("shortcuts", JSON.stringify(next)).catch((e) => reportError("Could not save the keyboard shortcuts", e));
+    },
+    [registry, reportError],
+  );
+
   // ---- Focus mode ----------------------------------------------------------------
 
   const [focusOn, setFocusOn] = useState(false);
@@ -1487,6 +1510,8 @@ export function App() {
     void viewerRef.current?.goToTarget(target);
   };
   const pageCount = activePdf?.numPages ?? 0;
+  const goToPageShortcut = registry.get("nav.goToPage")?.shortcut;
+  const goToPageHint = goToPageShortcut ? ` (${formatShortcut(goToPageShortcut)})` : "";
   const pageLabel = activeTab?.labels?.[currentPage];
   const activeKeyForView = activeTab?.key;
   const closePreview = linkPreview.close;
@@ -1511,331 +1536,341 @@ export function App() {
   const handleZoomTo = useCallback((zoom: number) => zoomMain(() => zoom), [zoomMain]);
 
   return (
-    <div className="app">
-      <Toolbar registry={registry}>
-        {activePdf && status && (
-          <>
+    <RegistryContext.Provider value={registry}>
+      <div className="app">
+        <Toolbar registry={registry}>
+          {activePdf && status && (
+            <>
+              <button
+                type="button"
+                className="toolbar-text-button"
+                onClick={() => registry.execute("nav.goToPage", "toolbar")}
+                title={`Go to page${goToPageHint}`}
+                aria-label={`Page ${currentPage + 1} of ${pageCount}. Go to page`}
+              >
+                {pageLabel && pageLabel !== String(currentPage + 1) ? `${pageLabel} (${currentPage + 1})` : currentPage + 1} /{" "}
+                {pageCount}
+              </button>
+              <span className="toolbar-status">{Math.round(status.zoom * 100)}%</span>
+            </>
+          )}
+          {activePdf && activeTab && bibliography && (
             <button
               type="button"
-              className="toolbar-text-button"
-              onClick={() => registry.execute("nav.goToPage", "toolbar")}
-              title="Go to page (Ctrl+G)"
-              aria-label={`Page ${currentPage + 1} of ${pageCount}. Go to page`}
-            >
-              {pageLabel && pageLabel !== String(currentPage + 1) ? `${pageLabel} (${currentPage + 1})` : currentPage + 1} /{" "}
-              {pageCount}
-            </button>
-            <span className="toolbar-status">{Math.round(status.zoom * 100)}%</span>
-          </>
-        )}
-        {activePdf && activeTab && bibliography && (
-          <button
-            type="button"
-            className={`toolbar-text-button toolbar-citekey${activeTab.citekey ? "" : " unlinked"}`}
-            onClick={() => registry.execute("file.linkEntry", "toolbar")}
-            title={
-              activeTab.citekey
-                ? `${bibliography.get(activeTab.citekey)?.fields.title ?? "Not in the bibliography any more"}. Link to another entry…`
-                : "Link to bibliography entry…"
-            }
-            aria-label={
-              activeTab.citekey
-                ? `Bibliography entry ${activeTab.citekey}. Link to another entry`
-                : "Not linked to a bibliography entry. Link to bibliography entry"
-            }
-          >
-            {activeTab.citekey ? `@${activeTab.citekey}` : "No entry"}
-          </button>
-        )}
-      </Toolbar>
-      <TabBar
-        tabs={tabs.map((t) => ({ key: t.key, title: t.name, detail: t.path }))}
-        activeKey={activeKey}
-        onActivate={setActiveKey}
-        onClose={closeTab}
-      />
-      {error && (
-        <div className="error" role="alert">
-          {error}
-          <button type="button" className="button" onClick={() => setError(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
-      <div className="notice-region" role="status" aria-live="polite">
-        {notice && <span className="notice">{notice}</span>}
-      </div>
-      <div className={captureMode ? "workspace capturing" : "workspace"}>
-        {activePdf && outlineOpen && (
-          <aside className="sidebar" aria-label="Outline">
-            <h2 className="sidebar-heading">Outline</h2>
-            <OutlinePanel outline={outline} onNavigate={navigate} />
-          </aside>
-        )}
-        <main className="document-area">
-          {activePdf && findOpen && (
-            <FindBar
-              query={search.query}
-              onQueryChange={search.setQuery}
-              count={search.matches.length}
-              active={search.active}
-              status={search.status}
-              onNext={() => registry.execute("nav.findNext", "other")}
-              onPrevious={() => registry.execute("nav.findPrevious", "other")}
-              onClose={() => registry.execute("nav.closeFind", "other")}
-              focusToken={findFocusToken}
-            />
-          )}
-          {activeTab && activePdf ? (
-            <PdfViewer
-              key={`${activeTab.key}:${activeTab.fileId}`}
-              doc={activePdf}
-              name={activeTab.name}
-              zoom={activeTab.zoom}
-              initialAnchor={views.current.get(activeTab.key)?.anchor ?? activeTab.initialAnchor}
-              highlights={findOpen ? search.highlights : undefined}
-              onViewChange={handleViewChange}
-              onZoomStep={handleZoomStep}
-              onZoomTo={handleZoomTo}
-              handleRef={viewerRef}
-              marks={marks}
-              onMarkClick={(id) => {
-                setSelectedId(id);
-                // Keep keyboard shortcuts (Delete, N, 1-9) working after a click.
-                viewerRef.current?.focus();
-              }}
-              captureMode={captureMode}
-              onCapture={onCapture}
-              onSelectionChange={setSelectionEnd}
-              overlay={overlay}
-              hiddenAnnotations={hiddenPdfAnnotations}
-              focus={focusRects}
-              spotsFor={references.spotsFor}
-              onSpotHover={onSpotHover}
-              onSpotActivate={(page, spot, aside) => void followSpot(page, spot, aside)}
-              onPageClick={(page, x, y) => {
-                if (!focusActive || !steps) return;
-                const i = stepUnder(steps, page, x, y);
-                if (i !== -1) setStepIndex(i);
-              }}
-            />
-          ) : activeTab ? (
-            <div className="tab-placeholder" role={activeTab.status === "error" ? "alert" : "status"}>
-              {activeTab.status === "error" ? activeTab.error : `Opening ${activeTab.name}…`}
-            </div>
-          ) : (
-            <Welcome recent={recent} onOpen={() => registry.execute("file.open", "other")} onOpenRecent={openRecent} />
-          )}
-          {captureMode && (
-            <div className="capture-hint" role="status">
-              Drag over the page, or use the arrow keys (Shift+arrows to resize) and Enter, to capture an area. Escape
-              or A to stop.
-            </div>
-          )}
-          {preview && activePdf && (
-            <ReferencePreview
-              key={preview.spot.id}
-              pdf={activePdf}
-              destination={preview.destination}
-              anchor={preview.at}
-              zoom={status?.zoom ?? 1}
-              onMouseEnter={linkPreview.keep}
-              onMouseLeave={() => onSpotHover(preview.page, null)}
-            />
-          )}
-          {focusActive && (
-            <FocusBar
-              unit={focusSettings.unit}
-              eye={focusSettings.eye}
-              detectColumns={detectColumns}
-              position={
-                !focusSteps
-                  ? "Finding the lines…"
-                  : focusSteps.pagesDone < focusSteps.pageCount
-                    ? `Reading pages: ${focusSteps.pagesDone} of ${focusSteps.pageCount}`
-                    : focusSteps.steps.length === 0
-                      ? "No text to step through"
-                      : `Step ${(stepIndex ?? 0) + 1} of ${focusSteps.steps.length}`
+              className={`toolbar-text-button toolbar-citekey${activeTab.citekey ? "" : " unlinked"}`}
+              onClick={() => registry.execute("file.linkEntry", "toolbar")}
+              title={
+                activeTab.citekey
+                  ? `${bibliography.get(activeTab.citekey)?.fields.title ?? "Not in the bibliography any more"}. Link to another entry…`
+                  : "Link to bibliography entry…"
               }
-              announcement={step ? (step.kind === "figure" ? "Figure" : step.text) : ""}
-              onUnit={(unit) => saveFocusSettings({ ...focusSettings, unit })}
-              onEye={(eye) => saveFocusSettings({ ...focusSettings, eye })}
-              onColumns={setColumnsFor}
-              // Back to the document after a click, so Up and Down step again.
-              onPrevious={() => {
-                registry.execute("focus.previous", "other");
-                viewerRef.current?.focus();
-              }}
-              onNext={() => {
-                registry.execute("focus.next", "other");
-                viewerRef.current?.focus();
-              }}
-              onExit={() => {
-                registry.execute("view.focusMode", "other");
-                viewerRef.current?.focus();
-              }}
+              aria-label={
+                activeTab.citekey
+                  ? `Bibliography entry ${activeTab.citekey}. Link to another entry`
+                  : "Not linked to a bibliography entry. Link to bibliography entry"
+              }
+            >
+              {activeTab.citekey ? `@${activeTab.citekey}` : "No entry"}
+            </button>
+          )}
+        </Toolbar>
+        <TabBar
+          tabs={tabs.map((t) => ({ key: t.key, title: t.name, detail: t.path }))}
+          activeKey={activeKey}
+          onActivate={setActiveKey}
+          onClose={closeTab}
+        />
+        {error && (
+          <div className="error" role="alert">
+            {error}
+            <button type="button" className="button" onClick={() => setError(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
+        <div className="notice-region" role="status" aria-live="polite">
+          {notice && <span className="notice">{notice}</span>}
+        </div>
+        <div className={captureMode ? "workspace capturing" : "workspace"}>
+          {activePdf && outlineOpen && (
+            <aside className="sidebar" aria-label="Outline">
+              <h2 className="sidebar-heading">Outline</h2>
+              <OutlinePanel outline={outline} onNavigate={navigate} />
+            </aside>
+          )}
+          <main className="document-area">
+            {activePdf && findOpen && (
+              <FindBar
+                query={search.query}
+                onQueryChange={search.setQuery}
+                count={search.matches.length}
+                active={search.active}
+                status={search.status}
+                onNext={() => registry.execute("nav.findNext", "other")}
+                onPrevious={() => registry.execute("nav.findPrevious", "other")}
+                onClose={() => registry.execute("nav.closeFind", "other")}
+                focusToken={findFocusToken}
+              />
+            )}
+            {activeTab && activePdf ? (
+              <PdfViewer
+                key={`${activeTab.key}:${activeTab.fileId}`}
+                doc={activePdf}
+                name={activeTab.name}
+                zoom={activeTab.zoom}
+                initialAnchor={views.current.get(activeTab.key)?.anchor ?? activeTab.initialAnchor}
+                highlights={findOpen ? search.highlights : undefined}
+                onViewChange={handleViewChange}
+                onZoomStep={handleZoomStep}
+                onZoomTo={handleZoomTo}
+                handleRef={viewerRef}
+                marks={marks}
+                onMarkClick={(id) => {
+                  setSelectedId(id);
+                  // Keep keyboard shortcuts (Delete, N, 1-9) working after a click.
+                  viewerRef.current?.focus();
+                }}
+                captureMode={captureMode}
+                onCapture={onCapture}
+                onSelectionChange={setSelectionEnd}
+                overlay={overlay}
+                hiddenAnnotations={hiddenPdfAnnotations}
+                focus={focusRects}
+                spotsFor={references.spotsFor}
+                onSpotHover={onSpotHover}
+                onSpotActivate={(page, spot, aside) => void followSpot(page, spot, aside)}
+                onPageClick={(page, x, y) => {
+                  if (!focusActive || !steps) return;
+                  const i = stepUnder(steps, page, x, y);
+                  if (i !== -1) setStepIndex(i);
+                }}
+              />
+            ) : activeTab ? (
+              <div className="tab-placeholder" role={activeTab.status === "error" ? "alert" : "status"}>
+                {activeTab.status === "error" ? activeTab.error : `Opening ${activeTab.name}…`}
+              </div>
+            ) : (
+              <Welcome recent={recent} onOpen={() => registry.execute("file.open", "other")} onOpenRecent={openRecent} />
+            )}
+            {captureMode && (
+              <div className="capture-hint" role="status">
+                Drag over the page, or use the arrow keys (Shift+arrows to resize) and Enter, to capture an area. Escape
+                or A to stop.
+              </div>
+            )}
+            {preview && activePdf && (
+              <ReferencePreview
+                key={preview.spot.id}
+                pdf={activePdf}
+                destination={preview.destination}
+                anchor={preview.at}
+                zoom={status?.zoom ?? 1}
+                onMouseEnter={linkPreview.keep}
+                onMouseLeave={() => onSpotHover(preview.page, null)}
+              />
+            )}
+            {focusActive && (
+              <FocusBar
+                unit={focusSettings.unit}
+                eye={focusSettings.eye}
+                detectColumns={detectColumns}
+                position={
+                  !focusSteps
+                    ? "Finding the lines…"
+                    : focusSteps.pagesDone < focusSteps.pageCount
+                      ? `Reading pages: ${focusSteps.pagesDone} of ${focusSteps.pageCount}`
+                      : focusSteps.steps.length === 0
+                        ? "No text to step through"
+                        : `Step ${(stepIndex ?? 0) + 1} of ${focusSteps.steps.length}`
+                }
+                announcement={step ? (step.kind === "figure" ? "Figure" : step.text) : ""}
+                onUnit={(unit) => saveFocusSettings({ ...focusSettings, unit })}
+                onEye={(eye) => saveFocusSettings({ ...focusSettings, eye })}
+                onColumns={setColumnsFor}
+                // Back to the document after a click, so Up and Down step again.
+                onPrevious={() => {
+                  registry.execute("focus.previous", "other");
+                  viewerRef.current?.focus();
+                }}
+                onNext={() => {
+                  registry.execute("focus.next", "other");
+                  viewerRef.current?.focus();
+                }}
+                onExit={() => {
+                  registry.execute("view.focusMode", "other");
+                  viewerRef.current?.focus();
+                }}
+              />
+            )}
+          </main>
+          {split && splitTab && (
+            <SplitPane
+              tabs={readyTabs}
+              tab={splitTab}
+              onTab={(key) => setSplit((s) => s && { ...s, tabKey: key, anchor: views.current.get(key)?.anchor ?? null })}
+              zoom={split.zoom}
+              onZoom={(zoom) => setSplit((s) => s && { ...s, zoom })}
+              initialAnchor={split.anchor}
+              marks={splitTab.key === activeKey ? marks : undefined}
+              handleRef={splitRef}
+              onViewChange={(v) => (splitZoom.current = v.zoom)}
+              onClose={() => registry.execute("view.split", "other")}
+              onError={reportError}
             />
           )}
-        </main>
-        {split && splitTab && (
-          <SplitPane
-            tabs={readyTabs}
-            tab={splitTab}
-            onTab={(key) => setSplit((s) => s && { ...s, tabKey: key, anchor: views.current.get(key)?.anchor ?? null })}
-            zoom={split.zoom}
-            onZoom={(zoom) => setSplit((s) => s && { ...s, zoom })}
-            initialAnchor={split.anchor}
-            marks={splitTab.key === activeKey ? marks : undefined}
-            handleRef={splitRef}
-            onViewChange={(v) => (splitZoom.current = v.zoom)}
-            onClose={() => registry.execute("view.split", "other")}
-            onError={reportError}
+          {activePdf && annotationsOpen && (
+            <aside className="sidebar right" aria-label="Annotations">
+              <h2 className="sidebar-heading">Annotations</h2>
+              <AnnotationsPanel
+                key={activeWork ?? ""}
+                annotations={notes.annotations}
+                categories={categories}
+                selectedId={selectedId}
+                reanchoring={notes.reanchoring}
+                pageLabel={(p) => activeTab?.labels?.[p] ?? String(p + 1)}
+                onSelect={(id) => selectAnnotation(notes.annotations.find((a) => a.id === id) ?? null)}
+                onEditNote={() => registry.execute("annot.editNote", "other")}
+                inlineEditor={
+                  selected && (!selected.placement || selected.placement.status === "orphan")
+                    ? renderPopover(selected)
+                    : undefined
+                }
+              />
+            </aside>
+          )}
+        </div>
+        {dialog === "palette" && <CommandPalette registry={registry} onClose={() => setDialog(null)} />}
+        {dialog === "shortcuts" && (
+          <ShortcutsDialog
+            registry={registry}
+            overrides={shortcutOverrides}
+            onChange={changeShortcuts}
+            onEditCategories={() => setDialog("categories")}
+            onClose={() => setDialog(null)}
           />
         )}
-        {activePdf && annotationsOpen && (
-          <aside className="sidebar right" aria-label="Annotations">
-            <h2 className="sidebar-heading">Annotations</h2>
-            <AnnotationsPanel
-              key={activeWork ?? ""}
-              annotations={notes.annotations}
-              categories={categories}
-              selectedId={selectedId}
-              reanchoring={notes.reanchoring}
-              pageLabel={(p) => activeTab?.labels?.[p] ?? String(p + 1)}
-              onSelect={(id) => selectAnnotation(notes.annotations.find((a) => a.id === id) ?? null)}
-              onEditNote={() => registry.execute("annot.editNote", "other")}
-              inlineEditor={
-                selected && (!selected.placement || selected.placement.status === "orphan")
-                  ? renderPopover(selected)
-                  : undefined
+        {dialog === "recent" && <RecentDialog recent={recent} onOpen={openRecent} onClose={() => setDialog(null)} />}
+        {activeTab?.pendingVersion && activeTab.fileId && (
+          <VersionDialog
+            name={activeTab.name}
+            onSame={() => {
+              const { key, fileId, pendingVersion } = activeTab;
+              updateTab(key, { pendingVersion: null });
+              void setTextSample(fileId!, pendingVersion!.sample).catch((e) => reportError("Could not save the answer", e));
+            }}
+            onDifferent={() => {
+              const { key, fileId, pendingVersion } = activeTab;
+              detachFile(fileId!, pendingVersion!.sample)
+                .then((info) => {
+                  updateTab(key, {
+                    workId: info.workId,
+                    citekey: info.citekey ?? null,
+                    citekeyDeclined: info.citekeyDeclined ?? null,
+                    pendingVersion: null,
+                  });
+                  refreshRecent();
+                })
+                .catch((e) => reportError("Could not separate the papers", e));
+            }}
+          />
+        )}
+        {dialog === "writeback" && activeTab && (
+          <WriteBackDialog
+            name={activeTab.name}
+            count={annotationsToWrite(notes.annotations, categories).length}
+            onSave={(dontAskAgain) => {
+              setDialog(null);
+              if (dontAskAgain) {
+                setWriteBackConfirmed(true);
+                void setState("writeback.confirmed", "yes").catch((e) => console.error("Could not save the setting", e));
               }
-            />
-          </aside>
+              void saveIntoPdf();
+            }}
+            onCancel={() => setDialog(null)}
+          />
+        )}
+        {dialog === "exportSettings" && (
+          <ExportSettingsDialog
+            settings={exportSettings}
+            preview={activeTab && activeTab.workId === activeWork ? sectionInput(activeTab, notes.annotations) : null}
+            citations={vaultSettings?.citations ?? null}
+            onSave={(next) => {
+              setDialog(null);
+              setExportSettings(next);
+              void setState("export.settings", JSON.stringify(next)).catch((e) => reportError("Could not save the export settings", e));
+            }}
+            onCancel={() => setDialog(null)}
+          />
+        )}
+        {question?.q.kind === "edited" && (
+          <ConfirmDialog
+            title="Replace your edits?"
+            confirmLabel="Replace"
+            danger
+            onConfirm={() => question.resolve(true)}
+            onCancel={() => question.resolve(false)}
+          >
+            <p>
+              The Tourmaline section of <code>{question.q.path}</code> has been edited since Tourmaline last wrote it.
+              Exporting replaces the whole section with the annotations as they are in Tourmaline.
+            </p>
+            <p className="muted">
+              The section is everything between <code>%% tourmaline:begin %%</code> and <code>%% tourmaline:end %%</code>;
+              the rest of the note is never changed. To keep what you wrote there, cancel and move it out of the section
+              first.
+            </p>
+          </ConfirmDialog>
+        )}
+        {question?.q.kind === "links" && (
+          <ConfirmDialog
+            title="Remove highlights that notes link to?"
+            confirmLabel="Remove them"
+            danger
+            onConfirm={() => question.resolve(true)}
+            onCancel={() => question.resolve(false)}
+          >
+            <p>These highlights were deleted in Tourmaline, but notes link to them, and those links will stop working:</p>
+            <ul className="link-list">
+              {question.q.links.map((l) => (
+                <li key={`${l.path}#${l.blockId}`}>
+                  <code>^{l.blockId}</code> from <code>{l.path}</code>
+                </li>
+              ))}
+            </ul>
+            <p className="muted">To keep them, cancel and undo the deletion (Edit › Undo) before exporting.</p>
+          </ConfirmDialog>
+        )}
+        {dialog === "entry" && bibliography && activeTab && (
+          <EntryPicker
+            bibliography={bibliography}
+            current={activeTab.citekey}
+            fileName={activeTab.name}
+            onPick={(citekey) => {
+              linkTab(activeTab, citekey).catch((e) => reportError(`Could not link ${activeTab.name} to ${citekey}`, e));
+            }}
+            onClose={() => setDialog(null)}
+          />
+        )}
+        {dialog === "categories" && (
+          <CategoriesDialog
+            categories={categories}
+            onSave={async (list) => setCategories(await saveCategories(list))}
+            onClose={() => setDialog(null)}
+          />
+        )}
+        {dialog === "goto" && activePdf && (
+          <GoToPageDialog
+            pageCount={pageCount}
+            current={currentPage}
+            labels={activeTab?.labels ?? null}
+            onGo={(page) => {
+              rememberPlace();
+              viewerRef.current?.goToPage(page);
+            }}
+            onClose={() => setDialog(null)}
+          />
         )}
       </div>
-      {dialog === "palette" && <CommandPalette registry={registry} onClose={() => setDialog(null)} />}
-      {dialog === "shortcuts" && <ShortcutsDialog registry={registry} onClose={() => setDialog(null)} />}
-      {dialog === "recent" && <RecentDialog recent={recent} onOpen={openRecent} onClose={() => setDialog(null)} />}
-      {activeTab?.pendingVersion && activeTab.fileId && (
-        <VersionDialog
-          name={activeTab.name}
-          onSame={() => {
-            const { key, fileId, pendingVersion } = activeTab;
-            updateTab(key, { pendingVersion: null });
-            void setTextSample(fileId!, pendingVersion!.sample).catch((e) => reportError("Could not save the answer", e));
-          }}
-          onDifferent={() => {
-            const { key, fileId, pendingVersion } = activeTab;
-            detachFile(fileId!, pendingVersion!.sample)
-              .then((info) => {
-                updateTab(key, {
-                  workId: info.workId,
-                  citekey: info.citekey ?? null,
-                  citekeyDeclined: info.citekeyDeclined ?? null,
-                  pendingVersion: null,
-                });
-                refreshRecent();
-              })
-              .catch((e) => reportError("Could not separate the papers", e));
-          }}
-        />
-      )}
-      {dialog === "writeback" && activeTab && (
-        <WriteBackDialog
-          name={activeTab.name}
-          count={annotationsToWrite(notes.annotations, categories).length}
-          onSave={(dontAskAgain) => {
-            setDialog(null);
-            if (dontAskAgain) {
-              setWriteBackConfirmed(true);
-              void setState("writeback.confirmed", "yes").catch((e) => console.error("Could not save the setting", e));
-            }
-            void saveIntoPdf();
-          }}
-          onCancel={() => setDialog(null)}
-        />
-      )}
-      {dialog === "exportSettings" && (
-        <ExportSettingsDialog
-          settings={exportSettings}
-          preview={activeTab && activeTab.workId === activeWork ? sectionInput(activeTab, notes.annotations) : null}
-          citations={vaultSettings?.citations ?? null}
-          onSave={(next) => {
-            setDialog(null);
-            setExportSettings(next);
-            void setState("export.settings", JSON.stringify(next)).catch((e) => reportError("Could not save the export settings", e));
-          }}
-          onCancel={() => setDialog(null)}
-        />
-      )}
-      {question?.q.kind === "edited" && (
-        <ConfirmDialog
-          title="Replace your edits?"
-          confirmLabel="Replace"
-          danger
-          onConfirm={() => question.resolve(true)}
-          onCancel={() => question.resolve(false)}
-        >
-          <p>
-            The Tourmaline section of <code>{question.q.path}</code> has been edited since Tourmaline last wrote it.
-            Exporting replaces the whole section with the annotations as they are in Tourmaline.
-          </p>
-          <p className="muted">
-            The section is everything between <code>%% tourmaline:begin %%</code> and <code>%% tourmaline:end %%</code>;
-            the rest of the note is never changed. To keep what you wrote there, cancel and move it out of the section
-            first.
-          </p>
-        </ConfirmDialog>
-      )}
-      {question?.q.kind === "links" && (
-        <ConfirmDialog
-          title="Remove highlights that notes link to?"
-          confirmLabel="Remove them"
-          danger
-          onConfirm={() => question.resolve(true)}
-          onCancel={() => question.resolve(false)}
-        >
-          <p>These highlights were deleted in Tourmaline, but notes link to them, and those links will stop working:</p>
-          <ul className="link-list">
-            {question.q.links.map((l) => (
-              <li key={`${l.path}#${l.blockId}`}>
-                <code>^{l.blockId}</code> from <code>{l.path}</code>
-              </li>
-            ))}
-          </ul>
-          <p className="muted">To keep them, cancel and undo the deletion (Edit › Undo) before exporting.</p>
-        </ConfirmDialog>
-      )}
-      {dialog === "entry" && bibliography && activeTab && (
-        <EntryPicker
-          bibliography={bibliography}
-          current={activeTab.citekey}
-          fileName={activeTab.name}
-          onPick={(citekey) => {
-            linkTab(activeTab, citekey).catch((e) => reportError(`Could not link ${activeTab.name} to ${citekey}`, e));
-          }}
-          onClose={() => setDialog(null)}
-        />
-      )}
-      {dialog === "categories" && (
-        <CategoriesDialog
-          categories={categories}
-          onSave={async (list) => setCategories(await saveCategories(list))}
-          onClose={() => setDialog(null)}
-        />
-      )}
-      {dialog === "goto" && activePdf && (
-        <GoToPageDialog
-          pageCount={pageCount}
-          current={currentPage}
-          labels={activeTab?.labels ?? null}
-          onGo={(page) => {
-            rememberPlace();
-            viewerRef.current?.goToPage(page);
-          }}
-          onClose={() => setDialog(null)}
-        />
-      )}
-    </div>
+    </RegistryContext.Provider>
   );
 }

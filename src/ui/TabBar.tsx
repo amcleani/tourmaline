@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { X } from "lucide-react";
+import { useShortcutHint } from "../commands/useShortcut";
 
 export interface TabInfo {
   key: string;
@@ -19,6 +20,7 @@ interface Props {
 // Delete closes the focused tab. Middle-click also closes.
 export function TabBar({ tabs, activeKey, onActivate, onClose }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
+  const closeHint = useShortcutHint("file.closeTab");
   if (tabs.length === 0) return null;
 
   const focusTab = (key: string) =>
@@ -65,7 +67,7 @@ export function TabBar({ tabs, activeKey, onActivate, onClose }: Props) {
               className="tab-close"
               tabIndex={-1}
               aria-label={`Close ${tab.title}`}
-              title="Close tab (Ctrl+W)"
+              title={`Close tab${closeHint}`}
               onClick={() => onClose(tab.key)}
             >
               <X size={14} aria-hidden="true" />

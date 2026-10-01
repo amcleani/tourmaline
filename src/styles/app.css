@@ -525,7 +525,14 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .shortcut-table { width: 100%; border-collapse: collapse; }
 .shortcut-table th { text-align: left; font-weight: 400; padding: 5px 0; }
-.shortcut-table td { text-align: right; }
+.shortcut-table td { padding: 5px 0 5px 8px; vertical-align: top; }
+.shortcut-keys { text-align: right; }
+.shortcut-table .row-actions { white-space: nowrap; width: 1%; }
+.shortcut-changed { color: var(--text-muted); font-size: 0.85em; }
+.shortcut-conflict { text-align: left; margin-top: 6px; }
+.shortcut-conflict p { margin: 0 0 6px; }
+.key-recorder { width: 12em; text-align: center; }
+.dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
 .shortcut-table tr + tr { border-top: 1px solid var(--border); }
 
 /* Annotations on the page. Marks sit under the text layer so text stays selectable. */
