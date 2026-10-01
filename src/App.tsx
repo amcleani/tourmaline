@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { CommandRegistry, IDLE_CONTEXT, isTypingTarget, type CommandContext, type ShortcutOverrides } from "./commands/registry";
 import { parseOverrides } from "./commands/keymap";
+import { contextMenuEntries, contextMenuKind, type ContextMenuEntry, type ContextMenuKind } from "./commands/contextMenus";
 import { appCommands } from "./commands/appCommands";
 import { formatShortcut, isTextEditingShortcut } from "./commands/shortcuts";
 import { RegistryContext } from "./commands/useShortcut";
@@ -73,6 +74,7 @@ import { AnnotationsPanel } from "./ui/AnnotationsPanel";
 import { CategoriesDialog } from "./ui/CategoriesDialog";
 import { CommandPalette } from "./ui/CommandPalette";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { ContextMenu } from "./ui/ContextMenu";
 import { EntryPicker } from "./ui/EntryPicker";
 import { ExportSettingsDialog } from "./ui/ExportSettingsDialog";
 import { FindBar } from "./ui/FindBar";
@@ -119,6 +121,20 @@ interface Tab {
 type Dialog = "palette" | "shortcuts" | "appearance" | "goto" | "recent" | "categories" | "entry" | "writeback" | "exportSettings" | null;
 
 const SAVE_POSITION_MS = 800;
+
+/** Where a menu opened from the keyboard goes: by the selected text, else the selected highlight, else the top of the document. */
+function keyboardMenuPoint(viewer: HTMLElement): { x: number; y: number } {
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && sel.rangeCount > 0 && viewer.contains(sel.anchorNode)) {
+    const rects = [...sel.getRangeAt(0).getClientRects()].filter((r) => r.width > 0);
+    const last = rects[rects.length - 1];
+    if (last) return { x: last.left, y: last.bottom + 4 };
+  }
+  const mark = viewer.querySelector(".mark.selected")?.getBoundingClientRect();
+  if (mark) return { x: mark.left, y: mark.bottom + 4 };
+  const box = viewer.getBoundingClientRect();
+  return { x: box.left + 40, y: box.top + 40 };
+}
 let tabCounter = 0;
 const newTabKey = () => `tab${++tabCounter}`;
 
@@ -1443,6 +1459,16 @@ export function App() {
       focusColumns: () => latest.current.setColumnsFor(!latest.current.detectColumns),
       copyMarkdown: () => latest.current.copyAnnotation("markdown"),
       copyLink: () => latest.current.copyAnnotation("link"),
+      copyText: async () => {
+        const quote = viewerRef.current?.captureSelection()?.quote;
+        if (!quote) return;
+        try {
+          await copyText(quote);
+          setNotice("Copied the text");
+        } catch (e) {
+          reportError("Could not copy the text", e);
+        }
+      },
       showAppearance: () => setDialog("appearance"),
       cycleTheme: () => {
         const a = appearanceRef.current;
@@ -1496,6 +1522,37 @@ export function App() {
     };
     window.addEventListener("mouseup", onMouseUp);
     return () => window.removeEventListener("mouseup", onMouseUp);
+  }, [registry]);
+
+  // Right-click menus on the document (also Shift+F10 and the menu key, which
+  // fire the same event at the focused element). Elsewhere the webview's own
+  // menu (Reload, Save as...) is suppressed, except in text fields and to
+  // copy selected text.
+  const [contextMenu, setContextMenu] = useState<{ at: { x: number; y: number }; kind: ContextMenuKind; entries: ContextMenuEntry[] } | null>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  useEffect(() => {
+    const onContextMenu = (e: MouseEvent) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (isTypingTarget(target)) return;
+      const viewer = target?.closest<HTMLElement>(".viewer-scroll");
+      if (!viewer) {
+        if (window.getSelection()?.isCollapsed ?? true) e.preventDefault();
+        return;
+      }
+      e.preventDefault();
+      const fromKeyboard = (e as PointerEvent).pointerType === "" || (e.clientX === 0 && e.clientY === 0);
+      // The pane right-clicked gets focus, so commands such as zoom act on it.
+      if (!fromKeyboard) viewer.focus({ preventScroll: true });
+      const at = fromKeyboard ? keyboardMenuPoint(viewer) : { x: e.clientX, y: e.clientY };
+      // After React has applied what the right-click selected (a highlight under it).
+      setTimeout(() => {
+        const kind = contextMenuKind(registry.context());
+        const entries = contextMenuEntries(registry, kind);
+        if (entries.length > 0) setContextMenu({ at, kind, entries });
+      });
+    };
+    window.addEventListener("contextmenu", onContextMenu);
+    return () => window.removeEventListener("contextmenu", onContextMenu);
   }, [registry]);
 
   // Global keyboard shortcuts.
@@ -1795,6 +1852,15 @@ export function App() {
             </aside>
           )}
         </div>
+        {contextMenu && (
+          <ContextMenu
+            registry={registry}
+            entries={contextMenu.entries}
+            at={contextMenu.at}
+            label={contextMenu.kind === "selection" ? "Selected text" : contextMenu.kind === "annotation" ? "Annotation" : "Page"}
+            onClose={closeContextMenu}
+          />
+        )}
         {dialog === "palette" && <CommandPalette registry={registry} onClose={() => setDialog(null)} />}
         {dialog === "appearance" && <AppearanceDialog appearance={appearance} onChange={changeAppearance} onClose={() => setDialog(null)} />}
         {dialog === "shortcuts" && (

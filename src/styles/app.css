@@ -944,3 +944,34 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
   .workspace:has(.split-pane) { flex-direction: column; }
   .split-pane { border-left: 0; border-top: 2px solid var(--border); }
 }
+
+/* Right-click menu */
+.context-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.28);
+}
+.context-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.context-item:hover, .context-item:focus { background: var(--surface-2); outline: none; }
+.context-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.context-item kbd { color: var(--text-muted); }
+.context-separator { height: 1px; margin: 4px 6px; background: var(--border); }

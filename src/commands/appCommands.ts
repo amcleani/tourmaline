@@ -46,6 +46,7 @@ export interface AppActions {
   goForward: () => void;
   cancel: () => void;
   undo: () => void;
+  copyText: () => Promise<void>;
   redo: () => void;
   toggleAnnotations: () => void;
   highlight: () => void;
@@ -156,6 +157,15 @@ export function appCommands(a: AppActions): Command[] {
       menu: { menu: "Edit", group: 1, order: 2 },
       when: (ctx) => ctx.hasDocument && ctx.canRedo,
       run: a.redo,
+    },
+    {
+      id: "edit.copyText",
+      title: "Copy text",
+      keywords: ["clipboard", "selection", "quote"],
+      // Ctrl+C copies selected text natively; this is the same for menus.
+      menu: { menu: "Edit", group: 2, order: 1 },
+      when: hasSelection,
+      run: a.copyText,
     },
     {
       id: "edit.cancel",

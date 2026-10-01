@@ -833,15 +833,8 @@ function PageView({
     window.addEventListener("pointerup", done);
   };
 
-  // A click that isn't the end of a text selection selects the smallest mark under it.
-  const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (captureMode || !viewport) return;
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-    const box = e.currentTarget.getBoundingClientRect();
-    const [x, y] = viewport.convertToPdfPoint(e.clientX - box.left, e.clientY - box.top);
-    onPageClick?.(index, x, y);
-    if (!onMarkClick) return;
+  /** The smallest mark under the pointer, if any. */
+  const markUnder = (x: number, y: number) => {
     let hit: { id: string; area: number } | null = null;
     for (const m of marks ?? []) {
       for (const [x0, y0, x1, y1] of m.rects) {
@@ -849,7 +842,30 @@ function PageView({
         if (x >= x0 && x <= x1 && y >= y0 && y <= y1 && (!hit || area < hit.area)) hit = { id: m.id, area };
       }
     }
-    onMarkClick(hit?.id ?? null);
+    return hit?.id ?? null;
+  };
+  const pdfPoint = (e: React.MouseEvent<HTMLDivElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    return viewport!.convertToPdfPoint(e.clientX - box.left, e.clientY - box.top);
+  };
+
+  // A click that isn't the end of a text selection selects the smallest mark under it.
+  const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (captureMode || !viewport) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const [x, y] = pdfPoint(e);
+    onPageClick?.(index, x, y);
+    onMarkClick?.(markUnder(x, y));
+  };
+  // A right-click does the same (without picking a focus step), so the menu
+  // that opens is about the mark under it; with text selected, it's about the text.
+  const onContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (captureMode || !viewport) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const [x, y] = pdfPoint(e);
+    onMarkClick?.(markUnder(x, y));
   };
 
   const toCss = useCallback((rect: PdfRect) => (viewport ? toCssRect(viewport, rect) : { left: 0, top: 0, width: 0, height: 0 }), [viewport]);
@@ -862,6 +878,7 @@ function PageView({
       role="region"
       aria-label={`Page ${pageNumber} of ${doc.numPages}`}
       onClick={onClick}
+      onContextMenu={onContextMenu}
     >
       <canvas ref={canvasRef} style={{ width, height }} aria-hidden="true" />
       {viewport && marks && marks.length > 0 && (
