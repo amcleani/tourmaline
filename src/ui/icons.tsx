@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ChevronDown,
+  Columns2,
   ChevronUp,
   Command,
   FileText,
@@ -55,6 +56,7 @@ const ICONS: Record<string, LucideIcon> = {
   export: NotebookPen,
   focus: Focus,
   back: ArrowLeft,
+  split: Columns2,
   forward: ArrowRight,
 };
 

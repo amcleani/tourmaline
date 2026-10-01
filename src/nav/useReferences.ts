@@ -98,7 +98,8 @@ async function pageSpots(pdf: PDFDocumentProxy, pageIndex: number, index: Index)
   const page = await pdf.getPage(pageIndex + 1);
   const { text, content } = await getPageText(pdf, pageIndex);
   // A link is named by the text it covers ("[12]", "Figure 2").
-  const under = (rect: PdfRect) => textUnderRects(text, content.items, [rect])?.quote.trim() || null;
+  // (Widened a little: link boxes often stop just short of a closing bracket.)
+  const under = ([x0, y0, x1, y1]: PdfRect) => textUnderRects(text, content.items, [[x0 - 2.5, y0, x1 + 2.5, y1]])?.quote.trim() || null;
   const spots: Spot[] = [];
   for (const a of (await page.getAnnotations({ intent: "display" })) as LinkData[]) {
     if (a.subtype !== "Link") continue;

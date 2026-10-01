@@ -88,6 +88,19 @@ copy BibTeX. Watch the `.bib` for changes.
 the PDF or inferred from headings), citation popups and figure/equation previews
 (PDF links first, text-pattern fallback), back/forward.
 
+**Smart navigation (6)**: links in the PDF are clickable (web and mail
+links open in the browser). Hovering or focusing (Tab) a link or citation
+shows where it leads, drawn from the page: the bibliography entry, the
+figure with its caption, the equation, theorem or section. Without links,
+citations are found in the text: numeric ([12], [2, 5–7], [BD24]),
+author-year matched against the bibliography read after its heading
+(Lewis (1986), Bacon and Dorr 2024, Bacon 2018a, p. 3; 2018b; "—" for the
+same authors), Figure/Table/Eq./Section/Theorem/Lemma… N, and a bare (2)
+when the paper numbers such an equation. Back/Forward (Alt+Left/Right,
+toolbar, mouse buttons) after any jump. Split view (Ctrl+Shift+S): a second
+pane on the same paper or another tab; Ctrl+click opens a link there; F6
+switches panes.
+
 **Focus mode** (View › Focus mode, F; toolbar): 1–3 lines or one sentence
 (S changes it); lines grouped from pdf.js text items; two-column ordering
 from the gap between columns, with full-width elements and side-by-side

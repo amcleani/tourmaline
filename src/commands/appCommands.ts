@@ -35,6 +35,8 @@ export interface AppActions {
   nextTab: () => void;
   previousTab: () => void;
   goBack: () => void;
+  toggleSplit: () => void;
+  switchPane: () => void;
   goForward: () => void;
   cancel: () => void;
   undo: () => void;
@@ -231,6 +233,26 @@ export function appCommands(a: AppActions): Command[] {
       run: a.fitPage,
     },
 
+    {
+      id: "view.split",
+      title: "Split view",
+      keywords: ["second pane", "side by side", "two", "references", "compare"],
+      shortcut: "Mod+Shift+S",
+      icon: "split",
+      toolbar: true,
+      menu: { menu: "View", group: 1, order: 4 },
+      when: hasDocument,
+      run: a.toggleSplit,
+    },
+    {
+      id: "view.switchPane",
+      title: "Switch pane",
+      keywords: ["split", "other pane", "focus"],
+      shortcut: "F6",
+      menu: { menu: "View", group: 1, order: 5 },
+      when: (ctx) => ctx.hasDocument && ctx.splitOpen,
+      run: a.switchPane,
+    },
     {
       id: "view.toggleAnnotations",
       title: "Show or hide annotations",

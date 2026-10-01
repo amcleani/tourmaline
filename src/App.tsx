@@ -54,7 +54,8 @@ import {
 import { useVaultMath } from "./math/useVaultMath";
 import { placeOf, stepAt, stepAtPlace, stepUnder, type StepPlace, type StepUnit } from "./focus/steps";
 import { useFocusSteps } from "./focus/useFocusSteps";
-import { useReferences, type Destination, type Spot } from "./nav/useReferences";
+import { useLinkPreview } from "./nav/useLinkPreview";
+import { useReferences, type Spot } from "./nav/useReferences";
 import { citationVariables } from "./vault/bibliography";
 import { parseReaderLink, readerLink } from "./vault/links";
 import { DEFAULT_EXPORT_SETTINGS, NoteFormatError, parseExportSettings, type ExportSettings, type SectionInput } from "./vault/export";
@@ -77,6 +78,7 @@ import { OutlinePanel } from "./ui/OutlinePanel";
 import { RecentDialog } from "./ui/RecentDialog";
 import { SelectionToolbar } from "./ui/SelectionToolbar";
 import { ShortcutsDialog } from "./ui/ShortcutsDialog";
+import { SplitPane, type SplitTab } from "./ui/SplitPane";
 import { TabBar } from "./ui/TabBar";
 import { VersionDialog } from "./ui/VersionDialog";
 import { WriteBackDialog } from "./ui/WriteBackDialog";
@@ -1038,6 +1040,39 @@ export function App() {
     setStepIndex(at === null ? 0 : Math.min(Math.max(at + by, 0), list.length - 1));
   };
 
+  // ---- Split view ------------------------------------------------------------------
+
+  /** The second pane: its tab (null: whichever is active), zoom, and where it opens. */
+  const [split, setSplit] = useState<{ tabKey: string | null; zoom: ZoomSpec; anchor: Anchor | null } | null>(null);
+  const splitRef = useRef<ViewerHandle>(null);
+  const splitZoom = useRef(1);
+  const readyTabs: SplitTab[] = tabs.flatMap((t) =>
+    t.status === "ready" && t.pdf && t.fileId ? [{ key: t.key, name: t.name, pdf: t.pdf, fileId: t.fileId }] : [],
+  );
+  const splitTab = split ? (readyTabs.find((t) => t.key === (split.tabKey ?? activeKey)) ?? null) : null;
+  const inSplitPane = () => !!(document.activeElement as HTMLElement | null)?.closest?.(".split-pane");
+
+  const toggleSplit = () => {
+    if (latest.current.split) {
+      setSplit(null);
+      viewerRef.current?.focus();
+      return;
+    }
+    const key = latest.current.activeTab?.key;
+    setSplit({ tabKey: null, zoom: { mode: "fit-width", zoom: 1 }, anchor: (key && views.current.get(key)?.anchor) || null });
+  };
+
+  /** Shows a place of the open paper in the second pane, opening it if need be (Ctrl+click on a link). */
+  const showAside = async (page: number, y: number | null) => {
+    const { split: current, activeTab: tab } = latest.current;
+    if (!tab?.pdf) return;
+    const sameTab = current && (current.tabKey ?? tab.key) === tab.key;
+    if (sameTab && splitRef.current) return void splitRef.current.goToTarget({ page, y });
+    const view = (await tab.pdf.getPage(page + 1)).view;
+    const fraction = y === null ? 0 : Math.min(1, Math.max(0, (view[3] - y) / (view[3] - view[1] || 1)));
+    setSplit({ tabKey: null, zoom: current?.zoom ?? { mode: "fit-width", zoom: 1 }, anchor: { page, fraction } });
+  };
+
   // ---- Links, references and Back/Forward ----------------------------------------
 
   /** Places each tab was at before a jump, to go back (and forward) to. */
@@ -1076,30 +1111,11 @@ export function App() {
 
   const references = useReferences(activePdf);
   /** The link the pointer or keyboard is on, once its destination is known. */
-  const [preview, setPreview] = useState<{ page: number; spot: Spot; destination: Destination; at: DOMRect } | null>(null);
-  const previewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => setPreview(null), [activeKey]);
-  const onSpotHover = useCallback(
-    (page: number, spot: LinkSpot | null, at?: DOMRect) => {
-      clearTimeout(previewTimer.current);
-      if (!spot || !at) {
-        // A moment to move onto the preview itself.
-        previewTimer.current = setTimeout(() => setPreview(null), 250);
-        return;
-      }
-      previewTimer.current = setTimeout(() => {
-        references
-          .destinationOf(spot as Spot, page)
-          .then((destination) => setPreview(destination ? { page, spot: spot as Spot, destination, at } : null))
-          .catch((e) => console.error("Could not find where the link leads", e));
-      }, 300);
-    },
-    [references],
-  );
+  const linkPreview = useLinkPreview(references.destinationOf, activeKey);
+  const { preview, onSpotHover } = linkPreview;
   const followSpot = useCallback(
-    async (page: number, spot: LinkSpot) => {
-      clearTimeout(previewTimer.current);
-      setPreview(null);
+    async (page: number, spot: LinkSpot, aside = false) => {
+      linkPreview.close();
       try {
         const destination = await references.destinationOf(spot as Spot, page);
         if (!destination) {
@@ -1107,13 +1123,15 @@ export function App() {
           return;
         }
         if (destination.url) return await openExternal(destination.url);
+        const y = destination.y === null ? null : destination.y + 12;
+        if (aside) return await latest.current.showAside(destination.page, y);
         rememberPlace();
         await viewerRef.current?.goToTarget({ page: destination.page, y: destination.y === null ? null : destination.y + 12 });
       } catch (e) {
         reportError("Could not follow the link", e);
       }
     },
-    [references, rememberPlace, reportError],
+    [references, rememberPlace, reportError, linkPreview],
   );
 
   // ---- Commands --------------------------------------------------------------
@@ -1135,6 +1153,7 @@ export function App() {
       focusMode: focusActive,
       canGoBack: !!activeHistory?.back.length,
       canGoForward: !!activeHistory?.forward.length,
+      splitOpen: split !== null,
       canSaveIntoPdf: isTauri() && !!activeTab?.path && !versionPending,
     };
     registry.notifyContextChanged();
@@ -1143,6 +1162,7 @@ export function App() {
     tabs.length,
     findOpen,
     dialog,
+    split,
     historyTick,
     focusActive,
     question,
@@ -1186,6 +1206,12 @@ export function App() {
     detectColumns,
     travel,
     preview,
+    linkPreview,
+    split,
+    toggleSplit,
+    showAside,
+    inSplitPane,
+    splitZoom,
   });
   latest.current = {
     activeTab,
@@ -1212,10 +1238,21 @@ export function App() {
     detectColumns,
     travel,
     preview,
+    linkPreview,
+    split,
+    toggleSplit,
+    showAside,
+    inSplitPane,
+    splitZoom,
   };
 
   useEffect(() => {
     const setZoom = (make: (current: number) => ZoomSpec) => {
+      // The zoom keys act on the second pane while it has focus.
+      if (latest.current.split && latest.current.inSplitPane()) {
+        setSplit((sp) => sp && { ...sp, zoom: make(latest.current.splitZoom.current) });
+        return;
+      }
       const { activeTab: tab, status: s } = latest.current;
       if (tab) updateTab(tab.key, { zoom: make(s?.zoom ?? tab.zoom.zoom) });
     };
@@ -1286,7 +1323,7 @@ export function App() {
           viewerRef.current?.clearSelection();
           setSelectionEnd(null);
         } else if (ctx.findOpen) closeFind();
-        else if (latest.current.preview) setPreview(null);
+        else if (latest.current.preview) latest.current.linkPreview.close();
         else if (ctx.focusMode) void latest.current.toggleFocus();
       },
       undo: async () => {
@@ -1327,6 +1364,11 @@ export function App() {
       exportToVault: () => void latest.current.exportToVault(),
       exportSettings: () => setDialog("exportSettings"),
       goBack: () => latest.current.travel("back"),
+      toggleSplit: () => latest.current.toggleSplit(),
+      switchPane: () => {
+        if (latest.current.inSplitPane()) viewerRef.current?.focus();
+        else splitRef.current?.focus();
+      },
       goForward: () => latest.current.travel("forward"),
       toggleFocus: () => void latest.current.toggleFocus(),
       focusNext: () => void latest.current.moveStep(1),
@@ -1444,14 +1486,15 @@ export function App() {
   const pageCount = activePdf?.numPages ?? 0;
   const pageLabel = activeTab?.labels?.[currentPage];
   const activeKeyForView = activeTab?.key;
+  const closePreview = linkPreview.close;
   const handleViewChange = useCallback(
     (v: ViewState) => {
       // A preview stays by its link: scrolling closes it.
       const before = views.current.get(activeKeyForView ?? "")?.anchor;
-      if (before?.page !== v.anchor.page || before.fraction !== v.anchor.fraction) setPreview(null);
+      if (before?.page !== v.anchor.page || before.fraction !== v.anchor.fraction) closePreview();
       if (activeKeyForView) onViewChange(activeKeyForView, v);
     },
-    [activeKeyForView, onViewChange],
+    [activeKeyForView, onViewChange, closePreview],
   );
   const handleZoomStep = useCallback(
     (d: 1 | -1) => registry.execute(d === 1 ? "view.zoomIn" : "view.zoomOut", "other"),
@@ -1559,7 +1602,7 @@ export function App() {
               focus={focusRects}
               spotsFor={references.spotsFor}
               onSpotHover={onSpotHover}
-              onSpotActivate={(page, spot) => void followSpot(page, spot)}
+              onSpotActivate={(page, spot, aside) => void followSpot(page, spot, aside)}
               onPageClick={(page, x, y) => {
                 if (!focusActive || !steps) return;
                 const i = stepUnder(steps, page, x, y);
@@ -1586,7 +1629,7 @@ export function App() {
               destination={preview.destination}
               anchor={preview.at}
               zoom={status?.zoom ?? 1}
-              onMouseEnter={() => clearTimeout(previewTimer.current)}
+              onMouseEnter={linkPreview.keep}
               onMouseLeave={() => onSpotHover(preview.page, null)}
             />
           )}
@@ -1624,6 +1667,21 @@ export function App() {
             />
           )}
         </main>
+        {split && splitTab && (
+          <SplitPane
+            tabs={readyTabs}
+            tab={splitTab}
+            onTab={(key) => setSplit((s) => s && { ...s, tabKey: key, anchor: views.current.get(key)?.anchor ?? null })}
+            zoom={split.zoom}
+            onZoom={(zoom) => setSplit((s) => s && { ...s, zoom })}
+            initialAnchor={split.anchor}
+            marks={splitTab.key === activeKey ? marks : undefined}
+            handleRef={splitRef}
+            onViewChange={(v) => (splitZoom.current = v.zoom)}
+            onClose={() => registry.execute("view.split", "other")}
+            onError={reportError}
+          />
+        )}
         {activePdf && annotationsOpen && (
           <aside className="sidebar right" aria-label="Annotations">
             <h2 className="sidebar-heading">Annotations</h2>

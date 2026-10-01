@@ -224,6 +224,24 @@ templates, note overrides) are app state `export.settings`. Try it on
 `.dev-data/test-vault` (a copy of the vault's settings and notes), never on
 the real vault.
 
+**Navigation.** `src/nav/references.ts` (pure, `test/references.test.ts`
+against the fixtures' `references`) reads the bibliography (lines after
+the last "References"-like heading, split by label, hanging indent or
+spacing) and finds citations in a page's text with its capitals restored
+(`casedText`), keeping author-year ones only if they match an entry;
+`targetIn` finds figure/table captions (with the band of `captionRegion`),
+equation numbers (the rightmost "(n)" item of a line), sections and
+theorems. `useReferences` turns a page's PDF links and text citations into
+`Spot`s (viewer `spotsFor`; the viewer draws them as focusable links) and a
+spot into a `Destination` (page, y, region to preview); the bibliography
+search covers the last third of the document (≤80 pages) and bare "(n)"
+equations only papers ≤150 pages, so books don't stall. `useLinkPreview`
+times the hover preview (`ReferencePreview`, drawn with pdf.js into a
+canvas, placed in the pane and kept in the window). Back/Forward is a per-tab
+stack of `Anchor`s, pushed by `rememberPlace()` before every jump. Split
+view (`SplitPane`) is a second `PdfViewer`; zoom commands act on the pane
+holding focus.
+
 **Security.** CSP is set in `src-tauri/tauri.conf.json` (includes
 `'wasm-unsafe-eval'` for pdf.js decoders); window permissions are in
 `src-tauri/capabilities/default.json` — add a permission there when using a new

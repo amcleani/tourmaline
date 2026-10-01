@@ -855,3 +855,26 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .reference-clip canvas { display: block; }
 .reference-where, .reference-url { margin: 6px 2px 0; font-size: 0.8rem; color: var(--text-muted); overflow-wrap: anywhere; }
 .reference-url { margin-top: 0; color: var(--text); }
+
+/* Split view: a second pane beside the document. */
+.split-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 2px solid var(--border);
+}
+.split-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.split-select { flex: 1; min-width: 0; }
+.split-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+@media (max-width: 760px) {
+  .workspace:has(.split-pane) { flex-direction: column; }
+  .split-pane { border-left: 0; border-top: 2px solid var(--border); }
+}

@@ -31,6 +31,8 @@ export interface CommandContext {
   /** The open tab has places to go back or forward to (after following links). */
   canGoBack: boolean;
   canGoForward: boolean;
+  /** The second pane (View › Split view) is open. */
+  splitOpen: boolean;
   /** Annotations can be saved into the open file (desktop app, file on disk). */
   canSaveIntoPdf: boolean;
 }
@@ -52,6 +54,7 @@ export const IDLE_CONTEXT: CommandContext = {
   focusMode: false,
   canGoBack: false,
   canGoForward: false,
+  splitOpen: false,
   canSaveIntoPdf: false,
 };
 
