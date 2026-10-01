@@ -8,6 +8,7 @@ vi.mock("../src/platform", () => ({
   isTauri: () => false,
   getState: vi.fn(async (key: string) => store.get(key) ?? null),
   setState: vi.fn(async (key: string, value: string) => void store.set(key, value)),
+  setUiScale: vi.fn(async () => {}),
   recentDocuments: vi.fn(async () => []),
   openPdfAtPath: vi.fn(() => new Promise(() => {})),
   pickAndOpenPdf: vi.fn(async () => null),
