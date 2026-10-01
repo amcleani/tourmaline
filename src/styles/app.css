@@ -14,16 +14,16 @@
   --overlay: rgb(0 0 0 / 0.35);
   --focus-dim: rgb(24 24 28 / 0.62);
   --radius: 6px;
-  --ui-scale: 1;
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  font-size: calc(14px * var(--ui-scale));
+  font-size: 14px;
   color: var(--text);
   background: var(--bg);
   color-scheme: light dark;
 }
 
+/* Themes (View › Appearance): the system's light or dark, or one chosen. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --bg: #1b1c1c;
     --surface: #242626;
     --surface-2: #2e3130;
@@ -37,7 +37,58 @@
     --danger-text: #ffb4a8;
     --page-bg: #111212;
     --overlay: rgb(0 0 0 / 0.55);
+    color-scheme: dark;
   }
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+  --bg: #1b1c1c;
+  --surface: #242626;
+  --surface-2: #2e3130;
+  --text: #e8e8e4;
+  --text-muted: #a3a39c;
+  --border: #3d403f;
+  --accent: #5cc2ae;
+  --accent-contrast: #0d1f1b;
+  --focus: #7fd8c6;
+  --danger-bg: #3d1f1b;
+  --danger-text: #ffb4a8;
+  --page-bg: #111212;
+  --overlay: rgb(0 0 0 / 0.55);
+  color-scheme: dark;
+}
+/* High contrast: white on black, yellow for what's active, solid borders. */
+:root[data-theme="contrast"] {
+  --bg: #000000;
+  --surface: #000000;
+  --surface-2: #1f1f1f;
+  --text: #ffffff;
+  --text-muted: #e6e6e6;
+  --border: #ffffff;
+  --accent: #ffe14d;
+  --accent-contrast: #000000;
+  --focus: #ffe14d;
+  --danger-bg: #000000;
+  --danger-text: #ff9e9e;
+  --page-bg: #000000;
+  --overlay: rgb(0 0 0 / 0.7);
+  --focus-dim: rgb(0 0 0 / 0.78);
+  color-scheme: dark;
+}
+:root[data-theme="contrast"] :focus-visible { outline-width: 3px; }
+
+/* Page colours: the drawn page changes, highlights keep their colour. */
+:root[data-pages="dark"] .page { background: #1e1e1e; }
+:root[data-pages="dark"] .page canvas,
+:root[data-pages="dark"] .reference-clip canvas { filter: invert(0.9) hue-rotate(180deg); }
+:root[data-pages="dark"] .mark-highlight { mix-blend-mode: screen; }
+:root[data-pages="sepia"] .page { background: #f4ecd8; }
+:root[data-pages="sepia"] .page canvas,
+:root[data-pages="sepia"] .reference-clip canvas { filter: sepia(0.45) brightness(0.97); }
+
+/* Windows' contrast themes: keep the page, highlights and swatches in their own colours. */
+@media (forced-colors: active) {
+  .page, .mark-layer, .focus-layer, .swatch, .reference-clip { forced-color-adjust: none; }
 }
 
 * { box-sizing: border-box; }
@@ -780,6 +831,8 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 @media (max-width: 860px) { .export-settings { grid-template-columns: minmax(0, 1fr); } }
 .fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 12px 0 0; padding: 4px 12px 10px; }
 .fieldset legend { padding: 0 4px; color: var(--text-muted); font-size: 0.9rem; }
+.radio-label { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.appearance-dialog .field-label { display: block; margin-top: 16px; }
 .text-input.indented { margin: 0 0 6px 24px; width: calc(100% - 24px); }
 .template-label { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
 .template-input { font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 0.85rem; resize: vertical; }

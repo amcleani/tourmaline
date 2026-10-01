@@ -10,6 +10,7 @@ import { useAnnotations } from "./annotations/useAnnotations";
 import { usePdfImport } from "./annotations/usePdfImport";
 import { annotationsToWrite } from "./annotations/writeback";
 import { looksLikeSamePaper, textSample } from "./annotations/version";
+import { DEFAULT_APPEARANCE, PAGE_COLOURS, THEMES, applyAppearance, cycle, parseAppearance, percent, stepScale, type Appearance } from "./app/appearance";
 import { DEFAULT_ZOOM, decodePosition, decodeSession, encodePosition, encodeSession } from "./app/session";
 import { clampZoom, nextZoom, type Anchor } from "./pdf/layout";
 import { loadPdf } from "./pdf/loader";
@@ -49,6 +50,7 @@ import {
   savePosition,
   setState,
   setTextSample,
+  setUiScale,
   vaultFileExists,
   type DocumentInfo,
   type OpenedDocument,
@@ -66,6 +68,7 @@ import { runExport, type ExportQuestion } from "./vault/runExport";
 import { useVault } from "./vault/useVault";
 import { installNativeMenu } from "./platform/menu";
 import { AnnotationPopover } from "./ui/AnnotationPopover";
+import { AppearanceDialog } from "./ui/AppearanceDialog";
 import { AnnotationsPanel } from "./ui/AnnotationsPanel";
 import { CategoriesDialog } from "./ui/CategoriesDialog";
 import { CommandPalette } from "./ui/CommandPalette";
@@ -113,7 +116,7 @@ interface Tab {
   citekeyDeclined: string | null;
 }
 
-type Dialog = "palette" | "shortcuts" | "goto" | "recent" | "categories" | "entry" | "writeback" | "exportSettings" | null;
+type Dialog = "palette" | "shortcuts" | "appearance" | "goto" | "recent" | "categories" | "entry" | "writeback" | "exportSettings" | null;
 
 const SAVE_POSITION_MS = 800;
 let tabCounter = 0;
@@ -900,6 +903,30 @@ export function App() {
     }
   };
 
+  // ---- Appearance (View › Appearance) ----------------------------------------------
+
+  const [appearance, setAppearance] = useState<Appearance>(DEFAULT_APPEARANCE);
+  useEffect(() => {
+    getState("appearance")
+      .then((json) => setAppearance(parseAppearance(json)))
+      .catch((e) => console.error("Could not load the appearance settings", e));
+  }, []);
+  useEffect(() => {
+    applyAppearance(appearance);
+    setUiScale(appearance.uiScale).catch((e) => console.error("Could not set the interface size", e));
+  }, [appearance]);
+  const appearanceRef = useRef(appearance);
+  appearanceRef.current = appearance;
+  const changeAppearance = useCallback(
+    (next: Appearance) => {
+      setAppearance(next);
+      void setState("appearance", JSON.stringify(next)).catch((e) => reportError("Could not save the appearance settings", e));
+    },
+    [reportError],
+  );
+  const changeAppearanceRef = useRef(changeAppearance);
+  changeAppearanceRef.current = changeAppearance;
+
   // ---- Keyboard shortcuts the user chose (Help › Keyboard shortcuts) ---------------
 
   const [shortcutOverrides, setShortcutOverrides] = useState<ShortcutOverrides>({});
@@ -1416,6 +1443,35 @@ export function App() {
       focusColumns: () => latest.current.setColumnsFor(!latest.current.detectColumns),
       copyMarkdown: () => latest.current.copyAnnotation("markdown"),
       copyLink: () => latest.current.copyAnnotation("link"),
+      showAppearance: () => setDialog("appearance"),
+      cycleTheme: () => {
+        const a = appearanceRef.current;
+        const theme = cycle(THEMES, a.theme);
+        changeAppearanceRef.current({ ...a, theme });
+        setNotice(`Theme: ${THEMES.find((t) => t.value === theme)?.label}`);
+      },
+      cyclePageColours: () => {
+        const a = appearanceRef.current;
+        const pages = cycle(PAGE_COLOURS, a.pages);
+        changeAppearanceRef.current({ ...a, pages });
+        setNotice(`Page colours: ${PAGE_COLOURS.find((p) => p.value === pages)?.label}`);
+      },
+      uiLarger: () => {
+        const a = appearanceRef.current;
+        const uiScale = stepScale(a.uiScale, 1);
+        changeAppearanceRef.current({ ...a, uiScale });
+        setNotice(`Interface size: ${percent(uiScale)}`);
+      },
+      uiSmaller: () => {
+        const a = appearanceRef.current;
+        const uiScale = stepScale(a.uiScale, -1);
+        changeAppearanceRef.current({ ...a, uiScale });
+        setNotice(`Interface size: ${percent(uiScale)}`);
+      },
+      uiReset: () => {
+        changeAppearanceRef.current({ ...appearanceRef.current, uiScale: 1 });
+        setNotice("Interface size: 100%");
+      },
     }).map((c) => registry.register(c));
 
     let uninstallMenu: (() => void) | null = null;
@@ -1740,6 +1796,7 @@ export function App() {
           )}
         </div>
         {dialog === "palette" && <CommandPalette registry={registry} onClose={() => setDialog(null)} />}
+        {dialog === "appearance" && <AppearanceDialog appearance={appearance} onChange={changeAppearance} onClose={() => setDialog(null)} />}
         {dialog === "shortcuts" && (
           <ShortcutsDialog
             registry={registry}

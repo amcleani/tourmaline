@@ -16,6 +16,12 @@ export interface AppActions {
   focusEyeLine: () => void;
   focusColumns: () => void;
   exportSettings: () => void;
+  showAppearance: () => void;
+  cycleTheme: () => void;
+  cyclePageColours: () => void;
+  uiLarger: () => void;
+  uiSmaller: () => void;
+  uiReset: () => void;
   quit: () => Promise<void>;
   zoomIn: () => void;
   zoomOut: () => void;
@@ -319,6 +325,51 @@ export function appCommands(a: AppActions): Command[] {
       menu: { menu: "View", group: 3, order: 6 },
       when: hasDocument,
       run: a.focusColumns,
+    },
+
+    // Appearance (View menu)
+    {
+      id: "view.appearance",
+      title: "Appearance…",
+      keywords: ["theme", "dark", "light", "high contrast", "colours", "sepia", "size", "scale", "font", "larger", "settings"],
+      icon: "appearance",
+      menu: { menu: "View", group: 4, order: 1 },
+      run: a.showAppearance,
+    },
+    {
+      id: "view.theme",
+      title: "Switch theme",
+      keywords: ["dark", "light", "high contrast", "colours", "appearance"],
+      menu: { menu: "View", group: 4, order: 2 },
+      run: a.cycleTheme,
+    },
+    {
+      id: "view.pageColours",
+      title: "Switch page colours",
+      keywords: ["dark pages", "night", "invert", "sepia", "appearance"],
+      menu: { menu: "View", group: 4, order: 3 },
+      run: a.cyclePageColours,
+    },
+    {
+      id: "view.uiLarger",
+      title: "Larger interface",
+      keywords: ["size", "scale", "bigger", "text", "font", "appearance"],
+      menu: { menu: "View", group: 4, order: 4 },
+      run: a.uiLarger,
+    },
+    {
+      id: "view.uiSmaller",
+      title: "Smaller interface",
+      keywords: ["size", "scale", "text", "font", "appearance"],
+      menu: { menu: "View", group: 4, order: 5 },
+      run: a.uiSmaller,
+    },
+    {
+      id: "view.uiReset",
+      title: "Default interface size",
+      keywords: ["size", "scale", "100%", "reset", "appearance"],
+      menu: { menu: "View", group: 4, order: 6 },
+      run: a.uiReset,
     },
 
     // Navigate

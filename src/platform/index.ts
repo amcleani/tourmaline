@@ -402,6 +402,19 @@ export async function onWindowClose(handler: () => Promise<void>): Promise<() =>
   return () => window.removeEventListener("pagehide", listener);
 }
 
+/**
+ * Sets the size of the window's contents (View › Appearance): the webview's
+ * zoom, which also raises the pixel density pages are drawn at, so they stay sharp.
+ */
+export async function setUiScale(scale: number): Promise<void> {
+  if (isTauri()) {
+    const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+    await getCurrentWebview().setZoom(scale);
+  } else {
+    document.documentElement.style.zoom = scale === 1 ? "" : String(scale);
+  }
+}
+
 export async function quitApp(): Promise<void> {
   if (isTauri()) {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");

@@ -164,6 +164,22 @@ function toCssRect(viewport: PageViewport, [x0, y0, x1, y1]: PdfRect) {
 }
 
 const WHEEL_STEP = 50;
+
+/**
+ * The screen's pixels per CSS pixel, followed as it changes (the interface
+ * size, another monitor), so pages are redrawn sharp.
+ */
+function usePixelRatio(): number {
+  const [ratio, setRatio] = useState(() => window.devicePixelRatio || 1);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(`(resolution: ${ratio}dppx)`);
+    const onChange = () => setRatio(window.devicePixelRatio || 1);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, [ratio]);
+  return ratio;
+}
 /** A pinch is over (and the pages are drawn at the new zoom) once no event has come for this long, in ms. */
 const PINCH_SETTLE = 150;
 
@@ -193,6 +209,7 @@ export function PdfViewer({
   // Before the pages' render effects run (layout effects come first).
   useLayoutEffect(() => hidePdfAnnotations(doc, hiddenAnnotations), [doc, hiddenAnnotations]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pixelRatio = usePixelRatio();
   const [sizes, setSizes] = useState<Size[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -567,6 +584,7 @@ export function PdfViewer({
         width={layout!.widths[i]}
         height={layout!.heights[i]}
         zoom={effectiveZoom}
+        pixelRatio={pixelRatio}
         highlights={highlights?.get(i)}
         marks={marks?.get(i)}
         onMarkClick={onMarkClick}
@@ -621,6 +639,7 @@ interface PageProps {
   width: number;
   height: number;
   zoom: number;
+  pixelRatio: number;
   highlights?: Highlight[];
   marks?: Mark[];
   onMarkClick?: (id: string | null) => void;
@@ -652,6 +671,7 @@ function PageView({
   width,
   height,
   zoom,
+  pixelRatio,
   highlights,
   marks,
   onMarkClick,
@@ -720,7 +740,7 @@ function PageView({
       const canvas = canvasRef.current;
       if (cancelled || !canvas) return;
       const pixels = viewport.width * viewport.height;
-      const dpr = Math.min(window.devicePixelRatio || 1, Math.sqrt(MAX_CANVAS_PIXELS / pixels));
+      const dpr = Math.min(pixelRatio, Math.sqrt(MAX_CANVAS_PIXELS / pixels));
       const scaled = page.getViewport({ scale: cssScale * dpr });
       canvas.width = Math.floor(scaled.width);
       canvas.height = Math.floor(scaled.height);
@@ -739,7 +759,7 @@ function PageView({
       cancelled = true;
       task?.cancel();
     };
-  }, [page, viewport, cssScale, pageNumber, hiddenAnnotations]);
+  }, [page, viewport, cssScale, pageNumber, hiddenAnnotations, pixelRatio]);
 
   // Text layer: invisible, selectable text positioned over the canvas; also
   // what screen readers read.

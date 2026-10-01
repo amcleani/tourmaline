@@ -9,6 +9,7 @@
     "core:default",
     "core:window:allow-close",
     "core:window:allow-destroy",
+    "core:webview:allow-set-webview-zoom",
     "dialog:allow-open",
     "deep-link:default",
     "clipboard-manager:allow-write-text",
