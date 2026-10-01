@@ -1,4 +1,5 @@
-//! Reading settings from the user's Obsidian vault. Nothing here writes to it.
+//! Reading settings from the user's Obsidian vault, and the only writes into it:
+//! exported notes and images (see "Writing notes" below).
 
 use std::path::{Path, PathBuf};
 
@@ -265,10 +266,203 @@ pub fn bibliography_modified(path: &Path) -> Result<i64> {
     Ok(modified_millis(&std::fs::metadata(path)?))
 }
 
+// ---- Writing notes (phase 4c export) -------------------------------------------
+//
+// The only writes into the vault: markdown notes and Tourmaline's area images,
+// at paths relative to the vault that stay inside it and out of hidden
+// folders (.obsidian, .trash). Which part of a note changes is decided by
+// the frontend (src/vault/export.ts), which only rewrites its own section.
+
+/// Notes bigger than this are refused.
+const MAX_NOTE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// A note's text and the SHA-256 of its bytes, to tell whether it changed before writing.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Note {
+    pub text: String,
+    pub sha256: String,
+}
+
+/// A note linking to a block.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockLink {
+    /// Relative to the vault, forward slashes.
+    pub path: String,
+    pub block_id: String,
+}
+
+/// Checks a path relative to the vault: plain names only (no `..`, no root,
+/// nothing hidden), and returns it joined to the vault.
+fn vault_path(vault: &Path, relative: &str) -> Result<PathBuf> {
+    use std::path::Component;
+    let rel = Path::new(relative);
+    let mut path = vault.to_path_buf();
+    for c in rel.components() {
+        match c {
+            Component::Normal(name) if !name.to_string_lossy().starts_with('.') => path.push(name),
+            _ => return Err(Error::Message(format!("{relative} is not a plain path inside the vault"))),
+        }
+    }
+    // A link (symlink, junction) inside the vault could still lead out of it.
+    let root = vault.canonicalize()?;
+    let mut existing = path.as_path();
+    while !existing.exists() {
+        existing = existing.parent().unwrap_or(vault);
+    }
+    if !existing.canonicalize()?.starts_with(&root) {
+        return Err(Error::Message(format!("{relative} is outside the vault")));
+    }
+    Ok(path)
+}
+
+fn note_path(vault: &Path, relative: &str) -> Result<PathBuf> {
+    config_dir(vault)?;
+    let is_md = Path::new(relative).extension().is_some_and(|e| e.eq_ignore_ascii_case("md"));
+    if !is_md {
+        return Err(Error::Message(format!("{relative} is not a markdown note")));
+    }
+    vault_path(vault, relative)
+}
+
+/// Reads a note; None if there is none.
+pub fn read_note(vault: &Path, relative: &str) -> Result<Option<Note>> {
+    let path = note_path(vault, relative)?;
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    if bytes.len() as u64 > MAX_NOTE_BYTES {
+        return Err(Error::Message(format!("{relative} is too large to be a note")));
+    }
+    let sha256 = crate::documents::sha256_hex(&bytes);
+    let text = String::from_utf8(bytes).map_err(|_| Error::Message(format!("{relative} is not UTF-8 text")))?;
+    Ok(Some(Note { text, sha256 }))
+}
+
+/// Writes a note whole, if it is still as it was read: `expected` is the
+/// SHA-256 `read_note` gave, or None for a note that didn't exist. A note
+/// changed meanwhile (edited in Obsidian, synced) is left alone.
+pub fn write_note(vault: &Path, relative: &str, text: &str, expected: Option<&str>) -> Result<()> {
+    let path = note_path(vault, relative)?;
+    let current = read_note(vault, relative)?.map(|n| n.sha256);
+    if current.as_deref() != expected {
+        return Err(Error::Message(format!(
+            "{relative} changed while Tourmaline was exporting to it; export again"
+        )));
+    }
+    crate::documents::write_synced(&path, text.as_bytes())
+}
+
+/// Whether a file name is one Tourmaline gives area images: `tourmaline-hl-xxxxxx.png`.
+fn is_image_name(name: &str) -> bool {
+    name.strip_prefix("tourmaline-hl-")
+        .and_then(|rest| rest.strip_suffix(".png"))
+        .is_some_and(|id| id.len() == 6 && id.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase()))
+}
+
+/// Copies an area image into a vault folder (relative, "" for the root),
+/// unless it is already there. Returns its path relative to the vault.
+pub fn export_image(vault: &Path, folder: &str, name: &str, png: &[u8]) -> Result<String> {
+    config_dir(vault)?;
+    if !is_image_name(name) {
+        return Err(Error::Message(format!("{name} is not a Tourmaline image name")));
+    }
+    let relative = if folder.is_empty() { name.to_owned() } else { format!("{folder}/{name}") };
+    let path = vault_path(vault, &relative)?;
+    if std::fs::read(&path).is_ok_and(|b| b == png) {
+        return Ok(relative);
+    }
+    crate::documents::write_synced(&path, png)?;
+    Ok(relative)
+}
+
+/// The notes in the vault (other than `except`) that link to any of these
+/// blocks (`#^hl-…`), so deleting a highlight can ask first.
+pub fn find_block_links(vault: &Path, block_ids: &[String], except: &str) -> Result<Vec<BlockLink>> {
+    config_dir(vault)?;
+    let needles: Vec<(String, &String)> = block_ids.iter().map(|id| (format!("#^{id}"), id)).collect();
+    let except = except.replace('\\', "/");
+    let mut found = Vec::new();
+    let mut stack = vec![(vault.to_path_buf(), String::new())];
+    while let Some((dir, rel)) = stack.pop() {
+        for entry in std::fs::read_dir(&dir)?.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            let child = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() {
+                stack.push((entry.path(), child));
+            } else if kind.is_file() && name.to_lowercase().ends_with(".md") && child != except {
+                let Ok(meta) = entry.metadata() else { continue };
+                if meta.len() > MAX_NOTE_BYTES {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(entry.path()) else { continue };
+                for (needle, id) in &needles {
+                    if text.contains(needle.as_str()) {
+                        found.push(BlockLink { path: child.clone(), block_id: (*id).clone() });
+                    }
+                }
+            }
+        }
+    }
+    found.sort_by(|a, b| (&a.path, &a.block_id).cmp(&(&b.path, &b.block_id)));
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn writes_notes_only_inside_the_vault_and_only_if_unchanged() {
+        let dir = vault(&[]);
+        let v = dir.path();
+        assert_eq!(read_note(v, "Notes/@a.md").unwrap(), None);
+        write_note(v, "Notes/@a.md", "one", None).unwrap();
+        let note = read_note(v, "Notes/@a.md").unwrap().unwrap();
+        assert_eq!(note.text, "one");
+        // Changed since read (or created meanwhile): refused.
+        assert!(write_note(v, "Notes/@a.md", "two", None).is_err());
+        assert!(write_note(v, "Notes/@a.md", "two", Some("0000")).is_err());
+        write_note(v, "Notes/@a.md", "two", Some(&note.sha256)).unwrap();
+        assert_eq!(fs::read_to_string(v.join("Notes/@a.md")).unwrap(), "two");
+        for bad in ["../x.md", "/x.md", "C:/x.md", ".obsidian/x.md", "Notes/x.txt", "Notes/../../x.md"] {
+            assert!(write_note(v, bad, "x", None).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn exports_images_once_with_tourmaline_names() {
+        let dir = vault(&[]);
+        let v = dir.path();
+        assert_eq!(export_image(v, "Attachments", "tourmaline-hl-abc123.png", b"png").unwrap(), "Attachments/tourmaline-hl-abc123.png");
+        assert_eq!(fs::read(v.join("Attachments/tourmaline-hl-abc123.png")).unwrap(), b"png");
+        assert_eq!(export_image(v, "", "tourmaline-hl-abc123.png", b"png").unwrap(), "tourmaline-hl-abc123.png");
+        assert!(export_image(v, "Attachments", "other.png", b"png").is_err());
+        assert!(export_image(v, "..", "tourmaline-hl-abc123.png", b"png").is_err());
+    }
+
+    #[test]
+    fn finds_links_to_blocks() {
+        let dir = vault(&[]);
+        let v = dir.path();
+        fs::create_dir_all(v.join("A/B")).unwrap();
+        fs::write(v.join("A/B/n.md"), "see [[@x#^hl-aaaaaa]]").unwrap();
+        fs::write(v.join("A/@x.md"), "^hl-aaaaaa and #^hl-bbbbbb").unwrap();
+        fs::write(v.join(".obsidian/hidden.md"), "#^hl-aaaaaa").unwrap();
+        let ids = ["hl-aaaaaa".to_string(), "hl-cccccc".to_string()];
+        assert_eq!(
+            find_block_links(v, &ids, "A/@x.md").unwrap(),
+            vec![BlockLink { path: "A/B/n.md".into(), block_id: "hl-aaaaaa".into() }]
+        );
+    }
 
     #[test]
     fn reads_citation_settings() {

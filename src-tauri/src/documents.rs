@@ -32,6 +32,28 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Writes a file whole or not at all: into a temporary file beside it,
+/// flushed to disk, then renamed over it.
+pub fn write_synced(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let dir = path.parent().ok_or_else(|| Error::Message(format!("{} has no folder", path.display())))?;
+    std::fs::create_dir_all(dir)?;
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let temp = dir.join(format!(".{name}.{}.tourmaline-saving", uuid::Uuid::new_v4().simple()));
+    let result = (|| -> Result<()> {
+        let mut file = std::fs::File::create(&temp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
+}
+
 /// Packs a JSON header and the file bytes into one binary IPC response:
 /// a little-endian u32 header length, the UTF-8 JSON, then the bytes.
 pub fn pack(header: &str, bytes: &[u8]) -> Vec<u8> {

@@ -29,11 +29,16 @@ export interface VaultSettings {
  * it, which is how Obsidian anchors a callout.
  */
 export const DEFAULT_HIGHLIGHT_TEMPLATE = `> [!{{category.callout}}] [p. {{page}}]({{readerLink}})
+{{#if image}}
+> {{image}}
+{{/if}}
 {{#if quote}}
 > {{quote}}
 {{/if}}
 {{#if note}}
 {{#if quote}}
+>
+{{else if image}}
 >
 {{/if}}
 > {{note}}
@@ -75,7 +80,7 @@ export function highlightVariables({ annotation: a, category, pageLabel, entry, 
     // Opens Obsidian's own PDF viewer at the annotation; needs it to be in the
     // file (imported from it, or saved into it).
     pdfLink: pdfRef && fileName ? `[[${fileName}#page=${page! + 1}&annotation=${pdfRef}]]` : "",
-    // Area images go into the vault on export (phase 4c).
+    // An area's image embed (![[…]]), set on export once the image is in the vault.
     image: "",
     created: new Date(a.created).toISOString().slice(0, 10),
   };

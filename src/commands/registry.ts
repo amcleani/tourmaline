@@ -24,6 +24,8 @@ export interface CommandContext {
   hasBibliography: boolean;
   /** The open paper is linked to a bibliography entry. */
   hasCitekey: boolean;
+  /** An Obsidian vault has been chosen and its settings read. */
+  hasVault: boolean;
   /** Annotations can be saved into the open file (desktop app, file on disk). */
   canSaveIntoPdf: boolean;
 }
@@ -41,6 +43,7 @@ export const IDLE_CONTEXT: CommandContext = {
   canRedo: false,
   hasBibliography: false,
   hasCitekey: false,
+  hasVault: false,
   canSaveIntoPdf: false,
 };
 

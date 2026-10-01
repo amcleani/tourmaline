@@ -109,6 +109,22 @@ object; Tourmaline's are named by their id; deleted ones leave the page. The
 result is a `writeback` version of the work with placements copied, each
 remembering its object (`{{pdfLink}}` = `[[x.pdf#page=N&annotation=412R]]`).
 
+**Export (4c)**: Export › Export annotations to Obsidian (Ctrl+Shift+X,
+toolbar), never automatic. Renders every highlight, area and note of the
+paper (reading order, orphans last) with the highlight template, joins them
+with the section template, and puts the result between the markers: an
+existing section is replaced in place; otherwise it goes directly under
+`# Annotations` (added at the end of the note if missing). A missing
+literature note is created from the Citations plugin's template. Asks before
+replacing edits made inside the section (compared with what Tourmaline last
+wrote there) and before removing highlights that any note links to
+(`#^hl-…`); refuses a note changed meanwhile or with muddled markers. Area
+images are copied to Obsidian's attachment folder as
+`tourmaline-hl-xxxxxx.png` and embedded with `{{image}}`. Export › Export
+settings edits where highlights go (heading, or a separate note), the
+literature note overrides and both templates, with a live preview on the
+open paper; Copy as Markdown uses the same highlight template.
+
 **Annotations**: user-defined colour categories (name, colour, key 1–9, callout
 type); area capture to PNG in the vault's attachment folder (`Obsidian/Attatchments`);
 pen with pressure and eraser; filterable annotation sidebar; import existing PDF

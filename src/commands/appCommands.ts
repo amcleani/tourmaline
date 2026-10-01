@@ -8,6 +8,8 @@ export interface AppActions {
   chooseVault: () => Promise<void>;
   linkEntry: () => void;
   openNote: () => Promise<void>;
+  exportToVault: () => void;
+  exportSettings: () => void;
   quit: () => Promise<void>;
   zoomIn: () => void;
   zoomOut: () => void;
@@ -380,6 +382,26 @@ export function appCommands(a: AppActions): Command[] {
       icon: "categories",
       menu: { menu: "Annotate", group: 9, order: 1 },
       run: a.editCategories,
+    },
+
+    // Export
+    {
+      id: "export.toVault",
+      title: "Export annotations to Obsidian",
+      keywords: ["obsidian", "vault", "literature note", "markdown", "highlights", "write", "sync"],
+      shortcut: "Mod+Shift+X",
+      icon: "export",
+      toolbar: true,
+      menu: { menu: "Export", group: 1, order: 1 },
+      when: (ctx) => ctx.hasDocument && ctx.hasCitekey && ctx.hasVault,
+      run: a.exportToVault,
+    },
+    {
+      id: "export.settings",
+      title: "Export settings and templates…",
+      keywords: ["obsidian", "handlebars", "template", "heading", "callout", "note", "preview"],
+      menu: { menu: "Export", group: 2, order: 1 },
+      run: a.exportSettings,
     },
 
     // Help

@@ -126,6 +126,9 @@ kbd {
   color: var(--accent-contrast);
 }
 .button.primary:hover { filter: brightness(1.08); }
+.button.danger { background: var(--danger-bg); border-color: var(--danger-text); color: var(--danger-text); }
+.button.small { padding: 2px 8px; font-size: 0.85em; }
+.button:disabled { opacity: 0.55; cursor: default; }
 
 .error {
   display: flex;
@@ -752,6 +755,31 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
   white-space: nowrap;
 }
 
+/* Export settings */
+.dialog.export-dialog { width: min(1100px, calc(100vw - 32px)); max-height: 88vh; }
+.export-settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+@media (max-width: 860px) { .export-settings { grid-template-columns: minmax(0, 1fr); } }
+.fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 12px 0 0; padding: 4px 12px 10px; }
+.fieldset legend { padding: 0 4px; color: var(--text-muted); font-size: 0.9rem; }
+.text-input.indented { margin: 0 0 6px 24px; width: calc(100% - 24px); }
+.template-label { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.template-input { font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 0.85rem; resize: vertical; }
+.export-preview { min-width: 0; }
+.export-preview h3 { margin-top: 12px; }
+.template-preview {
+  margin: 0;
+  padding: 10px;
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.dialog-actions .spacer { flex: 1; }
+
 /* Windows high-contrast themes */
 @media (forced-colors: active) {
   .mark { forced-color-adjust: none; }
@@ -764,3 +792,4 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
   .search-hit.active { outline-color: HighlightText; opacity: 0.6; }
   :focus-visible { outline-color: Highlight; }
 }
+.link-list { margin: 6px 0; padding-left: 20px; max-height: 30vh; overflow: auto; overflow-wrap: anywhere; }

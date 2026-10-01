@@ -245,6 +245,43 @@ export async function vaultFileExists(vault: string, path: string): Promise<bool
   return invoke<boolean>("vault_file_exists", { vault, path });
 }
 
+export interface VaultNote {
+  text: string;
+  /** SHA-256 of the file's bytes, passed back to writeNote. */
+  sha256: string;
+}
+
+/** A note in the vault (path relative to it); null if there is none. */
+export async function readNote(vault: string, path: string): Promise<VaultNote | null> {
+  if (!isTauri()) throw new Error("exporting to the vault needs the desktop app");
+  return invoke<VaultNote | null>("read_note", { vault, path });
+}
+
+/**
+ * Writes a note in the vault, refused if it changed since it was read
+ * (`expected`: readNote's sha256, or null for a note that didn't exist).
+ */
+export async function writeNote(vault: string, path: string, text: string, expected: string | null): Promise<void> {
+  if (!isTauri()) throw new Error("exporting to the vault needs the desktop app");
+  return invoke("write_note", { vault, path, text, expected });
+}
+
+/** Copies an area annotation's image into a vault folder ("" = its root); resolves to its path in the vault. */
+export async function exportImage(vault: string, annotationId: string, folder: string, name: string): Promise<string> {
+  if (!isTauri()) throw new Error("exporting to the vault needs the desktop app");
+  return invoke<string>("export_image", { vault, id: annotationId, folder, name });
+}
+
+/** Notes in the vault, other than `except`, that link to any of these blocks. */
+export async function findBlockLinks(
+  vault: string,
+  blockIds: string[],
+  except: string,
+): Promise<{ path: string; blockId: string }[]> {
+  if (!isTauri() || blockIds.length === 0) return [];
+  return invoke("find_block_links", { vault, blockIds, except });
+}
+
 /** The JabRef bibliography's text. Only ever read. */
 export async function readBibliography(path: string): Promise<{ text: string; modified: number }> {
   if (!isTauri()) {

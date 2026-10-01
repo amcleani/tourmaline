@@ -45,14 +45,18 @@ import {
 import { useVaultMath } from "./math/useVaultMath";
 import { citationVariables } from "./vault/bibliography";
 import { parseReaderLink, readerLink } from "./vault/links";
-import { DEFAULT_HIGHLIGHT_TEMPLATE, literatureNotePath, obsidianUrl, renderHighlight } from "./vault/notes";
+import { DEFAULT_EXPORT_SETTINGS, NoteFormatError, parseExportSettings, type ExportSettings, type SectionInput } from "./vault/export";
+import { literatureNotePath, obsidianUrl, renderHighlight } from "./vault/notes";
+import { runExport, type ExportQuestion } from "./vault/runExport";
 import { useVault } from "./vault/useVault";
 import { installNativeMenu } from "./platform/menu";
 import { AnnotationPopover } from "./ui/AnnotationPopover";
 import { AnnotationsPanel } from "./ui/AnnotationsPanel";
 import { CategoriesDialog } from "./ui/CategoriesDialog";
 import { CommandPalette } from "./ui/CommandPalette";
+import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { EntryPicker } from "./ui/EntryPicker";
+import { ExportSettingsDialog } from "./ui/ExportSettingsDialog";
 import { FindBar } from "./ui/FindBar";
 import { GoToPageDialog } from "./ui/GoToPageDialog";
 import { OutlinePanel } from "./ui/OutlinePanel";
@@ -91,7 +95,7 @@ interface Tab {
   citekeyDeclined: string | null;
 }
 
-type Dialog = "palette" | "shortcuts" | "goto" | "recent" | "categories" | "entry" | "writeback" | null;
+type Dialog = "palette" | "shortcuts" | "goto" | "recent" | "categories" | "entry" | "writeback" | "exportSettings" | null;
 
 const SAVE_POSITION_MS = 800;
 let tabCounter = 0;
@@ -729,7 +733,7 @@ export function App() {
         return;
       }
       const entry = tab?.citekey ? bibliography?.get(tab.citekey) : undefined;
-      const markdown = renderHighlight(DEFAULT_HIGHLIGHT_TEMPLATE, {
+      const markdown = renderHighlight(exportSettings.highlightTemplate, {
         annotation: a,
         category: categories.find((c) => c.id === a.categoryId),
         pageLabel: pageLabelOf(tab, a),
@@ -806,6 +810,78 @@ export function App() {
     }
   };
 
+  // ---- Exporting to the vault ----------------------------------------------------
+
+  const [exportSettings, setExportSettings] = useState<ExportSettings>(DEFAULT_EXPORT_SETTINGS);
+  useEffect(() => {
+    getState("export.settings")
+      .then((json) => setExportSettings(parseExportSettings(json)))
+      .catch((e) => console.error("Could not load the export settings", e));
+  }, []);
+
+  /** A question asked during an export, answered through `resolve`. */
+  const [question, setQuestion] = useState<{ q: ExportQuestion; resolve: (yes: boolean) => void } | null>(null);
+  const ask = useCallback(
+    (q: ExportQuestion) =>
+      new Promise<boolean>((resolve) =>
+        setQuestion({
+          q,
+          resolve: (yes) => {
+            setQuestion(null);
+            resolve(yes);
+          },
+        }),
+      ),
+    [],
+  );
+
+  /** What a paper's section is made of: its annotations, entry and page labels. */
+  const sectionInput = (tab: Tab, annotations: readonly Annotation[]): SectionInput => {
+    const entry = tab.citekey ? bibliography?.get(tab.citekey) : undefined;
+    return {
+      annotations,
+      categories,
+      pageLabel: (page) => tab.labels?.[page] ?? String(page + 1),
+      entry: entry ? citationVariables(entry) : { citekey: tab.citekey ?? "" },
+      fileName: tab.name,
+    };
+  };
+
+  const exporting = useRef(false);
+  const exportToVault = async () => {
+    const tab = latest.current.activeTab;
+    if (!tab?.citekey || !tab.workId || tab.pendingVersion || !vault || !vaultSettings || exporting.current) return;
+    exporting.current = true;
+    try {
+      // Notes still being typed, and every queued change, go in too.
+      await Promise.all([...draftFlushers.current].map((flush) => flush()));
+      await latest.current.notes.settled();
+      const now = latest.current;
+      if (now.activeTab?.key !== tab.key || now.activeTab.workId !== tab.workId || !now.notes.loaded) {
+        setNotice("Nothing was exported: the tab changed. Export again when it has loaded.");
+        return;
+      }
+      const annotations = now.notes.current().filter((a) => a.workId === tab.workId);
+      const result = await runExport({
+        vault,
+        vaultSettings,
+        settings: exportSettings,
+        workId: tab.workId,
+        input: sectionInput(now.activeTab, annotations),
+        ask,
+      });
+      const what = result.count === 1 ? "1 annotation" : `${result.count} annotations`;
+      if (result.status === "written") setNotice(`Exported ${what} to ${result.created ? "a new note, " : ""}${result.path}`);
+      else if (result.status === "unchanged") setNotice(`${result.path} is up to date`);
+      else setNotice("Nothing was exported");
+    } catch (e) {
+      if (e instanceof NoteFormatError) setError(`Could not export: the note ${e.message}.`);
+      else reportError("Could not export to the vault", e);
+    } finally {
+      exporting.current = false;
+    }
+  };
+
   // ---- Commands --------------------------------------------------------------
 
   useEffect(() => {
@@ -813,7 +889,7 @@ export function App() {
       hasDocument: activePdf !== null,
       tabCount: tabs.length,
       findOpen: findOpen && activePdf !== null,
-      modalOpen: dialog !== null || versionPending,
+      modalOpen: dialog !== null || versionPending || question !== null,
       hasTextSelection: selectionEnd !== null,
       annotationSelected: selected !== null,
       captureMode,
@@ -821,6 +897,7 @@ export function App() {
       canRedo: notes.canRedo,
       hasBibliography: bibliography !== null,
       hasCitekey: !!activeTab?.citekey,
+      hasVault: vault !== null && vaultSettings !== null,
       canSaveIntoPdf: isTauri() && !!activeTab?.path && !versionPending,
     };
     registry.notifyContextChanged();
@@ -829,6 +906,9 @@ export function App() {
     tabs.length,
     findOpen,
     dialog,
+    question,
+    vault,
+    vaultSettings,
     versionPending,
     selectionEnd,
     selected,
@@ -853,6 +933,7 @@ export function App() {
     copyAnnotation,
     openLiteratureNote,
     saveIntoPdf,
+    exportToVault,
     writeBackConfirmed,
   });
   latest.current = {
@@ -866,6 +947,7 @@ export function App() {
     copyAnnotation,
     openLiteratureNote,
     saveIntoPdf,
+    exportToVault,
     writeBackConfirmed,
   };
 
@@ -971,6 +1053,8 @@ export function App() {
         else setDialog("writeback");
       },
       openNote: () => latest.current.openLiteratureNote(),
+      exportToVault: () => void latest.current.exportToVault(),
+      exportSettings: () => setDialog("exportSettings"),
       copyMarkdown: () => latest.current.copyAnnotation("markdown"),
       copyLink: () => latest.current.copyAnnotation("link"),
     }).map((c) => registry.register(c));
@@ -1230,6 +1314,57 @@ export function App() {
           }}
           onCancel={() => setDialog(null)}
         />
+      )}
+      {dialog === "exportSettings" && (
+        <ExportSettingsDialog
+          settings={exportSettings}
+          preview={activeTab && activeTab.workId === activeWork ? sectionInput(activeTab, notes.annotations) : null}
+          citations={vaultSettings?.citations ?? null}
+          onSave={(next) => {
+            setDialog(null);
+            setExportSettings(next);
+            void setState("export.settings", JSON.stringify(next)).catch((e) => reportError("Could not save the export settings", e));
+          }}
+          onCancel={() => setDialog(null)}
+        />
+      )}
+      {question?.q.kind === "edited" && (
+        <ConfirmDialog
+          title="Replace your edits?"
+          confirmLabel="Replace"
+          danger
+          onConfirm={() => question.resolve(true)}
+          onCancel={() => question.resolve(false)}
+        >
+          <p>
+            The Tourmaline section of <code>{question.q.path}</code> has been edited since Tourmaline last wrote it.
+            Exporting replaces the whole section with the annotations as they are in Tourmaline.
+          </p>
+          <p className="muted">
+            The section is everything between <code>%% tourmaline:begin %%</code> and <code>%% tourmaline:end %%</code>;
+            the rest of the note is never changed. To keep what you wrote there, cancel and move it out of the section
+            first.
+          </p>
+        </ConfirmDialog>
+      )}
+      {question?.q.kind === "links" && (
+        <ConfirmDialog
+          title="Remove highlights that notes link to?"
+          confirmLabel="Remove them"
+          danger
+          onConfirm={() => question.resolve(true)}
+          onCancel={() => question.resolve(false)}
+        >
+          <p>These highlights were deleted in Tourmaline, but notes link to them, and those links will stop working:</p>
+          <ul className="link-list">
+            {question.q.links.map((l) => (
+              <li key={`${l.path}#${l.blockId}`}>
+                <code>^{l.blockId}</code> from <code>{l.path}</code>
+              </li>
+            ))}
+          </ul>
+          <p className="muted">To keep them, cancel and undo the deletion (Edit › Undo) before exporting.</p>
+        </ConfirmDialog>
       )}
       {dialog === "entry" && bibliography && activeTab && (
         <EntryPicker

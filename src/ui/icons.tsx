@@ -7,6 +7,7 @@ import {
   Highlighter,
   Keyboard,
   MoveHorizontal,
+  NotebookPen,
   PanelLeft,
   PanelRight,
   Plus,
@@ -48,6 +49,7 @@ const ICONS: Record<string, LucideIcon> = {
   up: ChevronUp,
   down: ChevronDown,
   add: Plus,
+  export: NotebookPen,
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

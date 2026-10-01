@@ -189,6 +189,24 @@ versions deleted after 30 days), writes beside it and renames; `record_writeback
 version with copied placements and their `pdf_obj_ref`. Never test it on
 the vault: use copies in `.dev-data/`.
 
+**Exporting to the vault.** `src/vault/export.ts` (pure, tested in
+`test/export.test.ts`, including a read-only pass over the user's real
+notes) renders the section and merges it into a note's text: replace an
+existing `%% tourmaline:begin %%`…`end` section in place, else insert it
+directly under the configured heading (outside frontmatter and code
+fences), else append heading + section; keeps CRLF. `runExport.ts` does one
+export: read the note (`read_note`, returns its SHA-256), ask before
+replacing edits inside the section (hash of what was last written, in app
+state `export.section:<work id>`) or removing blocks other notes link to
+(`find_block_links`), copy area images (`export_image`), then `write_note`
+with the SHA it read (refused if the note changed meanwhile). The only
+vault writes are these commands in `vault.rs`: `.md` notes and
+`tourmaline-hl-xxxxxx.png` images, at plain relative paths that stay inside
+the vault and out of hidden folders. Export settings (destination, heading,
+templates, note overrides) are app state `export.settings`. Try it on
+`.dev-data/test-vault` (a copy of the vault's settings and notes), never on
+the real vault.
+
 **Security.** CSP is set in `src-tauri/tauri.conf.json` (includes
 `'wasm-unsafe-eval'` for pdf.js decoders); window permissions are in
 `src-tauri/capabilities/default.json` — add a permission there when using a new

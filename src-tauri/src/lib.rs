@@ -105,6 +105,40 @@ async fn vault_file_exists(app: AppHandle, vault: PathBuf, path: String) -> Resu
     blocking(app, move |_, _| vault::vault_file_exists(&vault, &path)).await
 }
 
+/// A note in the vault (relative path), or None if there is none.
+#[tauri::command]
+async fn read_note(app: AppHandle, vault: PathBuf, path: String) -> Result<Option<vault::Note>> {
+    blocking(app, move |_, _| vault::read_note(&vault, &path)).await
+}
+
+/// Writes a note in the vault, if it hasn't changed since `read_note`
+/// (`expected` = its SHA-256 then, None if it didn't exist).
+#[tauri::command]
+async fn write_note(app: AppHandle, vault: PathBuf, path: String, text: String, expected: Option<String>) -> Result<()> {
+    blocking(app, move |_, _| vault::write_note(&vault, &path, &text, expected.as_deref())).await
+}
+
+/// Copies an area annotation's image into a vault folder; returns its path in the vault.
+#[tauri::command]
+async fn export_image(app: AppHandle, vault: PathBuf, id: String, folder: String, name: String) -> Result<String> {
+    blocking(app, move |app, _| {
+        let (source, _) = attachment_path(app, &id)?;
+        vault::export_image(&vault, &folder, &name, &std::fs::read(source)?)
+    })
+    .await
+}
+
+/// Notes (other than `except`) linking to any of these blocks.
+#[tauri::command]
+async fn find_block_links(
+    app: AppHandle,
+    vault: PathBuf,
+    block_ids: Vec<String>,
+    except: String,
+) -> Result<Vec<vault::BlockLink>> {
+    blocking(app, move |_, _| vault::find_block_links(&vault, &block_ids, &except)).await
+}
+
 /// Reads the JabRef bibliography (never written).
 #[tauri::command]
 async fn read_bibliography(app: AppHandle, path: PathBuf) -> Result<Bibliography> {
@@ -220,13 +254,13 @@ async fn save_annotations_to_pdf(
         let backup = backups.join(format!("{file_id}.pdf"));
         let backed_up = std::fs::read(&backup).is_ok_and(|b| documents::sha256_hex(&b) == file_id);
         if !backed_up {
-            write_synced(&backup, &file.bytes)?;
+            documents::write_synced(&backup, &file.bytes)?;
         }
         let max_age = std::time::Duration::from_secs(writeback::BACKUP_DAYS * 86_400);
         if let Err(e) = writeback::prune_backups(&backups, |sha| db.file_origin(sha), max_age) {
             eprintln!("Tourmaline: could not prune PDF backups: {e}");
         }
-        write_synced(&path, &written.bytes).map_err(|e| {
+        documents::write_synced(&path, &written.bytes).map_err(|e| {
             Error::Message(format!(
                 "could not save into {} ({e}); if another program has it open, close it and try again",
                 path.display()
@@ -242,28 +276,6 @@ async fn save_annotations_to_pdf(
         .map(Some)
     })
     .await
-}
-
-/// Writes a file whole or not at all: into a temporary file beside it,
-/// flushed to disk, then renamed over it.
-fn write_synced(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    use std::io::Write;
-    let dir = path.parent().ok_or_else(|| Error::Message(format!("{} has no folder", path.display())))?;
-    std::fs::create_dir_all(dir)?;
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let temp = dir.join(format!(".{name}.{}.tourmaline-saving", uuid::Uuid::new_v4().simple()));
-    let result = (|| -> Result<()> {
-        let mut file = std::fs::File::create(&temp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temp, path)?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result
 }
 
 /// Keys of the annotations already imported into a paper (deleted ones too).
@@ -427,6 +439,10 @@ pub fn run() {
             math_settings,
             vault_settings,
             vault_file_exists,
+            read_note,
+            write_note,
+            export_image,
+            find_block_links,
             read_bibliography,
             bibliography_modified,
             link_citekey,
