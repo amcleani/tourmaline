@@ -36,8 +36,11 @@ export function ReferencePreview({ pdf, destination, anchor, zoom, onMouseEnter,
       const left = Math.min(Math.max(anchor.left - box.left - 24, 8), Math.max(8, box.width - w - 8));
       const below = anchor.bottom - box.top + 6;
       const above = anchor.top - box.top - 6 - h;
-      const top = below + h <= box.height - 8 || above < 8 ? below : above;
-      setPlace({ left, top: Math.max(8, top) });
+      const top = Math.max(8, below + h <= box.height - 8 || above < 8 ? below : above);
+      // Only a real change moves it (never a loop of tiny adjustments).
+      setPlace((prev) =>
+        typeof prev.left === "number" && Math.abs(prev.left - left) < 1 && Math.abs((prev.top as number) - top) < 1 ? prev : { left, top },
+      );
     };
     fit();
     const observer = new ResizeObserver(fit);
@@ -59,7 +62,9 @@ export function ReferencePreview({ pdf, destination, anchor, zoom, onMouseEnter,
       const width = Math.max(1, x1 - x0);
       const height = Math.max(1, y1 - y0);
       // As large as the page's text, within the popup (and the window).
-      const maxWidth = Math.min(MAX_WIDTH, window.innerWidth - 48);
+      // (The pane it is in may be narrower than the window: split view, sidebars.)
+      const area = rootRef.current?.offsetParent?.clientWidth ?? window.innerWidth;
+      const maxWidth = Math.min(MAX_WIDTH, area - 40);
       const css = Math.min(PDF_TO_CSS * zoom, maxWidth / width, (MAX_HEIGHT * 1.6) / height);
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       const viewport = page.getViewport({ scale: css * ratio });

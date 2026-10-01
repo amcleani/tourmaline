@@ -843,7 +843,10 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .reference-preview {
   position: absolute;
   z-index: 7;
-  max-width: min(740px, calc(100vw - 32px));
+  /* Sized by its content, not by where it is placed: an absolutely placed box
+     near the right edge would otherwise shrink, be placed again, grow... */
+  width: max-content;
+  max-width: min(740px, calc(100% - 16px));
   padding: 8px;
   background: var(--surface);
   color: var(--text);
