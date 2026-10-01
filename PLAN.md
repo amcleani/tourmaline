@@ -228,10 +228,37 @@ silently dropped).
 Phases 7 and 8 are put off (decided after phase 6): phase 9 comes next, and
 they follow as later features.
 
-**Polish (9)**, so far: zoom by trackpad pinch (smooth while pinching, the
-pages redrawn sharp when it stops) and Ctrl+mouse wheel (one step a notch),
-around the pointer, in whichever pane is under it; the webview's own zoom of
-the whole interface stays off.
+**Polish (9)**:
+- Zoom by trackpad pinch (smooth while pinching, the pages redrawn sharp
+  when it stops) and Ctrl+mouse wheel (one step a notch), around the
+  pointer, in whichever pane is under it; the webview's own zoom of the
+  whole interface stays off.
+- Shortcut editor (Help › Keyboard shortcuts): change, remove or reset any
+  command's shortcut; taking another command's asks first; keys that move
+  focus, open menus, close the window or edit text are refused. Category
+  keys stay in Edit categories.
+- Appearance (View › Appearance, and View menu commands): theme as Windows,
+  light, dark or high contrast; pages as printed, dark or sepia; interface
+  size 80–200% (the webview's zoom). Windows' contrast themes keep pages and
+  highlights in their own colours.
+- Right-click menus (also Shift+F10 / the menu key) on selected text, a
+  highlight or the page, made of registry commands.
+- Keyboard text selection: Navigate › Select the found text (Alt+Enter, or
+  Select in the find bar), then Shift+arrows (Ctrl+Shift by word) to adjust;
+  H, 1–9 and N work on it as on a mouse selection. (Selecting a focus-mode
+  step is a possible later addition.)
+- Accessibility audit with axe-core over every dialog and panel in each
+  theme: no violations. Tab stays inside modal dialogs.
+- Installer (decided in phase 9): NSIS, per user; Tourmaline is offered in
+  Explorer's "Open with" for PDFs without becoming the default; PDFs passed
+  on the command line open (also into the running app).
+- Updates (decided in phase 9): signed GitHub releases of
+  `amcleani/tourmaline` (`plugins.updater` in tauri.conf.json). Pushing a
+  `v*` tag runs `.github/workflows/release.yml`, which makes a draft
+  release; publishing it delivers the update. The signing key is
+  `~/.tauri/tourmaline.key` (not in the repo; GitHub secret
+  `TAURI_SIGNING_PRIVATE_KEY`). Help › Check for updates / About; an
+  automatic check at start, at most daily, can be turned off.
 
 ## Development notes
 

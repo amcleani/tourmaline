@@ -251,6 +251,44 @@ stack of `Anchor`s, pushed by `rememberPlace()` before every jump. Split
 view (`SplitPane`) is a second `PdfViewer`; zoom commands act on the pane
 holding focus.
 
+**Phase 9 pieces.**
+- *User shortcuts*: `registry.setOverrides` applies the user's shortcuts
+  (app state `shortcuts`, `{id: shortcut | null}`) over the defaults; a
+  default another command took is dropped. The rules for what may be
+  chosen are `checkShortcut`/`assignShortcut` in `commands/keymap.ts`
+  (tested). While the editor records a key, `registry.setRecording(true)`
+  rebuilds the native menu without accelerators (Windows gives an
+  accelerator's key to the menu, never to the page). Components show a
+  command's current shortcut with `useShortcut`/`useShortcutHint`
+  (`RegistryContext`), never hard-coded key names.
+- *Context menus*: `commands/contextMenus.ts` lists command ids per menu
+  (selection, annotation, page); `ContextMenu.tsx` is the ARIA menu. A
+  right-click on a page first selects the highlight under it (PageView
+  `onContextMenu`). The webview's own menu is suppressed except in text
+  fields and over selected text outside the document.
+- *Appearance*: `app/appearance.ts` sets `data-theme`/`data-pages` on
+  `<html>` (themes are CSS token blocks in `app.css`); the interface size is
+  the webview's zoom (`setUiScale`), which changes `devicePixelRatio`, so
+  the viewer redraws pages when it changes (`usePixelRatio`).
+- *Keyboard selection*: viewer `selectText(page, start, end)` turns offsets
+  in a page's normalised text into a DOM selection; the viewer's own
+  keydown moves its end with `Selection.modify`.
+- *Dialogs*: `ui/focusTrap.ts` keeps Tab inside the topmost
+  `aria-modal` dialog for all of them; each dialog closes on Escape from
+  anywhere inside it and puts focus back where it was. Dialog headers are
+  `div`s (a `header` would be a second banner landmark).
+- *Launch and updates*: `launch.rs` takes PDF paths from the command line
+  (`take_launch_files`) and from a second launch (`open-files` event).
+  The installer's "Open with" registration is `src-tauri/windows/hooks.nsh`.
+  Updates: tauri-plugin-updater (`checkForUpdate` in platform,
+  `app/useUpdates.ts`); `saveEverything` runs before installing.
+  `npm run tauri build` needs `TAURI_SIGNING_PRIVATE_KEY` (contents of
+  `~/.tauri/tourmaline.key`) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`
+  because `createUpdaterArtifacts` is on.
+- An accessibility check: `axe-core` (dev dependency) can be loaded into
+  the running UI from `/node_modules/axe-core/axe.min.js` and run with
+  `axe.run(document)`.
+
 **Security.** CSP is set in `src-tauri/tauri.conf.json` (includes
 `'wasm-unsafe-eval'` for pdf.js decoders); window permissions are in
 `src-tauri/capabilities/default.json` — add a permission there when using a new
