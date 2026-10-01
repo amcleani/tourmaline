@@ -6,7 +6,7 @@ import { PDF_TO_CSS } from "../pdf/units";
 interface Props {
   pdf: PDFDocumentProxy;
   /** What the spot leads to: a part of a page, or an external address. */
-  destination: { page: number; preview: PdfRect | null; url?: string };
+  destination: { page: number; preview: PdfRect | null; url?: string; text: string };
   /** The link, on screen: the preview goes under it (or above), kept in the window. */
   anchor: DOMRect;
   /** The page's zoom: the preview's text is drawn as large as the page's. */
@@ -93,7 +93,9 @@ export function ReferencePreview({ pdf, destination, anchor, zoom, onMouseEnter,
   }, [pdf, pageIndex, preview, zoom]);
 
   return (
-    <div ref={rootRef} className="reference-preview" style={place} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} role="tooltip">
+    // role="status": read out when it appears (the picture itself is hidden from screen readers; its text isn't).
+    <div ref={rootRef} className="reference-preview" style={place} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} role="status">
+      {!destination.url && <p className="visually-hidden">{destination.text}</p>}
       {destination.url ? (
         <p className="reference-url">Opens {destination.url} in your browser</p>
       ) : failed ? (

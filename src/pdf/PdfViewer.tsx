@@ -807,6 +807,9 @@ function PageView({
                 href="#"
                 className="link-spot"
                 style={toCssRect(viewport, rect)}
+                draggable={false}
+                // A middle click would follow href="#" in a new window.
+                onAuxClick={(e) => e.preventDefault()}
                 // One tab stop per link, even when it covers several rectangles.
                 tabIndex={j === 0 ? 0 : -1}
                 aria-label={spot.label}

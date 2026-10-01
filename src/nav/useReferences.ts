@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { FocusPage } from "../focus/steps";
 import { resolveDest } from "../pdf/outline";
@@ -11,10 +11,12 @@ import {
   bibliographyLines,
   equationNumbers,
   findCitations,
+  looksLikeBibliography,
   parseBibliography,
   casedText,
   regionAt,
   targetIn,
+  textIn,
   type BibEntry,
   type CitationTarget,
 } from "./references";
@@ -39,6 +41,8 @@ export interface Destination {
   preview: PdfRect | null;
   /** For external links. */
   url?: string;
+  /** The text shown, for screen readers. */
+  text: string;
 }
 
 interface LinkData {
@@ -54,6 +58,9 @@ interface Index {
   bibliography: Promise<BibEntry[]>;
   /** Numbers of the document's displayed equations, so a bare "(2)" can be told from other brackets. */
   equations: Promise<Set<string>>;
+  /** A page's own links: ready at once. */
+  links: Map<number, Promise<Spot[]>>;
+  /** Its links and the citations found in its text: once the bibliography and equations are read. */
   spots: Map<number, Promise<Spot[]>>;
   found: Map<string, Promise<{ page: number; rect: PdfRect } | null>>;
 }
@@ -62,7 +69,7 @@ const indexes = new WeakMap<PDFDocumentProxy, Index>();
 function indexOf(pdf: PDFDocumentProxy): Index {
   let index = indexes.get(pdf);
   if (!index) {
-    index = { bibliography: readBibliography(pdf), equations: readEquations(pdf), spots: new Map(), found: new Map() };
+    index = { bibliography: readBibliography(pdf), equations: readEquations(pdf), links: new Map(), spots: new Map(), found: new Map() };
     Promise.all([index.bibliography, index.equations]).catch(() => indexes.delete(pdf));
     indexes.set(pdf, index);
   }
@@ -79,7 +86,10 @@ async function readBibliography(pdf: PDFDocumentProxy): Promise<BibEntry[]> {
   for (let i = pdf.numPages - 1; i >= last; i--) {
     pages.unshift(await getPageLines(pdf, i));
     const lines = bibliographyLines(pages);
-    if (lines.length) return parseBibliography(lines);
+    if (lines.length) {
+      const entries = parseBibliography(lines);
+      return looksLikeBibliography(entries) ? entries : [];
+    }
   }
   return [];
 }
@@ -92,9 +102,20 @@ async function readEquations(pdf: PDFDocumentProxy): Promise<Set<string>> {
   return out;
 }
 
+function cached<T>(map: Map<number, Promise<T>>, key: number, make: () => Promise<T>): Promise<T> {
+  let entry = map.get(key);
+  if (!entry) {
+    entry = make();
+    entry.catch(() => map.delete(key));
+    map.set(key, entry);
+  }
+  return entry;
+}
+
 const overlaps = (a: PdfRect, b: PdfRect) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
 
-async function pageSpots(pdf: PDFDocumentProxy, pageIndex: number, index: Index): Promise<Spot[]> {
+/** A page's own links (PDF link annotations). */
+async function linkSpots(pdf: PDFDocumentProxy, pageIndex: number): Promise<Spot[]> {
   const page = await pdf.getPage(pageIndex + 1);
   const { text, content } = await getPageText(pdf, pageIndex);
   // A link is named by the text it covers ("[12]", "Figure 2").
@@ -108,8 +129,17 @@ async function pageSpots(pdf: PDFDocumentProxy, pageIndex: number, index: Index)
     if (a.dest) spots.push({ id: `l${a.id}`, rects: [rect], label: under(rect) ?? "Link", to: { kind: "dest", dest: a.dest } });
     else if (a.url) spots.push({ id: `l${a.id}`, rects: [rect], label: `${under(rect) ?? "Link"} (opens ${a.url})`, to: { kind: "url", url: a.url } });
   }
-  // Citations and references in the text, where the PDF has no link of its own.
-  const [entries, equations] = await Promise.all([index.bibliography, index.equations]);
+  return spots;
+}
+
+/** A page's links, and the citations in its text where the PDF has no link of its own. */
+async function pageSpots(pdf: PDFDocumentProxy, pageIndex: number, index: Index): Promise<Spot[]> {
+  const spots = [...(await cached(index.links, pageIndex, () => linkSpots(pdf, pageIndex)))];
+  const [{ text, content }, entries, equations] = await Promise.all([
+    getPageText(pdf, pageIndex),
+    index.bibliography,
+    index.equations,
+  ]);
   const cased = casedText(text, content.items);
   findCitations(cased, entries, equations).forEach((c, i) => {
     const rects = matchRects(text, content.items, { page: pageIndex, start: c.start, end: c.end });
@@ -145,7 +175,7 @@ async function locate(pdf: PDFDocumentProxy, target: CitationTarget, from: numbe
     const lines = (await getPageLines(pdf, page)).lines.filter((l) =>
       entry.rects.some(([p, ...r]) => p === page && r.every((v, i) => v === l.bbox[i])),
     );
-    return lines.length ? { page, rect: around(await getPageLines(pdf, page), lines) } : null;
+    return lines.length ? { page, rect: around(await getPageLines(pdf, page), lines), text: entry.text } : null;
   }
   const key = `${target.kind}:${target.kind === "theorem" ? target.name : ""}:${target.label}`;
   let found = index.found.get(key);
@@ -163,25 +193,38 @@ async function locate(pdf: PDFDocumentProxy, target: CitationTarget, from: numbe
  * leads. Everything is worked out on demand and kept for the document.
  */
 export function useReferences(pdf: PDFDocumentProxy | null) {
+  // Pages show their own links at once; the citations in their text join
+  // them once the bibliography and equation numbers are read (spotsFor
+  // changes then, and the viewer asks again).
+  const [indexed, setIndexed] = useState<PDFDocumentProxy | null>(null);
+  useEffect(() => {
+    if (!pdf) return;
+    let cancelled = false;
+    const index = indexOf(pdf);
+    Promise.all([index.bibliography, index.equations])
+      .then(() => !cancelled && setIndexed(pdf))
+      .catch((e) => console.error("Could not read the bibliography", e));
+    return () => {
+      cancelled = true;
+    };
+  }, [pdf]);
+  const complete = indexed === pdf;
+
   const spotsFor = useCallback(
     (pageIndex: number): Promise<Spot[]> => {
       if (!pdf) return Promise.resolve([]);
       const index = indexOf(pdf);
-      let spots = index.spots.get(pageIndex);
-      if (!spots) {
-        spots = pageSpots(pdf, pageIndex, index);
-        spots.catch(() => index.spots.delete(pageIndex));
-        index.spots.set(pageIndex, spots);
-      }
-      return spots;
+      return complete
+        ? cached(index.spots, pageIndex, () => pageSpots(pdf, pageIndex, index))
+        : cached(index.links, pageIndex, () => linkSpots(pdf, pageIndex));
     },
-    [pdf],
+    [pdf, complete],
   );
 
   const destinationOf = useCallback(
     async (spot: Spot, fromPage: number): Promise<Destination | null> => {
       if (!pdf) return null;
-      if (spot.to.kind === "url") return { page: fromPage, y: null, preview: null, url: spot.to.url };
+      if (spot.to.kind === "url") return { page: fromPage, y: null, preview: null, url: spot.to.url, text: spot.to.url };
       if (spot.to.kind === "dest") {
         const target = await resolveDest(pdf, spot.to.dest);
         if (!target) return null;
@@ -200,10 +243,12 @@ export function useReferences(pdf: PDFDocumentProxy | null) {
           ? page.lines.filter((l) => entry.rects.some(([p, ...r]) => p === target.page && r[1] === l.bbox[1] && r[0] === l.bbox[0]))
           : [];
         const preview = entryLines.length ? around(page, entryLines) : regionAt(page, y, target.x ?? null);
-        return { page: target.page, y, preview };
+        return { page: target.page, y, preview, text: entry && entryLines.length ? entry.text : textIn(page, preview) };
       }
       const found = await locate(pdf, spot.to.target, fromPage, indexOf(pdf));
-      return found ? { page: found.page, y: found.rect[3], preview: found.rect } : null;
+      if (!found) return null;
+      const text = "text" in found ? found.text : textIn(await getPageLines(pdf, found.page), found.rect);
+      return { page: found.page, y: found.rect[3], preview: found.rect, text };
     },
     [pdf],
   );

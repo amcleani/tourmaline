@@ -26,7 +26,8 @@ export interface BibEntry {
   rects: PageRect[];
 }
 
-const HEADING = /^(?:\d+(?:\.\d+)*\.?\s+|[A-Z]\.\s+)?(references|bibliography|works cited|literature cited|literature|cited works|reference list)\s*$/i;
+// (Not a bare "Literature": that is as often a literature review.)
+const HEADING = /^(?:\d+(?:\.\d+)*\.?\s+|[A-Z]\.\s+)?(references|bibliography|works cited|literature cited|cited works|reference list)\s*$/i;
 const END = /^(?:appendix|appendices|index|notes|endnotes|supplementary)\b/i;
 const YEAR = /(?<![\d.])(1[5-9]\d\d|20\d\d)([a-z])?(?!\d)/;
 const LABEL = /^\s*(?:\[([^\]]{1,12})\]|(\d{1,3})\.(?=\s))/;
@@ -34,27 +35,37 @@ const DASHES = /^\s*(?:[—–]+|[-_]{2,})/;
 
 const heightOf = (l: Line) => l.bbox[3] - l.bbox[1];
 
-/** The lines after the last bibliography heading, with their pages; empty if there is none. */
+/**
+ * The lines after the last bibliography heading, with their pages; empty if
+ * there is none. A heading repeated atop consecutive pages is a running head:
+ * the bibliography starts at the first of them, and the repeats are left out.
+ */
 export function bibliographyLines(pages: readonly FocusPage[]): { page: number; line: Line }[] {
-  for (let p = pages.length - 1; p >= 0; p--) {
-    const lines = pages[p].lines;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (!HEADING.test(lines[i].text.trim())) continue;
-      const out: { page: number; line: Line }[] = [];
-      const take = (page: number, from: Line[]) => {
-        for (const line of from) {
-          if (END.test(line.text.trim()) && heightOf(line) >= heightOf(lines[i]) * 0.9) return false;
-          out.push({ page, line });
-        }
-        return true;
-      };
-      if (take(pages[p].page, lines.slice(i + 1))) {
-        for (let q = p + 1; q < pages.length; q++) if (!take(pages[q].page, [...pages[q].lines])) break;
-      }
-      return out;
+  const headings: { p: number; i: number }[] = [];
+  pages.forEach((page, p) => page.lines.forEach((l, i) => HEADING.test(l.text.trim()) && headings.push({ p, i })));
+  if (!headings.length) return [];
+  let k = headings.length - 1;
+  while (k > 0 && headings[k - 1].p === headings[k].p - 1 && pages[headings[k].p].page === pages[headings[k - 1].p].page + 1) k--;
+  const { p, i } = headings[k];
+  const heading = pages[p].lines[i];
+  const out: { page: number; line: Line }[] = [];
+  // The bibliography ends at a heading such as "Appendix" (short, and as large as its own).
+  const ends = (line: Line) => {
+    const text = line.text.trim();
+    return END.test(text) && text.length < 40 && !/\.$/.test(text) && heightOf(line) >= heightOf(heading) * 0.9;
+  };
+  for (let q = p; q < pages.length; q++) {
+    for (const line of q === p ? pages[q].lines.slice(i + 1) : pages[q].lines) {
+      if (ends(line)) return out;
+      if (!HEADING.test(line.text.trim())) out.push({ page: pages[q].page, line });
     }
   }
-  return [];
+  return out;
+}
+
+/** Whether entries look like a bibliography: most of them have a year (else the heading was something else). */
+export function looksLikeBibliography(entries: readonly BibEntry[]): boolean {
+  return entries.length >= 2 && entries.filter((e) => e.year).length >= 0.5 * entries.length;
 }
 
 /** Splits bibliography lines into entries: by label, hanging indent, or the space between entries. */
@@ -240,7 +251,8 @@ export function findCitations(text: string, entries: readonly BibEntry[], equati
   }
 
   // Figures, tables, equations, sections.
-  for (const m of text.matchAll(/\b(Figures?|Figs?\.|Tables?|Tab\.)\s*(\d+(?:\.\d+)?[a-z]?)/g)) {
+  for (const m of text.matchAll(/\b(Figures?|Figs?\.|Tables?|Tab\.)\s*(\d+(?:\.\d+)?)[a-z]?/g)) {
+    // "Figure 2a" is part of Figure 2.
     const kind = /^t/i.test(m[1]) ? "table" : "figure";
     out.push({ start: m.index, end: m.index + m[0].length, target: { kind, label: m[2] } });
   }
@@ -354,6 +366,14 @@ export function blockFrom(page: FocusPage, start: number, max: number): Line[] {
     out.push(line);
   }
   return out;
+}
+
+/** The text of the lines of a page inside a rectangle, in reading order (what a preview shows, for screen readers). */
+export function textIn(page: FocusPage, [x0, y0, x1, y1]: PdfRect): string {
+  return page.lines
+    .filter((l) => l.bbox[0] < x1 && l.bbox[2] > x0 && l.bbox[1] < y1 && l.bbox[3] > y0)
+    .map((l) => l.text)
+    .join(" ");
 }
 
 /** The smallest rectangle around some lines, widened to their column, with a margin. */

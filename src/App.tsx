@@ -1049,7 +1049,10 @@ export function App() {
   const readyTabs: SplitTab[] = tabs.flatMap((t) =>
     t.status === "ready" && t.pdf && t.fileId ? [{ key: t.key, name: t.name, pdf: t.pdf, fileId: t.fileId }] : [],
   );
-  const splitTab = split ? (readyTabs.find((t) => t.key === (split.tabKey ?? activeKey)) ?? null) : null;
+  // (If its tab was closed, the pane shows the active one.)
+  const splitTab = split
+    ? (readyTabs.find((t) => t.key === (split.tabKey ?? activeKey)) ?? readyTabs.find((t) => t.key === activeKey) ?? null)
+    : null;
   const inSplitPane = () => !!(document.activeElement as HTMLElement | null)?.closest?.(".split-pane");
 
   const toggleSplit = () => {

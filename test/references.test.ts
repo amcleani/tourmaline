@@ -11,6 +11,7 @@ import {
   casedText,
   equationNumbers,
   findCitations,
+  looksLikeBibliography,
   matchEntry,
   parseBibliography,
   targetIn,
@@ -125,5 +126,38 @@ describe("an author-year bibliography", () => {
       ["Lewis 1986", 3],
     ]);
     expect(matchEntry(entries, "Bacon", "2018")).toBe(-1);
+  });
+});
+
+describe("finding the bibliography", () => {
+  const names = ["Anscombe", "Bacon", "Carnap", "Dorr"];
+  // Hanging indent: the second line of each entry is indented.
+  const entry = (n: number, y: number) => [
+    line(`${names[n - 1]}, A. (20${10 + n}). A title of a paper number ${n}. In a`, 72, y),
+    line(`Journal of Examples, pp. 1-10.`, 90, y - 12),
+  ];
+
+  it("starts at the first of the running heads atop its pages, which are left out", () => {
+    const pages: FocusPage[] = [
+      { page: 7, items: [], rotation: 0, lines: [line("Some text before.", 72, 700), line("References", 72, 600, 12), ...entry(1, 580), ...entry(2, 550)] },
+      { page: 8, items: [], rotation: 0, lines: [line("References", 72, 760, 12), ...entry(3, 740), ...entry(4, 710)] },
+    ];
+    const entries = parseBibliography(bibliographyLines(pages));
+    expect(entries.map((e) => e.names[0])).toEqual(names);
+    expect(looksLikeBibliography(entries)).toBe(true);
+  });
+
+  it("is not a review section: entries without years don't count", () => {
+    const pages: FocusPage[] = [
+      { page: 0, items: [], rotation: 0, lines: [line("Reference list", 72, 700, 12), line("Some prose about earlier work.", 72, 680), line("More prose here.", 72, 660)] },
+    ];
+    expect(looksLikeBibliography(parseBibliography(bibliographyLines(pages)))).toBe(false);
+  });
+});
+
+describe("figure references", () => {
+  it("find a figure from a subfigure ('Figure 2a')", () => {
+    const [c] = findCitations("As Figure 2a shows.", []);
+    expect(c.target).toEqual({ kind: "figure", label: "2" });
   });
 });
