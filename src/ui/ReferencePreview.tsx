@@ -16,6 +16,8 @@ interface Props {
 }
 
 const MAX_WIDTH = 720;
+/** Laid out (to be measured) but not seen, until placed. */
+const HIDDEN: React.CSSProperties = { visibility: "hidden", left: 0, top: 0 };
 const MAX_HEIGHT = 380;
 
 // The part of the page a link or citation points to (a bibliography entry,
@@ -23,12 +25,15 @@ const MAX_HEIGHT = 380;
 // Enter on it) to go there.
 export function ReferencePreview({ pdf, destination, anchor, zoom, onMouseEnter, onMouseLeave }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const [place, setPlace] = useState<React.CSSProperties>({ visibility: "hidden" });
-  // Placed in the area it is drawn in (its offset parent), once its size is known.
+  const [place, setPlace] = useState<React.CSSProperties | null>(null);
+  /** Its picture is drawn (or there is none): only then is its size final, and it shows. */
+  const [drawn, setDrawn] = useState(!destination.preview);
+  // Placed in the area it is drawn in (its offset parent), once its size is
+  // known: shown before that, it would appear by the link and then jump.
   useLayoutEffect(() => {
     const el = rootRef.current;
     const area = el?.offsetParent;
-    if (!el || !area) return;
+    if (!el || !area || !drawn) return;
     const fit = () => {
       const box = area.getBoundingClientRect();
       const w = el.offsetWidth;
@@ -38,15 +43,13 @@ export function ReferencePreview({ pdf, destination, anchor, zoom, onMouseEnter,
       const above = anchor.top - box.top - 6 - h;
       const top = Math.max(8, below + h <= box.height - 8 || above < 8 ? below : above);
       // Only a real change moves it (never a loop of tiny adjustments).
-      setPlace((prev) =>
-        typeof prev.left === "number" && Math.abs(prev.left - left) < 1 && Math.abs((prev.top as number) - top) < 1 ? prev : { left, top },
-      );
+      setPlace((prev) => (prev && Math.abs((prev.left as number) - left) < 1 && Math.abs((prev.top as number) - top) < 1 ? prev : { left, top }));
     };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [anchor]);
+  }, [anchor, drawn]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [failed, setFailed] = useState(false);
   const { page: pageIndex, preview } = destination;
@@ -85,10 +88,12 @@ export function ReferencePreview({ pdf, destination, anchor, zoom, onMouseEnter,
         annotationMode: AnnotationMode.ENABLE_STORAGE,
       });
       await task.promise;
+      if (!cancelled) setDrawn(true);
     })().catch((e) => {
       if (!cancelled && (e as { name?: string })?.name !== "RenderingCancelledException") {
         console.error("Could not draw the preview", e);
         setFailed(true);
+        setDrawn(true);
       }
     });
     return () => {
@@ -99,7 +104,7 @@ export function ReferencePreview({ pdf, destination, anchor, zoom, onMouseEnter,
 
   return (
     // role="status": read out when it appears (the picture itself is hidden from screen readers; its text isn't).
-    <div ref={rootRef} className="reference-preview" style={place} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} role="status">
+    <div ref={rootRef} className="reference-preview" style={place ?? HIDDEN} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} role="status">
       {!destination.url && <p className="visually-hidden">{destination.text}</p>}
       {destination.url ? (
         <p className="reference-url">Opens {destination.url} in your browser</p>
