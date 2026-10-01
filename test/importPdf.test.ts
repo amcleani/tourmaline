@@ -96,7 +96,11 @@ describe("a highlight's text stored as its note", () => {
 
   it("is recognised despite line breaks, hyphenation, ligatures and a word more or less", () => {
     expect(repeatsQuote("the apt suspension of resent-\nment has nothing to do with theoretical truths about (in)determinism", quote)).toBe(true);
-    expect(repeatsQuote("Obviously, the apt suspension of resentment has nothing to do with theoretical truths about (in)determinism.", quote)).toBe(true);
+    // A word less than ours (their selection was shorter): still the quote.
+    expect(repeatsQuote("apt suspension of resentment has nothing to do with theoretical truths about (in)determinism.", quote)).toBe(true);
+    // The quote with the user's own words after it is a note.
+    expect(repeatsQuote(`${quote} Important!`, quote)).toBe(false);
+    expect(withoutRepeatedQuote(`${quote} Key step.`, quote)).toBe(`${quote} Key step.`);
     expect(repeatsQuote("ﬁne", "fine")).toBe(true);
     expect(repeatsQuote("resentment", quote)).toBe(false);
     expect(repeatsQuote("A real note about resentment and determinism", quote)).toBe(false);

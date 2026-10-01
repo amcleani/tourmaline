@@ -113,17 +113,36 @@ async fn read_note(app: AppHandle, vault: PathBuf, path: String) -> Result<Optio
     blocking(app, move |_, _| vault::read_note(&vault, &path)).await
 }
 
+/// Writes go only into the vault the user chose (File › Choose Obsidian vault).
+fn ensure_chosen_vault(db: &Db, vault: &std::path::Path) -> Result<()> {
+    let chosen = db.get_state("vault")?;
+    let same = chosen.is_some_and(|c| {
+        let canonical = |p: &std::path::Path| p.canonicalize().ok();
+        canonical(std::path::Path::new(&c)).is_some_and(|c| Some(c) == canonical(vault))
+    });
+    if same {
+        Ok(())
+    } else {
+        Err(Error::Message(format!("{} is not the chosen vault", vault.display())))
+    }
+}
+
 /// Writes a note in the vault, if it hasn't changed since `read_note`
 /// (`expected` = its SHA-256 then, None if it didn't exist).
 #[tauri::command]
 async fn write_note(app: AppHandle, vault: PathBuf, path: String, text: String, expected: Option<String>) -> Result<()> {
-    blocking(app, move |_, _| vault::write_note(&vault, &path, &text, expected.as_deref())).await
+    blocking(app, move |_, db| {
+        ensure_chosen_vault(db, &vault)?;
+        vault::write_note(&vault, &path, &text, expected.as_deref())
+    })
+    .await
 }
 
 /// Copies an area annotation's image into a vault folder; returns its path in the vault.
 #[tauri::command]
 async fn export_image(app: AppHandle, vault: PathBuf, id: String, folder: String, name: String) -> Result<String> {
-    blocking(app, move |app, _| {
+    blocking(app, move |app, db| {
+        ensure_chosen_vault(db, &vault)?;
         let (source, _) = attachment_path(app, &id)?;
         vault::export_image(&vault, &folder, &name, &std::fs::read(source)?)
     })

@@ -12,7 +12,6 @@ import {
   mergeIntoNote,
   NoteFormatError,
   normaliseSection,
-  outsideRegion,
   parseExportSettings,
   renderSection,
 } from "../src/vault/export";
@@ -138,12 +137,11 @@ describe("edits and links", () => {
     expect(normaliseSection("a\nb!")).not.toBe(normaliseSection("a\nb"));
   });
 
-  it("find links to blocks outside Tourmaline's section", () => {
-    const note = "see [[#^hl-aaaaaa]]\n%% tourmaline:begin %%\n> q\n\n^hl-aaaaaa\n> [[#^hl-bbbbbb]]\n%% tourmaline:end %%\n";
-    const outside = outsideRegion(note);
-    expect(linksToBlock(outside, "hl-aaaaaa")).toBe(true);
-    expect(linksToBlock(outside, "hl-bbbbbb")).toBe(false);
-    expect([...blockIds(note)]).toEqual(["hl-aaaaaa"]);
+  it("find links to blocks, not the blocks themselves", () => {
+    const note = "see [[#^hl-aaaaaa]]\n%% tourmaline:begin %%\n> q\n\n^hl-cccccc\n%% tourmaline:end %%\n";
+    expect(linksToBlock(note, "hl-aaaaaa")).toBe(true);
+    expect(linksToBlock(note, "hl-cccccc")).toBe(false);
+    expect([...blockIds(note)]).toEqual(["hl-cccccc"]);
   });
 });
 

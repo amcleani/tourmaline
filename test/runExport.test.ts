@@ -26,7 +26,7 @@ vi.mock("../src/platform", () => ({
 
 import { DEFAULT_EXPORT_SETTINGS } from "../src/vault/export";
 import type { VaultSettings } from "../src/vault/notes";
-import { runExport, type ExportQuestion } from "../src/vault/runExport";
+import { runExport, type ExportJob, type ExportQuestion } from "../src/vault/runExport";
 
 const vaultSettings: VaultSettings = {
   name: "Academia",
@@ -65,23 +65,23 @@ const highlight = (n: number, extra: Partial<Annotation> = {}): Annotation => ({
 const PATH = "Obsidian/Library/@Goodman2023GG.md";
 let asked: ExportQuestion[] = [];
 let answer = true;
-const run = (annotations: Annotation[]) =>
-  runExport({
-    vault: "C:/vault",
-    vaultSettings,
-    settings: DEFAULT_EXPORT_SETTINGS,
-    workId: "w",
-    input: {
-      annotations,
-      categories: [],
-      pageLabel: (p) => String(p + 1),
-      entry: { citekey: "Goodman2023GG", title: "Grounding Generalizations" },
-    },
-    ask: async (q) => {
-      asked.push(q);
-      return answer;
-    },
-  });
+const job = (annotations: Annotation[]): ExportJob => ({
+  vault: "C:/vault",
+  vaultSettings,
+  settings: DEFAULT_EXPORT_SETTINGS,
+  workId: "w",
+  input: {
+    annotations,
+    categories: [],
+    pageLabel: (p) => String(p + 1),
+    entry: { citekey: "Goodman2023GG", title: "Grounding Generalizations" },
+  },
+  ask: async (q) => {
+    asked.push(q);
+    return answer;
+  },
+});
+const run = (annotations: Annotation[]) => runExport(job(annotations));
 
 beforeEach(() => {
   notes.clear();
@@ -144,6 +144,28 @@ describe("runExport", () => {
     notes.set(PATH, { text: notes.get(PATH)!.text.replace("\nSee [[#^hl-000003]].\n", ""), version: 8 });
     expect(await run([highlight(1), highlight(2)])).toMatchObject({ status: "written" });
     expect(asked).toEqual([]);
+  });
+
+  it("counts a link from another highlight's note in the section", async () => {
+    await run([highlight(1), highlight(2, { note: "Compare [[#^hl-000001]]" })]);
+    answer = false;
+    expect(await run([highlight(2, { note: "Compare [[#^hl-000001]]" })])).toMatchObject({ status: "cancelled" });
+    expect(asked).toEqual([{ kind: "links", path: PATH, links: [{ path: PATH, blockId: "hl-000001" }] }]);
+  });
+
+  it("remembers what it wrote in each note, so switching where highlights go doesn't look like an edit", async () => {
+    await run([highlight(1)]);
+    const separate = { ...DEFAULT_EXPORT_SETTINGS, destination: "note" as const };
+    await runExport({ ...job([highlight(1)]), settings: separate });
+    expect(notes.has("Obsidian/Library/@Goodman2023GG highlights.md")).toBe(true);
+    expect(await run([highlight(1), highlight(2)])).toMatchObject({ status: "written" });
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses a section that wouldn't read back, e.g. a note with an unclosed code block", async () => {
+    const bare = { ...DEFAULT_EXPORT_SETTINGS, highlightTemplate: "{{note}}\n" };
+    await expect(runExport({ ...job([highlight(1, { note: "```js\nx" })]), settings: bare })).rejects.toThrow(/read back/);
+    expect(notes.size).toBe(0);
   });
 
   it("copies area images into the attachment folder and embeds them", async () => {

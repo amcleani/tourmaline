@@ -236,7 +236,7 @@ export function nearestCategory(colour: string | null, categories: readonly Cate
 function fold(s: string): string {
   return s
     .normalize("NFKC")
-    .replace(/­/g, "")
+    .replace(/\u00ad/g, "")
     // A word broken across lines: "hyphen-\nated".
     .replace(/(\p{L})-\s+(\p{L})/gu, "$1$2")
     .toLowerCase()
@@ -245,17 +245,17 @@ function fold(s: string): string {
 
 /**
  * Whether some text is the quote again. Acrobat, Zotero, Foxit and others
- * store a highlight's text as its /Contents; that isn't a note. Allows a few
- * characters' difference at the edges (their selection and ours can differ
- * by a letter or a word).
+ * store a highlight's text as its /Contents; that isn't a note. Their
+ * selection and ours can differ at the edges: the text may be a little
+ * shorter than the quote (a word less), but only a stray letter or two
+ * longer, since more may be the user's own words added after it.
  */
 export function repeatsQuote(text: string, quote: string): boolean {
   const t = fold(text);
   const q = fold(quote);
   if (!t || !q) return false;
-  if (t === q) return true;
-  const [short, long] = t.length < q.length ? [t, q] : [q, t];
-  return long.includes(short) && short.length >= 0.9 * long.length;
+  if (t.length <= q.length) return q.includes(t) && t.length >= 0.9 * q.length;
+  return t.includes(q) && t.length - q.length <= 2;
 }
 
 /**

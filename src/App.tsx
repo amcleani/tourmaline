@@ -875,7 +875,7 @@ export function App() {
       else if (result.status === "unchanged") setNotice(`${result.path} is up to date`);
       else setNotice("Nothing was exported");
     } catch (e) {
-      if (e instanceof NoteFormatError) setError(`Could not export: the note ${e.message}.`);
+      if (e instanceof NoteFormatError) setError(`Could not export to the note: ${e.message}.`);
       else reportError("Could not export to the vault", e);
     } finally {
       exporting.current = false;

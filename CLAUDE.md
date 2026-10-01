@@ -197,10 +197,11 @@ directly under the configured heading (outside frontmatter and code
 fences), else append heading + section; keeps CRLF. `runExport.ts` does one
 export: read the note (`read_note`, returns its SHA-256), ask before
 replacing edits inside the section (hash of what was last written, in app
-state `export.section:<work id>`) or removing blocks other notes link to
+state `export.section:<work id>:<note path>`) or removing blocks any note links to
 (`find_block_links`), copy area images (`export_image`), then `write_note`
-with the SHA it read (refused if the note changed meanwhile). The only
-vault writes are these commands in `vault.rs`: `.md` notes and
+with the SHA it read (refused if the note changed meanwhile); a section that
+wouldn't read back intact is refused before writing. The only
+vault writes are these commands in `vault.rs` (only into the chosen vault): `.md` notes and
 `tourmaline-hl-xxxxxx.png` images, at plain relative paths that stay inside
 the vault and out of hidden folders. Export settings (destination, heading,
 templates, note overrides) are app state `export.settings`. Try it on

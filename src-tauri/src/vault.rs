@@ -397,7 +397,8 @@ pub fn find_block_links(vault: &Path, block_ids: &[String], except: &str) -> Res
             let Ok(kind) = entry.file_type() else { continue };
             if kind.is_dir() {
                 stack.push((entry.path(), child));
-            } else if kind.is_file() && name.to_lowercase().ends_with(".md") && child != except {
+            // Windows and macOS paths ignore case, so the note may be listed as "library/@x.md".
+            } else if kind.is_file() && name.to_lowercase().ends_with(".md") && !child.eq_ignore_ascii_case(&except) {
                 let Ok(meta) = entry.metadata() else { continue };
                 if meta.len() > MAX_NOTE_BYTES {
                     continue;
@@ -459,7 +460,7 @@ mod tests {
         fs::write(v.join(".obsidian/hidden.md"), "#^hl-aaaaaa").unwrap();
         let ids = ["hl-aaaaaa".to_string(), "hl-cccccc".to_string()];
         assert_eq!(
-            find_block_links(v, &ids, "A/@x.md").unwrap(),
+            find_block_links(v, &ids, "a/@X.md").unwrap(),
             vec![BlockLink { path: "A/B/n.md".into(), block_id: "hl-aaaaaa".into() }]
         );
     }

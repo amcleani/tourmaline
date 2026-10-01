@@ -195,7 +195,8 @@ function lines(text: string): Line[] {
 function proseLines(text: string): Line[] {
   const all = lines(text);
   let i = 0;
-  if (all[0]?.text === "---") {
+  // (A byte order mark may come before the frontmatter.)
+  if (all[0]?.text.replace(/^\uFEFF/, "") === "---") {
     const close = all.findIndex((l, j) => j > 0 && /^(---|\.\.\.)\s*$/.test(l.text));
     if (close !== -1) i = close + 1;
   }
@@ -224,7 +225,7 @@ export function findRegion(text: string): Region | null {
   if (begins.length === 0 && ends.length === 0) return null;
   if (begins.length !== 1 || ends.length !== 1 || ends[0].start < begins[0].start) {
     throw new NoteFormatError(
-      `its Tourmaline section is unclear (it should have one "${REGION_BEGIN}" line, then one "${REGION_END}" line)`,
+      `its Tourmaline section is unclear: it should have one "${REGION_BEGIN}" line, then one "${REGION_END}" line`,
     );
   }
   const body = text.slice(begins[0].next, ends[0].start).replace(/\r?\n$/, "");
@@ -290,12 +291,6 @@ export function mergeIntoNote(note: string | null, body: string, s: Pick<ExportS
   const trimmed = note.replace(/\s+$/, "");
   const added = [heading, regionText(body)].filter(Boolean).join("\n\n");
   return { text: (trimmed ? trimmed + eol + eol : "") + withEol(added), previous: null };
-}
-
-/** For links to deleted highlights: the text of a note outside Tourmaline's section. */
-export function outsideRegion(note: string): string {
-  const region = findRegion(note);
-  return region ? note.slice(0, region.start) + note.slice(region.end) : note;
 }
 
 /** Whether some markdown links to a block (`[[note#^hl-…]]`, `![[#^hl-…]]`, `[x](note.md#^hl-…)`). */
