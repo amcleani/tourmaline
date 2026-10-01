@@ -200,7 +200,7 @@ silently dropped).
 | 3 | **Notes editor**: CodeMirror + MathJax + preamble + autocomplete | Formulas render as in Obsidian ✅ |
 | 4a | **Vault**: read vault settings, match PDFs to JabRef entries, Handlebars templates, `tourmaline://` links | `BaconDorrC.pdf` is matched to its entry; Copy as Markdown gives a callout whose `tourmaline://` link reopens the highlight ✅ |
 | 4b | **PDF annotations**: import existing annotations; optional write-back and `{{pdfLink}}` | The Okular highlights in `BaconDorrC.pdf` appear in the sidebar and can be edited; Save annotations into PDF puts Tourmaline's into a copy, and Obsidian shows them ✅ |
-| 4c | **Export**: merge into notes preserving edits; template editor with live preview | Highlight in `Goodman2023GG` → appears in `@Goodman2023GG.md` without touching the user's text → link reopens Tourmaline there |
+| 4c | **Export**: merge into notes preserving edits; template editor with live preview | Highlight in `Goodman2023GG` → appears in `@Goodman2023GG.md` without touching the user's text → link reopens Tourmaline there ✅ |
 | 5 | **Focus mode** | A two-column arXiv paper reads in order |
 | 6 | **Smart navigation**: citation/figure/equation popups, back/forward, split view | Hovering "[12]" shows the reference |
 | 7 | **Ink** | Strokes survive zoom and export |
