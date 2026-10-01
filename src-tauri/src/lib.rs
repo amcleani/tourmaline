@@ -189,7 +189,8 @@ async fn pdf_annotation_names(
 /// PDF). The file must still be the version `file_id`. Its bytes are first
 /// backed up to `<data>/backups/pdf/<sha256>.pdf` (see `prune_backups`); the changes are appended
 /// as an incremental update, written beside the file and moved over it.
-/// Returns the new version, which the tab then shows.
+/// Returns the new version, which the tab then shows, or None if the file
+/// already had everything (then nothing is written or backed up).
 #[tauri::command]
 async fn save_annotations_to_pdf(
     app: AppHandle,
@@ -197,8 +198,11 @@ async fn save_annotations_to_pdf(
     file_id: String,
     work_id: String,
     annotations: Vec<writeback::WriteAnnotation>,
-) -> Result<DocumentInfo> {
+) -> Result<Option<DocumentInfo>> {
     blocking(app, move |app, db| {
+        // One save at a time: two would race on the same file.
+        static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _saving = SAVING.lock().unwrap_or_else(|e| e.into_inner());
         let file = documents::read(&path)?;
         if file.sha256 != file_id {
             return Err(Error::Message(format!(
@@ -206,28 +210,28 @@ async fn save_annotations_to_pdf(
                 path.display()
             )));
         }
-        let backups = app.state::<DataDir>().0.join("backups").join("pdf");
-        std::fs::create_dir_all(&backups)?;
-        let backup = backups.join(format!("{file_id}.pdf"));
-        if !backup.exists() {
-            std::fs::write(&backup, &file.bytes)?;
+        let removed = db.writeback_removals(&work_id, &file_id)?;
+        let written = writeback::write_annotations(&file.bytes, &annotations, &removed)?;
+        if !written.changed {
+            return Ok(None);
         }
-        // Originals stay; backups of earlier saves go after a while.
+        // The file as it is now, kept before it changes (see prune_backups).
+        let backups = app.state::<DataDir>().0.join("backups").join("pdf");
+        let backup = backups.join(format!("{file_id}.pdf"));
+        let backed_up = std::fs::read(&backup).is_ok_and(|b| documents::sha256_hex(&b) == file_id);
+        if !backed_up {
+            write_synced(&backup, &file.bytes)?;
+        }
         let max_age = std::time::Duration::from_secs(writeback::BACKUP_DAYS * 86_400);
         if let Err(e) = writeback::prune_backups(&backups, |sha| db.file_origin(sha), max_age) {
             eprintln!("Tourmaline: could not prune PDF backups: {e}");
         }
-        let removed = db.writeback_removals(&work_id, &file_id)?;
-        let written = writeback::write_annotations(&file.bytes, &annotations, &removed)?;
-        let temp = path.with_extension("pdf.tourmaline-saving");
-        std::fs::write(&temp, &written.bytes)?;
-        if let Err(e) = std::fs::rename(&temp, &path) {
-            let _ = std::fs::remove_file(&temp);
-            return Err(Error::Message(format!(
-                "could not replace {} ({e}); if another program has it open, close it and try again",
+        write_synced(&path, &written.bytes).map_err(|e| {
+            Error::Message(format!(
+                "could not save into {} ({e}); if another program has it open, close it and try again",
                 path.display()
-            )));
-        }
+            ))
+        })?;
         let sha = documents::sha256_hex(&written.bytes);
         db.record_writeback(
             &file_id,
@@ -235,8 +239,31 @@ async fn save_annotations_to_pdf(
             &written.refs,
             &removed,
         )
+        .map(Some)
     })
     .await
+}
+
+/// Writes a file whole or not at all: into a temporary file beside it,
+/// flushed to disk, then renamed over it.
+fn write_synced(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let dir = path.parent().ok_or_else(|| Error::Message(format!("{} has no folder", path.display())))?;
+    std::fs::create_dir_all(dir)?;
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let temp = dir.join(format!(".{name}.{}.tourmaline-saving", uuid::Uuid::new_v4().simple()));
+    let result = (|| -> Result<()> {
+        let mut file = std::fs::File::create(&temp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
 }
 
 /// Keys of the annotations already imported into a paper (deleted ones too).

@@ -769,22 +769,40 @@ export function App() {
       .catch(() => {});
   }, []);
 
+  /** Set while a save runs: a second Ctrl+S waits for nothing and does nothing. */
+  const saving = useRef(false);
   const saveIntoPdf = async () => {
     const tab = latest.current.activeTab;
-    if (!tab?.path || !tab.fileId || !tab.workId || tab.pendingVersion) return;
+    if (!tab?.path || !tab.fileId || !tab.workId || tab.pendingVersion || saving.current) return;
+    saving.current = true;
     try {
       // Notes still being typed, and every queued change, go in too.
       await Promise.all([...draftFlushers.current].map((flush) => flush()));
       await latest.current.notes.settled();
-      const list = annotationsToWrite(latest.current.notes.current(), categories);
-      await saveAnnotationsToPdf(tab.path, tab.fileId, tab.workId, list);
+      // The annotations shown are the active tab's: stop if that changed meanwhile.
+      const now = latest.current;
+      if (now.activeTab?.key !== tab.key || now.activeTab.fileId !== tab.fileId || !now.notes.loaded) {
+        setNotice("Nothing was saved: the tab changed. Save again when it has loaded.");
+        return;
+      }
+      const list = annotationsToWrite(
+        now.notes.current().filter((a) => a.workId === tab.workId),
+        categories,
+      );
+      const info = await saveAnnotationsToPdf(tab.path, tab.fileId, tab.workId, list);
+      if (!info) {
+        setNotice(`${tab.name} already has all its annotations.`);
+        return;
+      }
       // Show the file as it now is (same pages; the annotations are now in it).
       const ready = await prepare(await openPdfAtPath(tab.path));
       installReady(tab.key, ready);
       refreshRecent();
-      setNotice(`Saved ${list.length === 1 ? "1 annotation" : `${list.length} annotations`} into ${tab.name}`);
+      setNotice(`Saved the annotations into ${tab.name}`);
     } catch (e) {
       reportError("Could not save the annotations into the PDF", e);
+    } finally {
+      saving.current = false;
     }
   };
 

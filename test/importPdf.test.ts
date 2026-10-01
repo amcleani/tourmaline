@@ -71,6 +71,24 @@ describe("collectAnnotations", () => {
   });
 });
 
+describe("collectAnnotations keys", () => {
+  it("are unique when names or places repeat", () => {
+    const found = collectAnnotations(
+      [{ page: 0, annotations: [highlight("1R"), highlight("2R"), highlight("3R"), highlight("4R")] }],
+      new Map([
+        ["1R", "dup"],
+        ["2R", "dup"],
+      ]),
+    );
+    expect(found.map((f) => f.key)).toEqual([
+      "nm:dup",
+      "nm:dup~2",
+      "pos:Highlight:0:100,500,300,520",
+      "pos:Highlight:0:100,500,300,520~2",
+    ]);
+  });
+});
+
 describe("pdfDate", () => {
   it.each([
     ["D:20250227173006-08'00'", Date.UTC(2025, 1, 28, 1, 30, 6)],

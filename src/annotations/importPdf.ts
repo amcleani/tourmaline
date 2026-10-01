@@ -101,6 +101,9 @@ export function collectAnnotations(
     }
   }
   const found: FoundAnnotation[] = [];
+  // Two annotations can share a name (copied in some programs) or, unnamed,
+  // a place: later ones get "~2", "~3"... so each has its own key.
+  const seen = new Map<string, number>();
   for (const { page, annotations } of pages) {
     for (const a of annotations) {
       const kind = KINDS[a.subtype];
@@ -109,9 +112,12 @@ export function collectAnnotations(
       const name = names.get(a.id);
       const where = a.rect.map((v) => Math.round(v)).join(",");
       const note = [a.contentsObj?.str.trim() ?? "", ...(replies.get(a.id) ?? [])].filter(Boolean).join("\n\n");
+      const base = name ? `nm:${name}` : `pos:${a.subtype}:${page}:${where}`;
+      const n = (seen.get(base) ?? 0) + 1;
+      seen.set(base, n);
       found.push({
         pdfId: a.id,
-        key: name ? `nm:${name}` : `pos:${a.subtype}:${page}:${where}`,
+        key: n === 1 ? base : `${base}~${n}`,
         kind,
         page,
         rects,

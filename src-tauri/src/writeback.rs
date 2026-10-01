@@ -37,12 +37,18 @@ pub struct WriteAnnotation {
     /// Unix ms.
     pub created: i64,
     pub updated: i64,
+    /// Imported from a PDF: its replies are part of the note, and without a
+    /// name it is found again by kind and place.
+    #[serde(default)]
+    pub imported: bool,
 }
 
 pub struct Written {
     pub bytes: Vec<u8>,
     /// Tourmaline id → the object it now is ("412R").
     pub refs: HashMap<String, String>,
+    /// False when everything was already in the file as given.
+    pub changed: bool,
 }
 
 fn rgb(colour: &str) -> Result<[f32; 3]> {
@@ -103,14 +109,40 @@ fn appearance(kind: &str, rects: &[[f64; 4]], bounds: [f64; 4], [r, g, b]: [f32;
     Some(Stream::new(dict, ops.into_bytes()))
 }
 
-/// Where each annotation object sits: by object reference and by `/NM`.
+/// One annotation object already on a page.
+#[derive(Clone)]
+struct Found {
+    page: ObjectId,
+    id: ObjectId,
+    name: Option<String>,
+    subtype: Vec<u8>,
+    rect: Option<[f64; 4]>,
+    popup: Option<ObjectId>,
+}
+
+/// The annotations already in the file: by reference, by `/NM`, and the
+/// replies (`/IRT`) to each.
 struct Existing {
-    by_ref: HashMap<String, (ObjectId, ObjectId)>,
-    by_name: HashMap<String, (ObjectId, ObjectId)>,
+    by_ref: HashMap<String, Found>,
+    by_name: HashMap<String, Found>,
+    replies: HashMap<ObjectId, Vec<Found>>,
+    all: Vec<Found>,
+}
+
+fn number(o: &Object) -> Option<f64> {
+    match o {
+        Object::Integer(i) => Some(*i as f64),
+        Object::Real(r) => Some(f64::from(*r)),
+        _ => None,
+    }
+}
+
+fn number_array(o: Option<&Object>) -> Option<Vec<f64>> {
+    o?.as_array().ok()?.iter().map(number).collect()
 }
 
 fn existing_annotations(doc: &lopdf::Document) -> Existing {
-    let mut found = Existing { by_ref: HashMap::new(), by_name: HashMap::new() };
+    let mut found = Existing { by_ref: HashMap::new(), by_name: HashMap::new(), replies: HashMap::new(), all: vec![] };
     for page_id in doc.get_pages().into_values() {
         let Ok(page) = doc.get_dictionary(page_id) else { continue };
         let entries = match page.get(b"Annots") {
@@ -120,50 +152,109 @@ fn existing_annotations(doc: &lopdf::Document) -> Existing {
         };
         for entry in entries {
             let Object::Reference(id) = entry else { continue };
-            found.by_ref.insert(ref_id(id), (page_id, id));
-            if let Ok(name) = doc.get_dictionary(id).and_then(|d| d.get(b"NM")).and_then(lopdf::decode_text_string) {
-                found.by_name.insert(name, (page_id, id));
+            let Ok(dict) = doc.get_dictionary(id) else { continue };
+            let rect = number_array(dict.get(b"Rect").ok())
+                .filter(|r| r.len() == 4)
+                .map(|r| [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])]);
+            let f = Found {
+                page: page_id,
+                id,
+                name: dict.get(b"NM").ok().and_then(|n| lopdf::decode_text_string(n).ok()),
+                subtype: dict.get(b"Subtype").and_then(Object::as_name).unwrap_or(b"").to_vec(),
+                rect,
+                popup: dict.get(b"Popup").and_then(Object::as_reference).ok(),
+            };
+            if let Ok(parent) = dict.get(b"IRT").and_then(Object::as_reference) {
+                found.replies.entry(parent).or_default().push(f.clone());
             }
+            found.by_ref.insert(ref_id(id), f.clone());
+            if let Some(name) = &f.name {
+                found.by_name.insert(name.clone(), f.clone());
+            }
+            found.all.push(f);
         }
     }
     found
 }
 
-/// A page's `/Annots` in the update, cloned from the previous revision on
-/// first change (the array itself when it is an object of its own).
+/// Changes a page's `/Annots`. The result is written into the page itself,
+/// not into an `/Annots` array object, which several pages may share.
 fn edit_annots(inc: &mut IncrementalDocument, page_id: ObjectId, edit: impl FnOnce(&mut Vec<Object>)) -> Result<()> {
     let to_err = |e: lopdf::Error| Error::Message(format!("could not update the page: {e}"));
     inc.opt_clone_object_to_new_document(page_id).map_err(to_err)?;
-    let array_id = {
+    let mut entries = {
         let page = inc.new_document.get_dictionary(page_id).map_err(to_err)?;
-        page.get(b"Annots").and_then(Object::as_reference).ok()
-    };
-    if let Some(array_id) = array_id {
-        inc.opt_clone_object_to_new_document(array_id).map_err(to_err)?;
-        if let Ok(Object::Array(entries)) = inc.new_document.get_object_mut(array_id) {
-            edit(entries);
-            return Ok(());
+        match page.get(b"Annots") {
+            Ok(Object::Array(entries)) => entries.clone(),
+            Ok(Object::Reference(array)) => inc
+                .new_document
+                .get_object(*array)
+                .or_else(|_| inc.get_prev_documents().get_object(*array))
+                .and_then(Object::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            _ => vec![],
         }
-    }
-    let page = inc.new_document.get_dictionary_mut(page_id).map_err(to_err)?;
-    if !matches!(page.get(b"Annots"), Ok(Object::Array(_))) {
-        page.set("Annots", Object::Array(vec![]));
-    }
-    if let Ok(Object::Array(entries)) = page.get_mut(b"Annots") {
-        edit(entries);
-    }
+    };
+    edit(&mut entries);
+    inc.new_document
+        .get_dictionary_mut(page_id)
+        .map_err(to_err)?
+        .set("Annots", Object::Array(entries));
     Ok(())
 }
 
-/// Appends the annotations to `original` and takes the objects in `remove`
-/// (references, "412R") off their pages.
-pub fn write_annotations(original: &[u8], list: &[WriteAnnotation], remove: &[String]) -> Result<Written> {
+/// Takes an annotation (and its popup) off its page.
+fn take_off_page(inc: &mut IncrementalDocument, f: &Found) -> Result<()> {
+    let ids: Vec<ObjectId> = std::iter::once(f.id).chain(f.popup).collect();
+    edit_annots(inc, f.page, |entries| {
+        entries.retain(|e| e.as_reference().map_or(true, |r| !ids.contains(&r)))
+    })
+}
+
+/// An annotation deleted in Tourmaline: its object in this file, if known,
+/// and the `/NM` it was written or imported under.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Removal {
+    pub pdf_ref: Option<String>,
+    pub name: String,
+}
+
+/// The subtypes an annotation of this kind can be in a file.
+fn subtypes(kind: &str) -> &'static [&'static [u8]] {
+    match kind {
+        "highlight" => &[b"Highlight", b"Underline", b"StrikeOut", b"Squiggly"],
+        "area" => &[b"Square", b"Circle"],
+        _ => &[b"Text", b"FreeText"],
+    }
+}
+
+fn close(a: &[f64], b: &[f64], tolerance: f64) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() <= tolerance)
+}
+
+/// "Name#3" (an annotation's part on another page) -> "Name".
+fn base_name(name: &str) -> &str {
+    match name.rsplit_once('#') {
+        Some((base, page)) if !page.is_empty() && page.bytes().all(|b| b.is_ascii_digit()) => base,
+        _ => name,
+    }
+}
+
+/// Appends the annotations to `original`, and takes the deleted ones in
+/// `remove` off their pages (with their popups, replies, and parts on other
+/// pages). Annotations already in the file exactly as given aren't written
+/// again; `changed` is false when nothing needed writing.
+pub fn write_annotations(original: &[u8], list: &[WriteAnnotation], remove: &[Removal]) -> Result<Written> {
     let to_err = |e: lopdf::Error| Error::Message(format!("could not write into the PDF: {e}"));
     let mut inc: IncrementalDocument = original.try_into().map_err(to_err)?;
     let pages = inc.get_prev_documents().get_pages();
     let existing = existing_annotations(inc.get_prev_documents());
     let now = pdf_date(crate::db::now_millis());
     let mut refs = HashMap::new();
+    let mut changed = false;
+    // Objects that an annotation in `list` is (so never removed below).
+    let mut used: Vec<ObjectId> = Vec::new();
 
     for a in list {
         if a.rects.is_empty() {
@@ -174,17 +265,32 @@ pub fn write_annotations(original: &[u8], list: &[WriteAnnotation], remove: &[St
             .ok_or_else(|| Error::Message(format!("the PDF has no page {}", a.page + 1)))?;
         let colour = rgb(&a.colour)?;
         let bounds = bbox(&a.rects);
+        let quads: Vec<f64> = a.rects.iter().flat_map(|r| [r[0], r[3], r[2], r[3], r[0], r[1], r[2], r[1]]).collect();
         let target = a
             .pdf_ref
             .as_ref()
             .and_then(|r| existing.by_ref.get(r))
             .or_else(|| existing.by_name.get(&a.name))
-            .copied();
+            // An imported annotation that had no name: the one of its kind in the same place.
+            .or_else(|| {
+                existing.all.iter().find(|f| {
+                    a.imported
+                        && f.name.is_none()
+                        && f.page == page_id
+                        && !used.contains(&f.id)
+                        && subtypes(&a.kind).contains(&f.subtype.as_slice())
+                        && f.rect.is_some_and(|r| close(&r, &bounds, 1.0))
+                })
+            })
+            .cloned();
+        if let Some(t) = &target {
+            used.push(t.id);
+        }
 
         // Start from the annotation as it is in the file, keeping what other
-        // programs put there (author, popup, reply threads).
-        let mut dict = match target {
-            Some((_, id)) => inc.get_prev_documents().get_dictionary(id).map_err(to_err)?.clone(),
+        // programs put there (author, popup, creation date).
+        let mut dict = match &target {
+            Some(t) => inc.get_prev_documents().get_dictionary(t.id).map_err(to_err)?.clone(),
             None => dictionary! {
                 "Type" => "Annot",
                 "Subtype" => match a.kind.as_str() {
@@ -196,6 +302,21 @@ pub fn write_annotations(original: &[u8], list: &[WriteAnnotation], remove: &[St
                 "CreationDate" => text_string(&pdf_date(a.created)),
             },
         };
+        if let Some(t) = &target {
+            let text = dict.get(b"Contents").ok().and_then(|c| lopdf::decode_text_string(c).ok());
+            let same = t.page == page_id
+                && t.name.as_deref() == Some(a.name.as_str())
+                && text.unwrap_or_default() == a.note
+                && number_array(dict.get(b"C").ok()).is_some_and(|c| close(&c, &colour.map(f64::from), 1.0 / 255.0))
+                && t.rect.is_some_and(|r| close(&r, &bounds, 0.05))
+                && (a.kind != "highlight"
+                    || number_array(dict.get(b"QuadPoints").ok()).is_some_and(|q| close(&q, &quads, 0.05)));
+            if same {
+                refs.insert(a.id.clone(), ref_id(t.id));
+                continue;
+            }
+        }
+        changed = true;
         let subtype = dict.get(b"Subtype").and_then(Object::as_name).unwrap_or(b"").to_vec();
         dict.set("P", page_id);
         dict.set("NM", text_string(&a.name));
@@ -204,7 +325,6 @@ pub fn write_annotations(original: &[u8], list: &[WriteAnnotation], remove: &[St
         dict.set("Contents", text_string(&a.note));
         dict.set("M", text_string(&if a.updated > 0 { pdf_date(a.updated) } else { now.clone() }));
         if a.kind == "highlight" {
-            let quads: Vec<f64> = a.rects.iter().flat_map(|r| [r[0], r[3], r[2], r[3], r[0], r[1], r[2], r[1]]).collect();
             dict.set("QuadPoints", numbers(&quads));
         }
         // An appearance we can draw for this kind of annotation, else none,
@@ -218,14 +338,20 @@ pub fn write_annotations(original: &[u8], list: &[WriteAnnotation], remove: &[St
             }
         }
 
-        let id = match target {
-            Some((old_page, id)) => {
-                if old_page != page_id {
-                    edit_annots(&mut inc, old_page, |entries| entries.retain(|e| e.as_reference().ok() != Some(id)))?;
-                    edit_annots(&mut inc, page_id, |entries| entries.push(Object::Reference(id)))?;
+        let id = match &target {
+            Some(t) => {
+                if t.page != page_id {
+                    take_off_page(&mut inc, &Found { popup: None, ..t.clone() })?;
+                    edit_annots(&mut inc, page_id, |entries| entries.push(Object::Reference(t.id)))?;
                 }
-                inc.new_document.set_object(id, dict);
-                id
+                // Imported replies are part of the note now: keep them from showing twice.
+                if a.imported {
+                    for reply in existing.replies.get(&t.id).into_iter().flatten() {
+                        take_off_page(&mut inc, reply)?;
+                    }
+                }
+                inc.new_document.set_object(t.id, dict);
+                t.id
             }
             None => {
                 let id = inc.new_document.add_object(dict);
@@ -236,16 +362,41 @@ pub fn write_annotations(original: &[u8], list: &[WriteAnnotation], remove: &[St
         refs.insert(a.id.clone(), ref_id(id));
     }
 
+    // Deleted annotations, with their replies (and popups, in take_off_page).
+    let mut gone: Vec<Found> = Vec::new();
     for r in remove {
-        if let Some(&(page_id, id)) = existing.by_ref.get(r) {
-            edit_annots(&mut inc, page_id, |entries| entries.retain(|e| e.as_reference().ok() != Some(id)))?;
+        let found = r.pdf_ref.as_ref().and_then(|x| existing.by_ref.get(x)).or_else(|| existing.by_name.get(&r.name));
+        if let Some(f) = found {
+            gone.extend(existing.replies.get(&f.id).into_iter().flatten().cloned());
+            gone.push(f.clone());
+        }
+    }
+    // Parts on other pages ("Name#3") no longer written, of annotations
+    // written or deleted now.
+    let written: std::collections::HashSet<&str> = list.iter().map(|a| a.name.as_str()).collect();
+    let bases: std::collections::HashSet<&str> =
+        list.iter().map(|a| base_name(&a.name)).chain(remove.iter().map(|r| r.name.as_str())).collect();
+    for f in &existing.all {
+        if let Some(name) = &f.name {
+            if base_name(name) != name && bases.contains(base_name(name)) && !written.contains(name.as_str()) {
+                gone.push(f.clone());
+            }
+        }
+    }
+    for f in &gone {
+        if !used.contains(&f.id) {
+            take_off_page(&mut inc, f)?;
+            changed = true;
         }
     }
 
+    if !changed {
+        return Ok(Written { bytes: original.to_vec(), refs, changed });
+    }
     let mut bytes = Vec::with_capacity(original.len() + 4096);
     inc.save_to(&mut bytes)
         .map_err(|e| Error::Message(format!("could not write into the PDF: {e}")))?;
-    Ok(Written { bytes, refs })
+    Ok(Written { bytes, refs, changed })
 }
 
 /// How long backups of versions Tourmaline itself wrote are kept.
@@ -305,7 +456,64 @@ mod tests {
             note: note.into(),
             created: 1_700_000_000_000,
             updated: 1_700_000_000_000,
+            imported: false,
         }
+    }
+
+    fn removal(pdf_ref: Option<&str>, name: &str) -> Removal {
+        Removal { pdf_ref: pdf_ref.map(Into::into), name: name.into() }
+    }
+
+    fn reference(id: &str) -> ObjectId {
+        (id.trim_end_matches('R').parse().unwrap(), 0)
+    }
+
+    /// A PDF with `pages` pages; `annots` are (page, dictionary) pairs. With
+    /// `shared`, every page points to one /Annots array object.
+    fn build(pages: usize, shared: bool, annots: Vec<(usize, Dictionary)>) -> Vec<u8> {
+        let mut doc = lopdf::Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let mut per_page: Vec<Vec<Object>> = vec![vec![]; pages];
+        for (page, mut dict) in annots {
+            // Replies point at their parent by the parent's index in `annots` order (IRT_INDEX).
+            if let Ok(Object::Integer(i)) = dict.get(b"IRT_INDEX").cloned() {
+                dict.remove(b"IRT_INDEX");
+                dict.set("IRT", Object::Reference((i as u32 + 2, 0)));
+            }
+            per_page[page].push(doc.add_object(dict).into());
+        }
+        let shared_id = shared.then(|| doc.add_object(Object::Array(per_page.concat())));
+        let kids: Vec<Object> = per_page
+            .into_iter()
+            .map(|entries| {
+                let annots = match shared_id {
+                    Some(id) => Object::Reference(id),
+                    None => Object::Array(entries),
+                };
+                doc.add_object(dictionary! {
+                    "Type" => "Page",
+                    "Parent" => pages_id,
+                    "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+                    "Annots" => annots,
+                })
+                .into()
+            })
+            .collect();
+        let count = kids.len() as i64;
+        doc.objects.insert(pages_id, Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => count }));
+        let catalog = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        bytes
+    }
+
+    fn markup(subtype: &str, name: Option<&str>, rect: [f64; 4]) -> Dictionary {
+        let mut d = dictionary! { "Type" => "Annot", "Subtype" => subtype, "Rect" => numbers(&rect) };
+        if let Some(name) = name {
+            d.set("NM", text_string(name));
+        }
+        d
     }
 
     #[test]
@@ -334,7 +542,9 @@ mod tests {
         let okular = names.iter().find(|n| n.name == "okular-1").unwrap().id.clone();
         let link = names.iter().find(|n| n.name == "link-1").unwrap().id.clone();
         // Edited in Tourmaline: same object, new note; and the link "deleted".
-        let written = write_annotations(&original, &[ours("t-9", "okular-1", Some(&okular), "edited")], &[link]).unwrap();
+        let written =
+            write_annotations(&original, &[ours("t-9", "okular-1", Some(&okular), "edited")], &[removal(Some(&link), "link-1")])
+                .unwrap();
         assert_eq!(written.refs["t-9"], okular, "the same object");
         let after = annotation_names(&written.bytes).unwrap();
         assert_eq!(after.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["okular-1"]);
@@ -346,6 +556,83 @@ mod tests {
         let again = write_annotations(&written.bytes, &[ours("t-9", "okular-1", None, "again")], &[]).unwrap();
         assert_eq!(again.refs["t-9"], okular);
         assert!(again.bytes.starts_with(&written.bytes));
+    }
+
+    #[test]
+    fn writes_nothing_when_the_file_already_has_it() {
+        let original = annotated_pdf(None);
+        let first = write_annotations(&original, &[ours("t-1", "t-1", None, "n")], &[]).unwrap();
+        assert!(first.changed);
+        let again = write_annotations(&first.bytes, &[ours("t-1", "t-1", Some(&first.refs["t-1"]), "n")], &[]).unwrap();
+        assert!(!again.changed, "unchanged: no new revision");
+        assert_eq!(again.bytes, first.bytes);
+        assert_eq!(again.refs["t-1"], first.refs["t-1"]);
+        let edited = write_annotations(&first.bytes, &[ours("t-1", "t-1", None, "edited")], &[]).unwrap();
+        assert!(edited.changed);
+    }
+
+    #[test]
+    fn changes_only_its_own_page_when_pages_share_an_annots_array() {
+        let original = build(2, true, vec![(0, markup("Highlight", Some("a"), [10.0, 10.0, 20.0, 20.0]))]);
+        let written = write_annotations(&original, &[ours("t-1", "t-1", None, "")], &[]).unwrap();
+        let after = annotation_names(&written.bytes).unwrap();
+        let mine: Vec<u32> = after.iter().filter(|n| n.name == "t-1").map(|n| n.page).collect();
+        assert_eq!(mine, [0], "not on page 2 too");
+        assert_eq!(after.iter().filter(|n| n.name == "a").count(), 2, "the shared array's own entry stays on both");
+    }
+
+    #[test]
+    fn removes_parts_on_other_pages_that_are_no_longer_written() {
+        let original = build(3, false, vec![]);
+        let spanning = [
+            ours("t-1", "t-1", None, ""),
+            WriteAnnotation { id: "t-1#1".into(), name: "t-1#1".into(), page: 1, ..ours("t-1", "t-1", None, "") },
+            WriteAnnotation { id: "t-2#2".into(), name: "t-2#2".into(), page: 2, ..ours("t-2", "t-2", None, "") },
+            ours("t-2", "t-2", None, ""),
+        ];
+        let first = write_annotations(&original, &spanning, &[]).unwrap();
+        assert_eq!(annotation_names(&first.bytes).unwrap().len(), 4);
+        // t-1 now fits on its first page; t-2 was deleted.
+        let second = write_annotations(&first.bytes, &spanning[..1], &[removal(None, "t-2")]).unwrap();
+        let names: Vec<String> = annotation_names(&second.bytes).unwrap().into_iter().map(|n| n.name).collect();
+        assert_eq!(names, ["t-1"]);
+    }
+
+    #[test]
+    fn imported_replies_and_popups_follow_their_annotation() {
+        let mut parent = markup("Highlight", Some("okular-1"), [70.0, 680.0, 110.0, 715.0]);
+        parent.set("Popup", Object::Reference((4, 0)));
+        let mut reply = markup("Text", Some("okular-2"), [0.0, 0.0, 10.0, 10.0]);
+        reply.set("IRT_INDEX", 0);
+        let popup = markup("Popup", Some("popup-1"), [0.0, 0.0, 50.0, 50.0]);
+        let original = build(1, false, vec![(0, parent), (0, reply), (0, popup)]);
+        let names = annotation_names(&original).unwrap();
+        assert_eq!(names.len(), 3);
+        let parent_ref = names.iter().find(|n| n.name == "okular-1").unwrap().id.clone();
+        assert_eq!(reference(&parent_ref), (2, 0));
+        // Edited: the reply's text is in the note now, so the reply goes; the popup stays.
+        let edited = WriteAnnotation { imported: true, ..ours("t-1", "okular-1", Some(&parent_ref), "note\n\nAda: reply") };
+        let written = write_annotations(&original, &[edited], &[]).unwrap();
+        let left: Vec<String> = annotation_names(&written.bytes).unwrap().into_iter().map(|n| n.name).collect();
+        assert_eq!(left, ["okular-1", "popup-1"]);
+        // Deleted: it goes with its reply and popup.
+        let deleted = write_annotations(&original, &[], &[removal(Some(&parent_ref), "okular-1")]).unwrap();
+        assert!(annotation_names(&deleted.bytes).unwrap().is_empty());
+    }
+
+    #[test]
+    fn finds_an_unnamed_imported_annotation_by_kind_and_place() {
+        let original = build(1, false, vec![(0, markup("Underline", None, [70.0, 680.0, 110.0, 715.0]))]);
+        let written = write_annotations(&original, &[WriteAnnotation { imported: true, ..ours("t-1", "t-1", None, "x") }], &[]).unwrap();
+        let doc = lopdf::Document::load_mem(&written.bytes).unwrap();
+        let page = doc.get_pages()[&1];
+        let annots = doc.get_page_annotations(page).unwrap();
+        assert_eq!(annots.len(), 1, "updated, not added beside it");
+        assert_eq!(annots[0].get(b"Subtype").unwrap().as_name().unwrap(), b"Underline");
+        // Tourmaline's own annotations are never matched by place.
+        let own = write_annotations(&original, &[ours("t-1", "t-1", None, "x")], &[]).unwrap();
+        let doc = lopdf::Document::load_mem(&own.bytes).unwrap();
+        assert_eq!(doc.get_page_annotations(doc.get_pages()[&1]).unwrap().len(), 2);
     }
 
     /// The user's paper with Okular highlights, when the vault is on this
@@ -363,7 +650,7 @@ mod tests {
             ..ours("t-1", &first.name, Some(&first.id), "Edited in Tourmaline")
         };
         let new = WriteAnnotation { page: 0, rects: vec![[100.0, 600.0, 300.0, 612.0]], ..ours("t-2", "t-2", None, "New") };
-        let written = write_annotations(&original, &[edited, new], std::slice::from_ref(&second.id)).unwrap();
+        let written = write_annotations(&original, &[edited, new], &[removal(Some(&second.id), &second.name)]).unwrap();
         assert!(written.bytes.starts_with(&original));
         let after = annotation_names(&written.bytes).unwrap();
         assert_eq!(after.len(), names.len(), "one removed, one added");

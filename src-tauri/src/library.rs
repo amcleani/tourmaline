@@ -213,8 +213,11 @@ impl Db {
                 )?;
             }
             Some(owner) => {
+                // Annotations imported from the file and never touched come
+                // back from it in the other work: they don't count.
                 let annotated: bool = tx.query_row(
-                    "SELECT EXISTS (SELECT 1 FROM annotations WHERE work_id = ?1 AND deleted_at IS NULL)",
+                    "SELECT EXISTS (SELECT 1 FROM annotations WHERE work_id = ?1 AND deleted_at IS NULL
+                                    AND NOT (source = 'imported' AND updated = created))",
                     [&work],
                     |r| r.get(0),
                 )?;
@@ -229,6 +232,16 @@ impl Db {
                     |r| r.get(0),
                 )?;
                 tx.execute("UPDATE files SET work_id = ?2 WHERE work_id = ?1", params![work, owner])?;
+                // The untouched imports go; opening the file imports them into the other work.
+                tx.execute(
+                    "DELETE FROM annotation_placements WHERE annotation_id IN
+                        (SELECT id FROM annotations WHERE work_id = ?1 AND source = 'imported' AND updated = created)",
+                    [&work],
+                )?;
+                tx.execute(
+                    "DELETE FROM annotations WHERE work_id = ?1 AND source = 'imported' AND updated = created",
+                    [&work],
+                )?;
                 // Ask again whether it's the same paper, now compared with that one.
                 tx.execute(
                     "UPDATE files SET derived_from = ?2, text_sample = NULL WHERE sha256 = ?1",
@@ -248,16 +261,21 @@ impl Db {
         Ok(info)
     }
 
-    /// PDF objects (refs) in `file_id` of annotations since deleted, which
-    /// write-back takes off their pages.
-    pub fn writeback_removals(&self, work_id: &str, file_id: &str) -> Result<Vec<String>> {
+    /// A work's deleted annotations, as write-back looks for them in
+    /// `file_id`: the object they are in that file, if known, and the `/NM`
+    /// they were imported or written under.
+    pub fn writeback_removals(&self, work_id: &str, file_id: &str) -> Result<Vec<crate::writeback::Removal>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT p.pdf_obj_ref FROM annotations a
-             JOIN annotation_placements p ON p.annotation_id = a.id AND p.file_sha256 = ?2
-             WHERE a.work_id = ?1 AND a.deleted_at IS NOT NULL AND p.pdf_obj_ref IS NOT NULL",
+            "SELECT p.pdf_obj_ref,
+                    CASE WHEN a.source_nm LIKE 'nm:%' THEN substr(a.source_nm, 4) ELSE a.id END
+             FROM annotations a
+             LEFT JOIN annotation_placements p ON p.annotation_id = a.id AND p.file_sha256 = ?2
+             WHERE a.work_id = ?1 AND a.deleted_at IS NOT NULL",
         )?;
-        let rows = stmt.query_map(params![work_id, file_id], |r| r.get(0))?;
+        let rows = stmt.query_map(params![work_id, file_id], |r| {
+            Ok(crate::writeback::Removal { pdf_ref: r.get(0)?, name: r.get(1)? })
+        })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
@@ -277,7 +295,7 @@ impl Db {
         old: &str,
         new: &FileKey,
         refs: &std::collections::HashMap<String, String>,
-        removed: &[String],
+        removed: &[crate::writeback::Removal],
     ) -> Result<DocumentInfo> {
         let now = now_millis();
         let mut conn = self.conn();
@@ -315,7 +333,7 @@ impl Db {
                 params![id, new.sha256, pdf_ref],
             )?;
         }
-        for pdf_ref in removed {
+        for pdf_ref in removed.iter().filter_map(|r| r.pdf_ref.as_ref()) {
             tx.execute(
                 "UPDATE annotation_placements SET pdf_obj_ref = NULL WHERE file_sha256 = ?1 AND pdf_obj_ref = ?2",
                 params![new.sha256, pdf_ref],
@@ -469,6 +487,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn untouched_imported_annotations_dont_stop_a_merge() {
+        let db = Db::in_memory().unwrap();
+        open(&db, "a", "/lib/a.pdf", 1);
+        db.link_citekey("a", "Key").unwrap();
+        let b = open(&db, "b", "/dl/Key.pdf", 2);
+        let imported = |key: &str| crate::annotations::NewAnnotation {
+            source_nm: Some(key.into()),
+            created: Some(5),
+            ..crate::annotations::tests::highlight(&b.work_id, "b", 0)
+        };
+        let result = db.import_annotations(&[imported("nm:x")]).unwrap();
+        assert_eq!(result.created[0].updated, 5, "unedited: updated = created");
+        let joined = db.link_citekey("b", "Key").unwrap();
+        assert_ne!(joined.work_id, b.work_id);
+        assert_eq!(db.count("annotations").unwrap(), 0, "re-imported into the joined work on opening");
+
+        // Once edited, an import is the user's work and blocks merging.
+        let c = open(&db, "c", "/dl/Key2.pdf", 3);
+        let edited = db
+            .import_annotations(&[crate::annotations::NewAnnotation {
+                work_id: c.work_id.clone(),
+                file_id: "c".into(),
+                ..imported("nm:y")
+            }])
+            .unwrap();
+        let a = &edited.created[0];
+        db.update_annotation(
+            &a.id,
+            "c",
+            &crate::annotations::AnnotationEdit { category_id: None, colour: None, note: "mine".into() },
+        )
+        .unwrap();
+        assert!(db.link_citekey("c", "Key").is_err());
+    }
+
+    #[test]
     fn works_with_annotations_are_never_merged() {
         let db = Db::in_memory().unwrap();
         let a = open(&db, "a", "/lib/a.pdf", 1);
@@ -491,17 +545,19 @@ pub(crate) mod tests {
             .execute("UPDATE annotation_placements SET pdf_obj_ref = '9R' WHERE annotation_id = ?1", [&gone.id])
             .unwrap();
         db.delete_annotation(&gone.id).unwrap();
-        assert_eq!(db.writeback_removals(&v1.work_id, "a").unwrap(), ["9R"]);
+        let removals = db.writeback_removals(&v1.work_id, "a").unwrap();
+        assert_eq!(removals, [crate::writeback::Removal { pdf_ref: Some("9R".into()), name: gone.id.clone() }]);
 
         let refs = std::collections::HashMap::from([(kept.id.clone(), "12R".to_string())]);
         let key = FileKey { sha256: "a2", path: "/lib/a.pdf", name: "a.pdf", size: 11 };
-        let v2 = db.record_writeback("a", &key, &refs, &["9R".into()]).unwrap();
+        let v2 = db.record_writeback("a", &key, &refs, &removals).unwrap();
         assert_eq!(v2.work_id, v1.work_id);
         assert_eq!(v2.previous_version, None, "same text: nothing to confirm");
         let list = db.list_annotations(&v1.work_id, "a2").unwrap();
         let p = list[0].placement.as_ref().unwrap();
         assert_eq!((p.page, p.status.as_str(), p.pdf_ref.as_deref()), (2, "exact", Some("12R")));
-        assert!(db.writeback_removals(&v1.work_id, "a2").unwrap().is_empty());
+        // Still deleted, but no longer in the new file.
+        assert_eq!(db.writeback_removals(&v1.work_id, "a2").unwrap()[0].pdf_ref, None);
         // Opening the written file finds it.
         assert_eq!(open(&db, "a2", "/lib/a.pdf", 5).work_id, v1.work_id);
     }

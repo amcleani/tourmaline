@@ -16,14 +16,22 @@ export interface WriteAnnotation {
   note: string;
   created: number;
   updated: number;
+  /** Imported from a PDF: its replies are in the note; found again by place if it had no name. */
+  imported: boolean;
 }
 
-/** Annotations placed on this file, as write-back takes them. Orphans and ink are left out. */
+/**
+ * Annotations placed on this file, as write-back takes them. Orphans and ink
+ * are left out, and so are imported annotations never changed since (they
+ * are in the file as they were).
+ */
 export function annotationsToWrite(annotations: readonly Annotation[], categories: readonly Category[]): WriteAnnotation[] {
   const list: WriteAnnotation[] = [];
   for (const a of annotations) {
     const p = a.placement;
     if (!p || p.status === "orphan" || a.kind === "ink") continue;
+    const imported = a.source === "imported";
+    if (imported && a.updated === a.created && p.pdfRef) continue;
     const name = a.sourceNm?.startsWith("nm:") ? a.sourceNm.slice(3) : a.id;
     const pages = [...new Set(p.geometry.rects.map((r) => r[0]))].sort((x, y) => x - y);
     for (const page of pages) {
@@ -40,6 +48,7 @@ export function annotationsToWrite(annotations: readonly Annotation[], categorie
         note: a.note,
         created: a.created,
         updated: a.updated,
+        imported,
       });
     }
   }

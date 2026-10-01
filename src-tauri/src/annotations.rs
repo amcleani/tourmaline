@@ -261,6 +261,8 @@ fn insert_annotation(tx: &Transaction, new: &NewAnnotation, now: i64) -> Result<
     let id = uuid::Uuid::now_v7().to_string();
     let source = if new.source_nm.is_some() { "imported" } else { "tourmaline" };
     let created = new.created.unwrap_or(now);
+    // An imported annotation counts as unedited (updated = created) until changed.
+    let updated = if new.source_nm.is_some() { created } else { now };
     // Block ids are short, so retry the rare collision.
     let mut attempts = 0;
     loop {
@@ -282,7 +284,7 @@ fn insert_annotation(tx: &Transaction, new: &NewAnnotation, now: i64) -> Result<
                 source,
                 new.source_nm,
                 created,
-                now
+                updated
             ],
         );
         match inserted {

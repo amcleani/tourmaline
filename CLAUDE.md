@@ -178,8 +178,12 @@ write-back's own output isn't imported back) and returns the pdf.js ids to
 hide: `hidePdfAnnotations` sets `noView`/`noPrint` in the document's
 annotation storage and pages render with `AnnotationMode.ENABLE_STORAGE`
 (captures too). Write-back is `writeback.rs` (lopdf `IncrementalDocument`;
-the output must start with the original bytes) behind
-`save_annotations_to_pdf`, which checks the file is still the open version,
+the output must start with the original bytes; a page's `/Annots` is
+rewritten inline since pages may share one array; annotations already in
+the file as given aren't rewritten, and a save with nothing new writes
+nothing; parts on other pages are named `<name>#<page>`) behind
+`save_annotations_to_pdf` (one at a time; files written via `write_synced`:
+temp file, fsync, rename), which checks the file is still the open version,
 backs it up (`prune_backups`: originals kept, backups of `writeback`
 versions deleted after 30 days), writes beside it and renames; `record_writeback` adds the new
 version with copied placements and their `pdf_obj_ref`. Never test it on

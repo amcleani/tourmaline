@@ -54,7 +54,9 @@ export function usePdfImport(
       const found = await findPdfAnnotations(pdf, names);
       if (cancelled) return;
       const before = new Set(await importedKeys(workId));
-      const fresh = found.filter((f) => !before.has(f.key));
+      // "nm:<id>#3": the part on page 3 of an annotation write-back wrote.
+      const known = (key: string) => before.has(key) || before.has(key.replace(/#\d+$/, ""));
+      const fresh = found.filter((f) => !known(f.key));
       if (fresh.length) {
         // So pictures taken of imported areas don't show the original too.
         hidePdfAnnotations(pdf, fresh.map((f) => f.pdfId));

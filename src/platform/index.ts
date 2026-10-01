@@ -129,16 +129,17 @@ export async function importAnnotations(annotations: NewAnnotation[]): Promise<I
 
 /**
  * Writes annotations into the PDF on disk (backed up first, appended as an
- * incremental update). Resolves to the file's new version.
+ * incremental update). Resolves to the file's new version, or null if the
+ * file already had everything (nothing was written).
  */
 export async function saveAnnotationsToPdf(
   path: string,
   fileId: string,
   workId: string,
   annotations: WriteAnnotation[],
-): Promise<DocumentInfo> {
+): Promise<DocumentInfo | null> {
   if (!isTauri()) throw new Error("saving into the PDF needs the desktop app");
-  return invoke<DocumentInfo>("save_annotations_to_pdf", {
+  return invoke<DocumentInfo | null>("save_annotations_to_pdf", {
     path,
     fileId,
     workId,

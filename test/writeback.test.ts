@@ -75,3 +75,19 @@ describe("{{pdfLink}}", () => {
     expect(v(base).pdfLink).toBe("");
   });
 });
+
+describe("unchanged imports", () => {
+  it("aren't written again: the file already has them", () => {
+    const untouched: Annotation = {
+      ...base,
+      source: "imported",
+      sourceNm: "nm:okular-1",
+      updated: base.created,
+      placement: { ...base.placement!, pdfRef: "9R" },
+    };
+    expect(annotationsToWrite([untouched], categories)).toEqual([]);
+    // Edited, or from another version of the file (no object here): written.
+    expect(annotationsToWrite([{ ...untouched, updated: base.created + 1 }], categories)[0]).toMatchObject({ imported: true });
+    expect(annotationsToWrite([{ ...untouched, placement: { ...untouched.placement!, pdfRef: null } }], categories)).toHaveLength(2);
+  });
+});
