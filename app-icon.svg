@@ -1,16 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#e2557f"/>
-      <stop offset="0.48" stop-color="#e98aa6"/>
-      <stop offset="0.52" stop-color="#6fc8a0"/>
-      <stop offset="1" stop-color="#1c6f62"/>
-    </linearGradient>
-  </defs>
-  <rect x="64" y="64" width="896" height="896" rx="200" fill="#1f2423"/>
-  <!-- Elongated crystal: pointed top, flat base, three visible faces -->
-  <polygon points="512,150 700,330 700,820 512,890 324,820 324,330" fill="url(#g)"/>
-  <polygon points="512,150 512,890 324,820 324,330" fill="#000" opacity="0.18"/>
-  <polygon points="512,150 700,330 512,400 324,330" fill="#fff" opacity="0.28"/>
-  <line x1="512" y1="400" x2="512" y2="890" stroke="#fff" stroke-opacity="0.35" stroke-width="10"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><defs><linearGradient id="f0" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe0ea"/><stop offset="1" stop-color="#f29abb"/></linearGradient><linearGradient id="f1" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f59ab9"/><stop offset="1" stop-color="#d4507f"/></linearGradient><linearGradient id="f2" x1="0" y1="0" x2="0.6" y2="1"><stop offset="0" stop-color="#f7adc6"/><stop offset="1" stop-color="#d9628d"/></linearGradient><linearGradient id="f3" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cf4d7a"/><stop offset="1" stop-color="#86244b"/></linearGradient><linearGradient id="f4" x1="0.3" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#f3c3d4"/></linearGradient><linearGradient id="f5" x1="0.2" y1="0" x2="0.8" y2="1"><stop offset="0" stop-color="#7fdcb8"/><stop offset="1" stop-color="#2c9474"/></linearGradient><linearGradient id="f6" x1="0.5" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#c9f1df"/><stop offset="1" stop-color="#71c8a5"/></linearGradient><linearGradient id="f7" x1="0.5" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#2b9172"/><stop offset="1" stop-color="#145a4a"/></linearGradient><linearGradient id="f8" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a8c73"/><stop offset="1" stop-color="#16594b"/></linearGradient></defs><polygon points="612,88 752,268 566,352" fill="url(#f0)"/><polygon points="612,88 566,352 452,186" fill="url(#f1)"/><polygon points="752,268 778,560 616,602 566,352" fill="url(#f2)"/><polygon points="452,186 566,352 452,560 286,402" fill="url(#f3)"/><polygon points="566,352 616,602 452,560" fill="url(#f4)"/><polygon points="778,560 660,910 520,800 616,602" fill="url(#f5)"/><polygon points="452,560 616,602 520,800" fill="url(#f6)"/><polygon points="520,800 660,910 424,948" fill="url(#f7)"/><polygon points="286,402 452,560 520,800 424,948 278,722" fill="url(#f8)"/><line x1="612" y1="88" x2="566" y2="352" stroke="#ffffff" stroke-opacity="0.45" stroke-width="7" stroke-linecap="round"/><line x1="566" y1="352" x2="616" y2="602" stroke="#ffffff" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round"/><line x1="566" y1="352" x2="452" y2="560" stroke="#ffffff" stroke-opacity="0.3" stroke-width="7" stroke-linecap="round"/><line x1="616" y1="602" x2="520" y2="800" stroke="#ffffff" stroke-opacity="0.25" stroke-width="7" stroke-linecap="round"/><line x1="612" y1="88" x2="752" y2="268" stroke="#ffffff" stroke-opacity="0.3" stroke-width="7" stroke-linecap="round"/></svg>
