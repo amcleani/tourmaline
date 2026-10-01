@@ -138,3 +138,24 @@ export function nextZoom(current: number, direction: 1 | -1): number {
   if (direction === 1) return ZOOM_STEPS.find((z) => z > current + 1e-6) ?? MAX_ZOOM;
   return [...ZOOM_STEPS].reverse().find((z) => z < current - 1e-6) ?? MIN_ZOOM;
 }
+
+/** A zoom within the limits (a pinch can ask for any). */
+export function clampZoom(zoom: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+}
+
+/**
+ * Ctrl+wheel: whether an event is a trackpad pinch (or a smooth trackpad
+ * scroll with Ctrl held), which zooms continuously, rather than a mouse
+ * wheel's notch, which zooms one step. Chromium sends pinches as wheel events
+ * with Ctrl set and small pixel deltas; a notch is 100 px (times the
+ * display scale) or counted in lines.
+ */
+export function isPinchWheel(e: Pick<WheelEvent, "deltaY" | "deltaMode">): boolean {
+  return e.deltaMode === 0 && Math.abs(e.deltaY) < 50;
+}
+
+/** How much a pinch's wheel event scales the page: about 2× for a full pinch. */
+export function pinchFactor(deltaY: number): number {
+  return Math.exp(-deltaY / 100);
+}

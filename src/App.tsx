@@ -9,7 +9,7 @@ import { usePdfImport } from "./annotations/usePdfImport";
 import { annotationsToWrite } from "./annotations/writeback";
 import { looksLikeSamePaper, textSample } from "./annotations/version";
 import { DEFAULT_ZOOM, decodePosition, decodeSession, encodePosition, encodeSession } from "./app/session";
-import { nextZoom, type Anchor } from "./pdf/layout";
+import { clampZoom, nextZoom, type Anchor } from "./pdf/layout";
 import { loadPdf } from "./pdf/loader";
 import { loadOutline, type OutlineNode, type Target } from "./pdf/outline";
 import {
@@ -1499,10 +1499,16 @@ export function App() {
     },
     [activeKeyForView, onViewChange, closePreview],
   );
-  const handleZoomStep = useCallback(
-    (d: 1 | -1) => registry.execute(d === 1 ? "view.zoomIn" : "view.zoomOut", "other"),
-    [registry],
+  // The wheel and a pinch zoom the pane under the pointer (the zoom keys, the pane with focus).
+  const zoomMain = useCallback(
+    (make: (current: number) => number) => {
+      const { activeTab: tab, status: s } = latest.current;
+      if (tab) updateTab(tab.key, { zoom: { mode: "custom", zoom: clampZoom(make(s?.zoom ?? tab.zoom.zoom)) } });
+    },
+    [updateTab],
   );
+  const handleZoomStep = useCallback((d: 1 | -1) => zoomMain((z) => nextZoom(z, d)), [zoomMain]);
+  const handleZoomTo = useCallback((zoom: number) => zoomMain(() => zoom), [zoomMain]);
 
   return (
     <div className="app">
@@ -1590,6 +1596,7 @@ export function App() {
               highlights={findOpen ? search.highlights : undefined}
               onViewChange={handleViewChange}
               onZoomStep={handleZoomStep}
+              onZoomTo={handleZoomTo}
               handleRef={viewerRef}
               marks={marks}
               onMarkClick={(id) => {

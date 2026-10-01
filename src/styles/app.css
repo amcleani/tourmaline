@@ -42,6 +42,8 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+/* A touchscreen pinch would zoom the whole interface. */
+html { touch-action: pan-x pan-y; }
 body { background: var(--bg); }
 
 :focus-visible {
@@ -350,6 +352,7 @@ kbd {
   outline-offset: -2px;
 }
 .viewer-pages { position: relative; }
+.viewer-zoom { position: absolute; inset: 0; }
 .page {
   position: absolute;
   background: #fff;

@@ -4,10 +4,13 @@ import type { PageViewport } from "pdfjs-dist/types/src/display/page_viewport";
 import {
   PADDING,
   anchorAt,
+  clampZoom,
   computeLayout,
   currentPage,
   fitZoom,
+  isPinchWheel,
   offsetOf,
+  pinchFactor,
   typicalSize,
   MAX_ZOOM,
   MIN_ZOOM,
@@ -96,8 +99,10 @@ interface Props {
   initialAnchor?: Anchor | null;
   highlights?: ReadonlyMap<number, Highlight[]>;
   onViewChange: (state: ViewState) => void;
-  /** Ctrl+wheel: ask the owner to zoom one step in (1) or out (-1). */
+  /** Ctrl+wheel (a mouse wheel's notch): ask the owner to zoom one step in (1) or out (-1). */
   onZoomStep: (direction: 1 | -1) => void;
+  /** A trackpad pinch: ask the owner for this zoom (within the limits). */
+  onZoomTo: (zoom: number) => void;
   handleRef?: React.Ref<ViewerHandle>;
   marks?: ReadonlyMap<number, Mark[]>;
   /** Clicking a mark selects it; clicking elsewhere on a page passes null. */
@@ -159,6 +164,8 @@ function toCssRect(viewport: PageViewport, [x0, y0, x1, y1]: PdfRect) {
 }
 
 const WHEEL_STEP = 50;
+/** A pinch is over (and the pages are drawn at the new zoom) once no event has come for this long, in ms. */
+const PINCH_SETTLE = 150;
 
 export function PdfViewer({
   doc,
@@ -168,6 +175,7 @@ export function PdfViewer({
   highlights,
   onViewChange,
   onZoomStep,
+  onZoomTo,
   handleRef,
   marks,
   onMarkClick,
@@ -225,7 +233,18 @@ export function PdfViewer({
   // page turning out to be a different size): remember which point of which
   // page was under the focus line, and put it back there.
   const prevLayout = useRef<typeof layout>(null);
-  const zoomFocusY = useRef<number | null>(null);
+  /** Where the pointer was for a zoom by wheel or pinch, in the view: that point stays put. */
+  const zoomFocus = useRef<{ x: number; y: number } | null>(null);
+  // A pinch scales the drawn pages (a CSS transform) until it ends, then asks
+  // for the zoom; the transform goes when the pages are laid out at it.
+  const zoomRef = useRef<HTMLDivElement>(null);
+  const pinchShown = useRef(false);
+  const endPinchPreview = useCallback(() => {
+    if (!pinchShown.current) return;
+    pinchShown.current = false;
+    const wrap = zoomRef.current;
+    if (wrap) wrap.style.transform = "";
+  }, []);
   const restored = useRef(false);
   const openAt = useRef(initialAnchor);
   useLayoutEffect(() => {
@@ -237,14 +256,16 @@ export function PdfViewer({
       if (openAt.current && !restored.current) el.scrollTop = offsetOf(layout, openAt.current);
       restored.current = true;
     } else if (prev !== layout) {
-      const focusY = zoomFocusY.current ?? el.clientHeight / 2;
-      zoomFocusY.current = null;
-      const anchor = anchorAt(prev, el.scrollTop + focusY);
+      const focus = zoomFocus.current ?? { x: el.clientWidth / 2, y: el.clientHeight / 2 };
+      zoomFocus.current = null;
+      const anchor = anchorAt(prev, el.scrollTop + focus.y);
       const ratio = layout.maxWidth / (prev.maxWidth || 1);
-      // Keep the horizontal centre of the view where it was, too.
-      const centreX = el.scrollLeft + el.clientWidth / 2;
-      el.scrollTop = offsetOf(layout, anchor) - focusY;
-      el.scrollLeft = centreX * ratio - el.clientWidth / 2;
+      // Horizontally too (pages are centred in the content).
+      const contentWidth = (l: NonNullable<typeof layout>) => Math.max(el.clientWidth, l.maxWidth + 2 * PADDING);
+      const fromCentre = el.scrollLeft + focus.x - contentWidth(prev) / 2;
+      el.scrollTop = offsetOf(layout, anchor) - focus.y;
+      el.scrollLeft = contentWidth(layout) / 2 + fromCentre * ratio - focus.x;
+      endPinchPreview();
     }
     setScrollTop(el.scrollTop);
   }, [layout]);
@@ -268,18 +289,51 @@ export function PdfViewer({
     frame.current = requestAnimationFrame(() => setScrollTop(scrollRef.current?.scrollTop ?? 0));
   }, []);
 
-  // Ctrl+wheel zooms around the pointer. Needs a non-passive listener to stop
-  // the webview's own page zoom.
+  // Ctrl+wheel and trackpad pinches (which arrive as Ctrl+wheel) zoom around
+  // the pointer. Needs a non-passive listener to stop the webview's own page zoom.
   const zoomStep = useRef(onZoomStep);
   zoomStep.current = onZoomStep;
+  const zoomTo = useRef(onZoomTo);
+  zoomTo.current = onZoomTo;
   const zoomNow = useRef(effectiveZoom);
   zoomNow.current = effectiveZoom;
   useEffect(() => {
     const el = scrollRef.current!;
     let accumulated = 0;
+    let pinch: { scale: number; x: number; y: number; timer: number } | null = null;
+    const settle = () => {
+      const p = pinch;
+      pinch = null;
+      if (!p) return;
+      const z = zoomNow.current;
+      const target = clampZoom(z * p.scale);
+      if (Math.abs(target - z) < 1e-3) return endPinchPreview();
+      zoomFocus.current = { x: p.x, y: p.y };
+      zoomTo.current(target);
+    };
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
+      if (isPinchWheel(e) || pinch) {
+        const box = el.getBoundingClientRect();
+        if (!pinch) {
+          pinch = { scale: 1, x: e.clientX - box.left, y: e.clientY - box.top, timer: 0 };
+          const wrap = zoomRef.current;
+          if (wrap) wrap.style.transformOrigin = `${el.scrollLeft + pinch.x}px ${el.scrollTop + pinch.y}px`;
+        }
+        // Small steps stay smooth; a notch arriving mid-pinch counts as a few.
+        const delta = Math.max(-50, Math.min(50, e.deltaMode === 0 ? e.deltaY : e.deltaY * 40));
+        const z = zoomNow.current;
+        pinch.scale = clampZoom(z * pinch.scale * pinchFactor(delta)) / z;
+        const wrap = zoomRef.current;
+        if (wrap) {
+          wrap.style.transform = `scale(${pinch.scale})`;
+          pinchShown.current = true;
+        }
+        clearTimeout(pinch.timer);
+        pinch.timer = window.setTimeout(settle, PINCH_SETTLE);
+        return;
+      }
       accumulated += e.deltaY;
       if (Math.abs(accumulated) < WHEEL_STEP) return;
       const direction = accumulated < 0 ? 1 : -1;
@@ -288,12 +342,16 @@ export function PdfViewer({
       // behind for some unrelated relayout to use later.
       const z = zoomNow.current;
       if ((direction === 1 && z >= MAX_ZOOM - 1e-6) || (direction === -1 && z <= MIN_ZOOM + 1e-6)) return;
-      zoomFocusY.current = e.clientY - el.getBoundingClientRect().top;
+      const box = el.getBoundingClientRect();
+      zoomFocus.current = { x: e.clientX - box.left, y: e.clientY - box.top };
       zoomStep.current(direction);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      if (pinch) clearTimeout(pinch.timer);
+    };
+  }, [endPinchPreview]);
 
   // Focus the document once it appears so arrow keys, PageDown and Space scroll it straight away.
   const ready = layout !== null;
@@ -545,7 +603,10 @@ export function PdfViewer({
       )}
       {layout && (
         <div className="viewer-pages" style={{ height: layout.totalHeight, width: innerWidth }}>
-          {pages}
+          {/* What a pinch scales while it lasts; the box outside keeps the scroll range. */}
+          <div className="viewer-zoom" ref={zoomRef}>
+            {pages}
+          </div>
         </div>
       )}
     </div>

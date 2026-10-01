@@ -116,7 +116,7 @@ Tourmaline's on first open: text markup → highlights with their quote,
 sticky notes/free text → notes, squares/circles → areas; replies join their
 parent's note; colour → the category nearest in hue. Once per paper, keyed
 by /NM (else position); deleting one keeps it deleted. pdf.js stops drawing
-the originals. Ink is left drawn until phase 7.
+the originals. Ink is left drawn until Ink (phase 7, deferred) exists.
 
 **Write-back (4b)**: File › Save annotations into PDF (Ctrl+S), asked before
 the first use, never automatic. Original bytes backed up to
@@ -220,10 +220,18 @@ silently dropped).
 | 4b | **PDF annotations**: import existing annotations; optional write-back and `{{pdfLink}}` | The Okular highlights in `BaconDorrC.pdf` appear in the sidebar and can be edited; Save annotations into PDF puts Tourmaline's into a copy, and Obsidian shows them ✅ |
 | 4c | **Export**: merge into notes preserving edits; template editor with live preview | Highlight in `Goodman2023GG` → appears in `@Goodman2023GG.md` without touching the user's text → link reopens Tourmaline there ✅ |
 | 5 | **Focus mode** | A two-column arXiv paper reads in order ✅ |
-| 6 | **Smart navigation**: citation/figure/equation popups, back/forward, split view | Hovering "[12]" shows the reference |
-| 7 | **Ink** | Strokes survive zoom and export |
-| 8 | **Equation → LaTeX** | Copied LaTeX compiles |
+| 6 | **Smart navigation**: citation/figure/equation popups, back/forward, split view | Hovering "[12]" shows the reference ✅ |
+| 7 | **Ink** *(deferred: a later feature, after phase 9)* | Strokes survive zoom and export |
+| 8 | **Equation → LaTeX** *(deferred: a later feature, after phase 9)* | Copied LaTeX compiles |
 | 9 | **Polish**: accessibility audit, themes, UI scale, shortcut editor, installer, auto-update | Everything works mouse-only and keyboard-only |
+
+Phases 7 and 8 are put off (decided after phase 6): phase 9 comes next, and
+they follow as later features.
+
+**Polish (9)**, so far: zoom by trackpad pinch (smooth while pinching, the
+pages redrawn sharp when it stops) and Ctrl+mouse wheel (one step a notch),
+around the pointer, in whichever pane is under it; the webview's own zoom of
+the whole interface stays off.
 
 ## Development notes
 

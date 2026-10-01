@@ -121,6 +121,15 @@ Popovers and the selection toolbar render through the viewer's per-page
 `overlay`, so they scroll with the page.
 pdf.js 6: `render({ canvas, viewport })`, documents are freed with
 `pdf.loadingTask.destroy()`.
+Zoom by wheel and pinch: a trackpad pinch arrives as Ctrl+wheel with small
+deltas (`isPinchWheel`); while it lasts the viewer scales `.viewer-zoom` with
+a CSS transform around the pointer, and 150 ms after the last event asks for
+the zoom (`onZoomTo`); the relayout keeps the point under the pointer and
+drops the transform. A mouse notch zooms one step (`onZoomStep`). The window
+has `zoomHotkeysEnabled` on, because wry ties pinches to it and WebView2
+otherwise never passes them to the page; `platform/pageZoom.ts` cancels the
+webview's own zoom (Ctrl+wheel anywhere, its zoom keys), and `touch-action`
+stops a touchscreen pinch zooming the interface.
 
 **Focus mode.** `src/focus/lines.ts` orders a page's lines (columns from the
 gutter, full-width elements and side-by-side author blocks in place, stacked

@@ -2,7 +2,7 @@ import { useId, useRef } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useLinkPreview } from "../nav/useLinkPreview";
 import { useReferences, type Spot } from "../nav/useReferences";
-import { nextZoom, type Anchor } from "../pdf/layout";
+import { clampZoom, nextZoom, type Anchor } from "../pdf/layout";
 import { PdfViewer, type Mark, type ViewerHandle, type ViewState, type ZoomSpec } from "../pdf/PdfViewer";
 import { openExternal } from "../platform";
 import { Icon } from "./icons";
@@ -97,6 +97,7 @@ export function SplitPane({ tabs, tab, onTab, zoom, onZoom, initialAnchor, marks
             onViewChange(v);
           }}
           onZoomStep={(d) => onZoom({ mode: "custom", zoom: nextZoom(lastZoom.current, d) })}
+          onZoomTo={(z) => onZoom({ mode: "custom", zoom: clampZoom(z) })}
           handleRef={handleRef}
           marks={marks}
           spotsFor={references.spotsFor}

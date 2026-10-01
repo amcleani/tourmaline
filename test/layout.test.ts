@@ -1,13 +1,18 @@
 import {
+  MAX_ZOOM,
+  MIN_ZOOM,
   PADDING,
   PAGE_GAP,
   anchorAt,
+  clampZoom,
   computeLayout,
   currentPage,
   fitZoom,
+  isPinchWheel,
   nextZoom,
   offsetOf,
   pageAt,
+  pinchFactor,
   typicalSize,
   visibleRange,
 } from "../src/pdf/layout";
@@ -100,5 +105,27 @@ describe("zoom steps", () => {
     expect(nextZoom(1.37, -1)).toBe(1.25);
     expect(nextZoom(4, 1)).toBe(4);
     expect(nextZoom(0.25, -1)).toBe(0.25);
+  });
+});
+
+describe("pinch zoom", () => {
+  it("tells a trackpad pinch from a mouse wheel notch", () => {
+    expect(isPinchWheel({ deltaY: -3.5, deltaMode: 0 })).toBe(true);
+    expect(isPinchWheel({ deltaY: 12, deltaMode: 0 })).toBe(true);
+    expect(isPinchWheel({ deltaY: -100, deltaMode: 0 })).toBe(false);
+    expect(isPinchWheel({ deltaY: 125, deltaMode: 0 })).toBe(false);
+    expect(isPinchWheel({ deltaY: 3, deltaMode: 1 })).toBe(false);
+  });
+  it("scales by about 2x over a full pinch, symmetrically", () => {
+    let s = 1;
+    for (let i = 0; i < 14; i++) s *= pinchFactor(-5);
+    expect(s).toBeGreaterThan(1.9);
+    expect(s).toBeLessThan(2.1);
+    expect(pinchFactor(7) * pinchFactor(-7)).toBeCloseTo(1);
+  });
+  it("keeps a zoom within the limits", () => {
+    expect(clampZoom(10)).toBe(MAX_ZOOM);
+    expect(clampZoom(0.01)).toBe(MIN_ZOOM);
+    expect(clampZoom(1.37)).toBe(1.37);
   });
 });
