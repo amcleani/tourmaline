@@ -1,6 +1,6 @@
 [package]
 name = "tourmaline"
-version = "0.1.0"
+version = "0.1.1"
 description = "A PDF reader for academic research"
 edition = "2021"
 

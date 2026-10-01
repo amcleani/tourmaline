@@ -167,9 +167,11 @@ describe("Bibliography", () => {
 // The user's own bibliography and the literature notes the Citations plugin
 // made from it: Tourmaline must give the same title, authors and year.
 const VAULT = "C:/Users/amcle/Documents/Academia";
-describe.skipIf(!existsSync(join(VAULT, "Library/database.bib")))("the user's JabRef bibliography", () => {
-  const path = join(VAULT, "Library/database.bib");
-  const bib = new Bibliography(readFileSync(path, "utf8"), path);
+const USER_BIB = join(VAULT, "Library/database.bib");
+describe.skipIf(!existsSync(USER_BIB))("the user's JabRef bibliography", () => {
+  // A skipped describe still runs its body, so read the file only where it exists (not on CI).
+  const path = USER_BIB;
+  const bib = new Bibliography(existsSync(path) ? readFileSync(path, "utf8") : "", path);
 
   it("reads every entry", () => {
     expect(bib.errors).toEqual([]);
