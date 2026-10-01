@@ -5,6 +5,7 @@ import {
   deleteAnnotation,
   importAnnotations,
   listAnnotations,
+  repairImportedNotes,
   restoreAnnotation,
   saveAttachment,
   savePlacements,
@@ -14,6 +15,7 @@ import type { PdfRect } from "../pdf/search";
 import { getPageHash, getPageText } from "../pdf/textCache";
 import { reanchor } from "./anchor";
 import { renderRegion } from "./capture";
+import { withoutRepeatedQuote } from "./importPdf";
 import { textAnchor, type CapturedSelection } from "./selection";
 import {
   byPosition,
@@ -56,6 +58,29 @@ async function placeOnFile(pdf: PDFDocumentProxy, fileId: string, unplaced: Anno
   const placed = updates.filter((u) => u.placement.status !== "orphan").map((u) => u.placement.page);
   await savePlacements(fileId, updates, await hashesFor(pdf, placed));
   return new Map(updates.map((u) => [u.annotationId, u.placement]));
+}
+
+/**
+ * Imports before this fix kept a highlight's /Contents as its note even when
+ * it was only the highlighted text again. Clears that from imported
+ * annotations the user hasn't changed (best effort: on failure the list is
+ * shown as stored).
+ */
+async function withRepairedNotes(list: Annotation[]): Promise<Annotation[]> {
+  const repairs = list.flatMap((a) => {
+    if (a.source !== "imported" || a.kind !== "highlight" || a.updated !== a.created) return [];
+    const note = withoutRepeatedQuote(a.note, a.quote);
+    return note === a.note ? [] : [{ id: a.id, note }];
+  });
+  if (repairs.length === 0) return list;
+  try {
+    const fixed = new Set(await repairImportedNotes(repairs));
+    const notes = new Map(repairs.map((r) => [r.id, r.note]));
+    return list.map((a) => (fixed.has(a.id) ? { ...a, note: notes.get(a.id)! } : a));
+  } catch (err) {
+    console.warn("Could not correct imported notes", err);
+    return list;
+  }
 }
 
 /**
@@ -121,7 +146,7 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
     if (!workId || !fileId || !pdf) return;
     let cancelled = false;
     (async () => {
-      const list = await listAnnotations(workId, fileId);
+      const list = await withRepairedNotes(await listAnnotations(workId, fileId));
       if (cancelled) return;
       show(list);
       setLoadedFor(`${workId}:${fileId}`);

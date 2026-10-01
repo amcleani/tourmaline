@@ -14,7 +14,9 @@ use tauri::{
     AppHandle, Manager,
 };
 
-use annotations::{Annotation, AnnotationEdit, Category, ImportResult, NewAnnotation, PageHash, PlacementUpdate};
+use annotations::{
+    Annotation, AnnotationEdit, Category, ImportResult, NewAnnotation, NoteRepair, PageHash, PlacementUpdate,
+};
 use db::Db;
 use error::{Error, Result};
 use library::{DocumentInfo, FileKey};
@@ -290,6 +292,12 @@ async fn import_annotations(app: AppHandle, annotations: Vec<NewAnnotation>) -> 
     blocking(app, move |_, db| db.import_annotations(&annotations)).await
 }
 
+/// Fixes notes of imported annotations the user hasn't changed; returns the ids fixed.
+#[tauri::command]
+async fn repair_imported_notes(app: AppHandle, repairs: Vec<NoteRepair>) -> Result<Vec<String>> {
+    blocking(app, move |_, db| db.repair_imported_notes(&repairs)).await
+}
+
 #[tauri::command]
 async fn update_annotation(app: AppHandle, id: String, file_id: String, edit: AnnotationEdit) -> Result<Annotation> {
     blocking(app, move |_, db| db.update_annotation(&id, &file_id, &edit)).await
@@ -425,6 +433,7 @@ pub fn run() {
             create_annotation,
             import_annotations,
             imported_keys,
+            repair_imported_notes,
             save_annotations_to_pdf,
             pdf_annotation_names,
             update_annotation,

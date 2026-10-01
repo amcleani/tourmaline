@@ -119,6 +119,14 @@ pub struct PlacementUpdate {
     pub placement: Placement,
 }
 
+/// A corrected note for an imported annotation (see `repair_imported_notes`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteRepair {
+    pub id: String,
+    pub note: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Category {
@@ -402,6 +410,27 @@ impl Db {
         self.annotation(id, file_id)
     }
 
+    /// Corrects the notes of imported annotations the user hasn't changed
+    /// (updated = created), keeping them unchanged as far as write-back is
+    /// concerned. Returns the ids changed; edited ones are left alone.
+    pub fn repair_imported_notes(&self, repairs: &[NoteRepair]) -> Result<Vec<String>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let mut changed = Vec::new();
+        for r in repairs {
+            let n = tx.execute(
+                "UPDATE annotations SET note_md = ?2
+                 WHERE id = ?1 AND source = 'imported' AND updated = created AND deleted_at IS NULL",
+                params![r.id, r.note],
+            )?;
+            if n > 0 {
+                changed.push(r.id.clone());
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     /// Soft delete; `restore_annotation` undoes it.
     pub fn delete_annotation(&self, id: &str) -> Result<()> {
         self.conn().execute(
@@ -588,6 +617,30 @@ pub(crate) mod tests {
         let theirs = NewAnnotation { source_nm: Some("okular-1".into()), ..highlight(&other.work_id, "b", 0) };
         assert_eq!(db.import_annotations(&[theirs]).unwrap().created.len(), 1);
         assert!(db.import_annotations(&[highlight(&doc.work_id, "a", 0)]).is_err(), "needs a key");
+    }
+
+    #[test]
+    fn repairs_only_untouched_imported_notes() {
+        let db = Db::in_memory().unwrap();
+        let doc = open(&db, "a", "/p/a.pdf", 1);
+        let imported = |key: &str| NewAnnotation {
+            source_nm: Some(key.into()),
+            created: Some(42),
+            note: "the quote".into(),
+            ..highlight(&doc.work_id, "a", 2)
+        };
+        let made = db.import_annotations(&[imported("k1"), imported("k2")]).unwrap().created;
+        let own = db.create_annotation(&highlight(&doc.work_id, "a", 1)).unwrap();
+        let edit = AnnotationEdit { category_id: None, colour: None, note: "mine".into() };
+        db.update_annotation(&made[1].id, "a", &edit).unwrap();
+        let fix = |id: &str| NoteRepair { id: id.into(), note: String::new() };
+        let changed = db.repair_imported_notes(&[fix(&made[0].id), fix(&made[1].id), fix(&own.id)]).unwrap();
+        assert_eq!(changed, [made[0].id.clone()]);
+        let list = db.list_annotations(&doc.work_id, "a").unwrap();
+        let get = |id: &str| list.iter().find(|a| a.id == id).unwrap().clone();
+        assert_eq!(get(&made[0].id).note, "");
+        assert_eq!(get(&made[0].id).updated, get(&made[0].id).created, "still untouched");
+        assert_eq!(get(&made[1].id).note, "mine");
     }
 
     #[test]

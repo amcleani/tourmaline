@@ -7,7 +7,9 @@ import {
   findPdfAnnotations,
   nearestCategory,
   pdfDate,
+  repeatsQuote,
   textUnderRects,
+  withoutRepeatedQuote,
   toNewAnnotations,
   type PdfAnnotationData,
 } from "../src/annotations/importPdf";
@@ -86,6 +88,25 @@ describe("collectAnnotations keys", () => {
       "pos:Highlight:0:100,500,300,520",
       "pos:Highlight:0:100,500,300,520~2",
     ]);
+  });
+});
+
+describe("a highlight's text stored as its note", () => {
+  const quote = "the apt suspension of resentment has nothing to do with theoretical truths about (in)determinism.";
+
+  it("is recognised despite line breaks, hyphenation, ligatures and a word more or less", () => {
+    expect(repeatsQuote("the apt suspension of resent-\nment has nothing to do with theoretical truths about (in)determinism", quote)).toBe(true);
+    expect(repeatsQuote("Obviously, the apt suspension of resentment has nothing to do with theoretical truths about (in)determinism.", quote)).toBe(true);
+    expect(repeatsQuote("ﬁne", "fine")).toBe(true);
+    expect(repeatsQuote("resentment", quote)).toBe(false);
+    expect(repeatsQuote("A real note about resentment and determinism", quote)).toBe(false);
+  });
+
+  it("is dropped, keeping replies and real notes", () => {
+    expect(withoutRepeatedQuote(quote, quote)).toBe("");
+    expect(withoutRepeatedQuote(`${quote}\n\nAda: I agree`, quote)).toBe("Ada: I agree");
+    expect(withoutRepeatedQuote("My own thought", quote)).toBe("My own thought");
+    expect(withoutRepeatedQuote(quote, null)).toBe(quote);
   });
 });
 

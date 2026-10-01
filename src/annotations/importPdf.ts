@@ -232,6 +232,49 @@ export function nearestCategory(colour: string | null, categories: readonly Cate
   return best;
 }
 
+/** Text reduced to its letters and digits, for comparing a note with the quote it may repeat. */
+function fold(s: string): string {
+  return s
+    .normalize("NFKC")
+    .replace(/­/g, "")
+    // A word broken across lines: "hyphen-\nated".
+    .replace(/(\p{L})-\s+(\p{L})/gu, "$1$2")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/**
+ * Whether some text is the quote again. Acrobat, Zotero, Foxit and others
+ * store a highlight's text as its /Contents; that isn't a note. Allows a few
+ * characters' difference at the edges (their selection and ours can differ
+ * by a letter or a word).
+ */
+export function repeatsQuote(text: string, quote: string): boolean {
+  const t = fold(text);
+  const q = fold(quote);
+  if (!t || !q) return false;
+  if (t === q) return true;
+  const [short, long] = t.length < q.length ? [t, q] : [q, t];
+  return long.includes(short) && short.length >= 0.9 * long.length;
+}
+
+/**
+ * A highlight's imported note without the leading paragraphs that only
+ * repeat its quote (replies after them stay). Unchanged if it doesn't
+ * start with the quote.
+ */
+export function withoutRepeatedQuote(note: string, quote: string | null): string {
+  if (!quote || !note.trim()) return note;
+  const paragraphs = note.split(/\n\s*\n/);
+  // Shortest first, so a short reply isn't taken for the quote's last words.
+  for (let k = 1; k <= paragraphs.length; k++) {
+    if (repeatsQuote(paragraphs.slice(0, k).join("\n"), quote)) {
+      return paragraphs.slice(k).join("\n\n").trim();
+    }
+  }
+  return note;
+}
+
 /** What to store for each found annotation. */
 export async function toNewAnnotations(
   pdf: PDFDocumentProxy,
@@ -252,7 +295,7 @@ export async function toNewAnnotations(
       kind: f.kind,
       categoryId: nearestCategory(f.colour, categories)?.id ?? null,
       colour: null,
-      note: f.note,
+      note: f.kind === "highlight" ? withoutRepeatedQuote(f.note, text?.quote ?? null) : f.note,
       quote: text?.quote ?? null,
       prefix: text?.prefix ?? null,
       suffix: text?.suffix ?? null,

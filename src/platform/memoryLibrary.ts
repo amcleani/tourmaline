@@ -129,6 +129,18 @@ export class MemoryLibrary {
     return this.view(a, fileId);
   }
 
+  repairImportedNotes(repairs: { id: string; note: string }[]): string[] {
+    return repairs
+      .filter(({ id }) => {
+        const a = this.annotations.get(id);
+        return a && a.source === "imported" && a.updated === a.created && !a.deleted;
+      })
+      .map(({ id, note }) => {
+        this.get(id).note = note;
+        return id;
+      });
+  }
+
   delete(id: string) {
     this.get(id).deleted = true;
   }

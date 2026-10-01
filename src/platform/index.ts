@@ -147,6 +147,16 @@ export async function saveAnnotationsToPdf(
   });
 }
 
+/**
+ * Corrects the notes of imported annotations the user hasn't changed, which
+ * then still count as unchanged. Resolves to the ids corrected.
+ */
+export async function repairImportedNotes(repairs: { id: string; note: string }[]): Promise<string[]> {
+  if (repairs.length === 0) return [];
+  if (!isTauri()) return memoryLibrary().repairImportedNotes(repairs);
+  return invoke<string[]>("repair_imported_notes", { repairs });
+}
+
 /** Keys of the annotations already imported into a paper (deleted ones too). */
 export async function importedKeys(workId: string): Promise<string[]> {
   if (!isTauri()) return memoryLibrary().importedKeys(workId);
