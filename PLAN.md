@@ -53,7 +53,10 @@ mouse (menus, toolbar, right-click) and by keyboard (shortcuts, command palette)
   `{{DOI}}`, …) plus Tourmaline's (`{{quote}}`, `{{note}}`, `{{page}}`,
   `{{category.callout}}`, `{{blockId}}`, `{{readerLink}}`, `{{pdfLink}}`, `{{image}}`).
 - **Where highlights go** (choice): under a heading in the literature note, in a
-  separate `@{{citekey}} highlights` note, or copy one at a time.
+  separate `@{{citekey}} highlights` note, or copy one at a time. **Default
+  (decided before 4c): under a `# Annotations` heading in the literature note**;
+  the managed `%% tourmaline:begin %%`…`%% tourmaline:end %%` region sits
+  under that heading.
 - **Links**: `{{readerLink}}` (`tourmaline://open?doc=…&hl=…`, default) reopens
   Tourmaline at the highlight. `{{pdfLink}}` (`[[x.pdf#page=5&annotation=412R]]`)
   opens Obsidian's own viewer; needs PDF write-back turned on.
