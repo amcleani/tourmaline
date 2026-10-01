@@ -4,6 +4,8 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 export interface Target {
   page: number;
   y: number | null;
+  /** Where across the page, when the destination says (for previews: which column). */
+  x?: number | null;
 }
 
 export interface OutlineNode {
@@ -28,8 +30,10 @@ export async function resolveDest(doc: PDFDocumentProxy, dest: Dest): Promise<Ta
 
   // Destination types (PDF 32000-1, 12.3.2.2); only the vertical position matters here.
   let y: number | null = null;
+  let x: number | null = null;
   switch (mode?.name) {
     case "XYZ":
+      x = args[0] ?? null;
       y = args[1] ?? null;
       break;
     case "FitH":
@@ -40,7 +44,7 @@ export async function resolveDest(doc: PDFDocumentProxy, dest: Dest): Promise<Ta
       y = args[3] ?? null;
       break;
   }
-  return { page, y: typeof y === "number" ? y : null };
+  return { page, y: typeof y === "number" ? y : null, x: typeof x === "number" ? x : null };
 }
 
 export async function loadOutline(doc: PDFDocumentProxy): Promise<OutlineNode[]> {

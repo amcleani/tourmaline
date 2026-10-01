@@ -28,6 +28,9 @@ export interface CommandContext {
   hasVault: boolean;
   /** Focus mode is on for the open document. */
   focusMode: boolean;
+  /** The open tab has places to go back or forward to (after following links). */
+  canGoBack: boolean;
+  canGoForward: boolean;
   /** Annotations can be saved into the open file (desktop app, file on disk). */
   canSaveIntoPdf: boolean;
 }
@@ -47,6 +50,8 @@ export const IDLE_CONTEXT: CommandContext = {
   hasCitekey: false,
   hasVault: false,
   focusMode: false,
+  canGoBack: false,
+  canGoForward: false,
   canSaveIntoPdf: false,
 };
 

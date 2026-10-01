@@ -343,7 +343,18 @@ export async function copyText(text: string): Promise<void> {
   return navigator.clipboard.writeText(text);
 }
 
-/** Opens an obsidian:// link (the only scheme the app may open). */
+/** Opens a web or mail link from a PDF in the default browser or mail program. */
+export async function openExternal(url: string): Promise<void> {
+  if (!/^(https?:|mailto:)/i.test(url)) throw new Error(`Tourmaline doesn't open ${url.split(":")[0]} links`);
+  if (!isTauri()) {
+    window.open(url, "_blank", "noopener");
+    return;
+  }
+  const { openUrl } = await import("@tauri-apps/plugin-opener");
+  return openUrl(url);
+}
+
+/** Opens an obsidian:// link. */
 export async function openInObsidian(url: string): Promise<void> {
   if (!url.startsWith("obsidian://")) throw new Error("not an Obsidian link");
   if (!isTauri()) {

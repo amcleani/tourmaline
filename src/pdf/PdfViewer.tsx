@@ -58,8 +58,18 @@ export interface SelectionEnd {
   rect: PdfRect;
 }
 
+/** Something on a page that leads elsewhere (a link, a citation): drawn as a focusable link over its text. */
+export interface LinkSpot {
+  id: string;
+  rects: PdfRect[];
+  /** Its accessible name. */
+  label: string;
+}
+
 export interface ViewerHandle {
   goToPage(page: number): void;
+  /** Goes back to a place the reader was (Back/Forward). */
+  goToAnchor(anchor: Anchor): void;
   goToTarget(target: Target): Promise<void>;
   /** Scrolls a PDF-space rectangle on a page into view if it isn't already. */
   revealRect(page: number, rect: PdfRect): Promise<void>;
@@ -104,6 +114,12 @@ interface Props {
   focus?: ReadonlyMap<number, PdfRect[]> | null;
   /** A click on a page that isn't on a mark or the end of a selection, in PDF space. */
   onPageClick?: (page: number, x: number, y: number) => void;
+  /** The links of a page, asked for when it mounts. */
+  spotsFor?: (page: number) => Promise<readonly LinkSpot[]>;
+  /** The pointer or keyboard focus is on a link (null: it left), and where it is on screen. */
+  onSpotHover?: (page: number, spot: LinkSpot | null, at?: DOMRect) => void;
+  /** A link was clicked or Enter pressed on it; `aside`: Ctrl/Cmd held (open in the other pane). */
+  onSpotActivate?: (page: number, spot: LinkSpot, aside: boolean) => void;
 }
 
 /**
@@ -162,6 +178,9 @@ export function PdfViewer({
   hiddenAnnotations = NO_IDS,
   focus = null,
   onPageClick,
+  spotsFor,
+  onSpotHover,
+  onSpotActivate,
 }: Props) {
   // Before the pages' render effects run (layout effects come first).
   useLayoutEffect(() => hidePdfAnnotations(doc, hiddenAnnotations), [doc, hiddenAnnotations]);
@@ -361,6 +380,10 @@ export function PdfViewer({
     };
     return {
       goToPage,
+      goToAnchor(anchor) {
+        const l = layoutRef.current;
+        if (l) scrollToOffset(offsetOf(l, anchor));
+      },
       async goToTarget(target) {
         const l = layoutRef.current;
         if (!l) return;
@@ -496,6 +519,9 @@ export function PdfViewer({
         hiddenAnnotations={hiddenAnnotations}
         focusRects={focus ? (focus.get(i) ?? NO_RECTS) : null}
         onPageClick={onPageClick}
+        spotsFor={spotsFor}
+        onSpotHover={onSpotHover}
+        onSpotActivate={onSpotActivate}
         onRegister={onRegister}
         onSize={onPageSize}
       />,
@@ -547,6 +573,9 @@ interface PageProps {
   /** Focus mode: what stays lit on this page (null: not in focus mode). */
   focusRects: readonly PdfRect[] | null;
   onPageClick?: Props["onPageClick"];
+  spotsFor?: Props["spotsFor"];
+  onSpotHover?: Props["onSpotHover"];
+  onSpotActivate?: Props["onSpotActivate"];
   onRegister: (index: number, info: PageInfo | null) => void;
   onSize: (index: number, size: Size) => void;
 }
@@ -572,6 +601,9 @@ function PageView({
   hiddenAnnotations,
   focusRects,
   onPageClick,
+  spotsFor,
+  onSpotHover,
+  onSpotActivate,
   onRegister,
   onSize,
 }: PageProps) {
@@ -586,6 +618,18 @@ function PageView({
 
   const pageNumber = index + 1;
   const cssScale = zoom * PDF_TO_CSS;
+
+  const [spots, setSpots] = useState<readonly LinkSpot[]>([]);
+  useEffect(() => {
+    if (!spotsFor) return;
+    let cancelled = false;
+    spotsFor(index)
+      .then((list) => !cancelled && setSpots(list))
+      .catch((e) => console.error(`Could not find the links on page ${index + 1}`, e));
+    return () => {
+      cancelled = true;
+    };
+  }, [spotsFor, index]);
 
   useEffect(() => {
     let cancelled = false;
@@ -754,6 +798,32 @@ function PageView({
       )}
       <div ref={textRef} className="textLayer" onPointerDown={onPointerDown} />
       {viewport && focusRects && <FocusLayer width={width} height={height} rects={focusRects.map((r) => toCssRect(viewport, r))} />}
+      {viewport && spots.length > 0 && (
+        <div className="link-layer">
+          {spots.flatMap((spot) =>
+            spot.rects.map((rect, j) => (
+              <a
+                key={`${spot.id}-${j}`}
+                href="#"
+                className="link-spot"
+                style={toCssRect(viewport, rect)}
+                // One tab stop per link, even when it covers several rectangles.
+                tabIndex={j === 0 ? 0 : -1}
+                aria-label={spot.label}
+                onMouseEnter={(e) => onSpotHover?.(index, spot, e.currentTarget.getBoundingClientRect())}
+                onMouseLeave={() => onSpotHover?.(index, null)}
+                onFocus={(e) => onSpotHover?.(index, spot, e.currentTarget.getBoundingClientRect())}
+                onBlur={() => onSpotHover?.(index, null)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSpotActivate?.(index, spot, e.ctrlKey || e.metaKey);
+                }}
+              />
+            )),
+          )}
+        </div>
+      )}
       {viewport && highlights && highlights.length > 0 && (
         <div className="highlight-layer" aria-hidden="true">
           {highlights.flatMap((h, i) =>

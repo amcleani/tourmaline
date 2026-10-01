@@ -395,3 +395,12 @@ export function stepAtPlace(steps: readonly Step[], place: StepPlace): number {
   );
   return same !== -1 ? same : stepAt(steps, place.page, place.y + 1);
 }
+
+/** The drawing a caption labels (the empty band above or below it, as for focus steps), with the caption; null if none. */
+export function captionRegion(p: FocusPage, caption: Line): PdfRect | null {
+  if (p.rotation % 360 !== 0) return null;
+  const band = figureBand(p, p.lines, caption, shape(p.lines));
+  if (!band) return null;
+  const [x0, y0, x1, y1] = band.rect;
+  return [Math.min(x0, caption.bbox[0]), Math.min(y0, caption.bbox[1]), Math.max(x1, caption.bbox[2]), Math.max(y1, caption.bbox[3])];
+}

@@ -1,4 +1,6 @@
 import {
+  ArrowLeft,
+  ArrowRight,
   ChevronDown,
   ChevronUp,
   Command,
@@ -52,6 +54,8 @@ const ICONS: Record<string, LucideIcon> = {
   add: Plus,
   export: NotebookPen,
   focus: Focus,
+  back: ArrowLeft,
+  forward: ArrowRight,
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

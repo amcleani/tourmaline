@@ -34,6 +34,8 @@ export interface AppActions {
   lastPage: () => void;
   nextTab: () => void;
   previousTab: () => void;
+  goBack: () => void;
+  goForward: () => void;
   cancel: () => void;
   undo: () => void;
   redo: () => void;
@@ -374,6 +376,28 @@ export function appCommands(a: AppActions): Command[] {
       menu: { menu: "Navigate", group: 3, order: 2 },
       when: severalTabs,
       run: a.previousTab,
+    },
+    {
+      id: "nav.back",
+      title: "Back",
+      keywords: ["previous place", "history", "return", "link"],
+      shortcut: "Alt+ArrowLeft",
+      icon: "back",
+      toolbar: true,
+      menu: { menu: "Navigate", group: 4, order: 1 },
+      when: (ctx) => ctx.hasDocument && ctx.canGoBack,
+      run: a.goBack,
+    },
+    {
+      id: "nav.forward",
+      title: "Forward",
+      keywords: ["next place", "history", "link"],
+      shortcut: "Alt+ArrowRight",
+      icon: "forward",
+      toolbar: true,
+      menu: { menu: "Navigate", group: 4, order: 2 },
+      when: (ctx) => ctx.hasDocument && ctx.canGoForward,
+      run: a.goForward,
     },
 
     // Annotate

@@ -12,7 +12,15 @@ import { DEFAULT_ZOOM, decodePosition, decodeSession, encodePosition, encodeSess
 import { nextZoom, type Anchor } from "./pdf/layout";
 import { loadPdf } from "./pdf/loader";
 import { loadOutline, type OutlineNode, type Target } from "./pdf/outline";
-import { PdfViewer, type Mark, type SelectionEnd, type ViewState, type ViewerHandle, type ZoomSpec } from "./pdf/PdfViewer";
+import {
+  PdfViewer,
+  type LinkSpot,
+  type Mark,
+  type SelectionEnd,
+  type ViewState,
+  type ViewerHandle,
+  type ZoomSpec,
+} from "./pdf/PdfViewer";
 import type { PdfRect } from "./pdf/search";
 import { useDocumentSearch } from "./pdf/useSearch";
 import {
@@ -26,6 +34,7 @@ import {
   locateWork,
   onReaderLinks,
   onWindowClose,
+  openExternal,
   openInObsidian,
   openPdfAtPath,
   openPdfFromUrl,
@@ -45,6 +54,7 @@ import {
 import { useVaultMath } from "./math/useVaultMath";
 import { placeOf, stepAt, stepAtPlace, stepUnder, type StepPlace, type StepUnit } from "./focus/steps";
 import { useFocusSteps } from "./focus/useFocusSteps";
+import { useReferences, type Destination, type Spot } from "./nav/useReferences";
 import { citationVariables } from "./vault/bibliography";
 import { parseReaderLink, readerLink } from "./vault/links";
 import { DEFAULT_EXPORT_SETTINGS, NoteFormatError, parseExportSettings, type ExportSettings, type SectionInput } from "./vault/export";
@@ -60,6 +70,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { EntryPicker } from "./ui/EntryPicker";
 import { ExportSettingsDialog } from "./ui/ExportSettingsDialog";
 import { FindBar } from "./ui/FindBar";
+import { ReferencePreview } from "./ui/ReferencePreview";
 import { EYE_HEIGHTS, FocusBar, STEP_UNITS } from "./ui/FocusBar";
 import { GoToPageDialog } from "./ui/GoToPageDialog";
 import { OutlinePanel } from "./ui/OutlinePanel";
@@ -1027,6 +1038,84 @@ export function App() {
     setStepIndex(at === null ? 0 : Math.min(Math.max(at + by, 0), list.length - 1));
   };
 
+  // ---- Links, references and Back/Forward ----------------------------------------
+
+  /** Places each tab was at before a jump, to go back (and forward) to. */
+  const history = useRef(new Map<string, { back: Anchor[]; forward: Anchor[] }>());
+  const [historyTick, setHistoryTick] = useState(0);
+  const historyOf = (key: string) => {
+    let h = history.current.get(key);
+    if (!h) history.current.set(key, (h = { back: [], forward: [] }));
+    return h;
+  };
+  /** Records where the reader is, before a jump. */
+  const rememberPlace = useCallback(() => {
+    const key = tabsRef.current.find((t) => t.key === latest.current.activeTab?.key)?.key;
+    const anchor = key ? views.current.get(key)?.anchor : undefined;
+    if (!key || !anchor) return;
+    const h = historyOf(key);
+    h.back.push(anchor);
+    if (h.back.length > 100) h.back.shift();
+    h.forward = [];
+    setHistoryTick((n) => n + 1);
+  }, []);
+  const travel = (direction: "back" | "forward") => {
+    const key = latest.current.activeTab?.key;
+    const here = key ? views.current.get(key)?.anchor : undefined;
+    if (!key || !here) return;
+    const h = historyOf(key);
+    const [from, to] = direction === "back" ? [h.back, h.forward] : [h.forward, h.back];
+    const anchor = from.pop();
+    if (!anchor) return;
+    to.push(here);
+    setHistoryTick((n) => n + 1);
+    viewerRef.current?.goToAnchor(anchor);
+  };
+  const activeHistory = activeKey ? history.current.get(activeKey) : undefined;
+  void historyTick;
+
+  const references = useReferences(activePdf);
+  /** The link the pointer or keyboard is on, once its destination is known. */
+  const [preview, setPreview] = useState<{ page: number; spot: Spot; destination: Destination; at: DOMRect } | null>(null);
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => setPreview(null), [activeKey]);
+  const onSpotHover = useCallback(
+    (page: number, spot: LinkSpot | null, at?: DOMRect) => {
+      clearTimeout(previewTimer.current);
+      if (!spot || !at) {
+        // A moment to move onto the preview itself.
+        previewTimer.current = setTimeout(() => setPreview(null), 250);
+        return;
+      }
+      previewTimer.current = setTimeout(() => {
+        references
+          .destinationOf(spot as Spot, page)
+          .then((destination) => setPreview(destination ? { page, spot: spot as Spot, destination, at } : null))
+          .catch((e) => console.error("Could not find where the link leads", e));
+      }, 300);
+    },
+    [references],
+  );
+  const followSpot = useCallback(
+    async (page: number, spot: LinkSpot) => {
+      clearTimeout(previewTimer.current);
+      setPreview(null);
+      try {
+        const destination = await references.destinationOf(spot as Spot, page);
+        if (!destination) {
+          setNotice("Couldn't find where that leads in this document");
+          return;
+        }
+        if (destination.url) return await openExternal(destination.url);
+        rememberPlace();
+        await viewerRef.current?.goToTarget({ page: destination.page, y: destination.y === null ? null : destination.y + 12 });
+      } catch (e) {
+        reportError("Could not follow the link", e);
+      }
+    },
+    [references, rememberPlace, reportError],
+  );
+
   // ---- Commands --------------------------------------------------------------
 
   useEffect(() => {
@@ -1044,6 +1133,8 @@ export function App() {
       hasCitekey: !!activeTab?.citekey,
       hasVault: vault !== null && vaultSettings !== null,
       focusMode: focusActive,
+      canGoBack: !!activeHistory?.back.length,
+      canGoForward: !!activeHistory?.forward.length,
       canSaveIntoPdf: isTauri() && !!activeTab?.path && !versionPending,
     };
     registry.notifyContextChanged();
@@ -1052,6 +1143,7 @@ export function App() {
     tabs.length,
     findOpen,
     dialog,
+    historyTick,
     focusActive,
     question,
     vault,
@@ -1092,6 +1184,8 @@ export function App() {
     saveFocusSettings,
     setColumnsFor,
     detectColumns,
+    travel,
+    preview,
   });
   latest.current = {
     activeTab,
@@ -1116,6 +1210,8 @@ export function App() {
     saveFocusSettings,
     setColumnsFor,
     detectColumns,
+    travel,
+    preview,
   };
 
   useEffect(() => {
@@ -1172,8 +1268,14 @@ export function App() {
       findPrevious: () => (latest.current.search.query ? latest.current.search.previous() : openFind()),
       closeFind,
       goToPage: () => setDialog("goto"),
-      firstPage: () => viewerRef.current?.goToPage(0),
-      lastPage: () => viewerRef.current?.goToPage(Number.MAX_SAFE_INTEGER),
+      firstPage: () => {
+        rememberPlace();
+        viewerRef.current?.goToPage(0);
+      },
+      lastPage: () => {
+        rememberPlace();
+        viewerRef.current?.goToPage(Number.MAX_SAFE_INTEGER);
+      },
       nextTab: () => cycleTab(1),
       previousTab: () => cycleTab(-1),
       cancel: () => {
@@ -1184,6 +1286,7 @@ export function App() {
           viewerRef.current?.clearSelection();
           setSelectionEnd(null);
         } else if (ctx.findOpen) closeFind();
+        else if (latest.current.preview) setPreview(null);
         else if (ctx.focusMode) void latest.current.toggleFocus();
       },
       undo: async () => {
@@ -1223,6 +1326,8 @@ export function App() {
       openNote: () => latest.current.openLiteratureNote(),
       exportToVault: () => void latest.current.exportToVault(),
       exportSettings: () => setDialog("exportSettings"),
+      goBack: () => latest.current.travel("back"),
+      goForward: () => latest.current.travel("forward"),
       toggleFocus: () => void latest.current.toggleFocus(),
       focusNext: () => void latest.current.moveStep(1),
       focusPrevious: () => void latest.current.moveStep(-1),
@@ -1257,6 +1362,17 @@ export function App() {
       unregister.forEach((u) => u());
     };
   }, [registry, openFile, closeTab, updateTab, refreshRecent, reportError]);
+
+  // The mouse's back and forward buttons.
+  useEffect(() => {
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      registry.execute(e.button === 3 ? "nav.back" : "nav.forward", "other");
+    };
+    window.addEventListener("mouseup", onMouseUp);
+    return () => window.removeEventListener("mouseup", onMouseUp);
+  }, [registry]);
 
   // Global keyboard shortcuts.
   useEffect(() => {
@@ -1321,12 +1437,20 @@ export function App() {
 
   // ---- Rendering ---------------------------------------------------------------
 
-  const navigate = (target: Target) => void viewerRef.current?.goToTarget(target);
+  const navigate = (target: Target) => {
+    rememberPlace();
+    void viewerRef.current?.goToTarget(target);
+  };
   const pageCount = activePdf?.numPages ?? 0;
   const pageLabel = activeTab?.labels?.[currentPage];
   const activeKeyForView = activeTab?.key;
   const handleViewChange = useCallback(
-    (v: ViewState) => activeKeyForView && onViewChange(activeKeyForView, v),
+    (v: ViewState) => {
+      // A preview stays by its link: scrolling closes it.
+      const before = views.current.get(activeKeyForView ?? "")?.anchor;
+      if (before?.page !== v.anchor.page || before.fraction !== v.anchor.fraction) setPreview(null);
+      if (activeKeyForView) onViewChange(activeKeyForView, v);
+    },
     [activeKeyForView, onViewChange],
   );
   const handleZoomStep = useCallback(
@@ -1433,6 +1557,9 @@ export function App() {
               overlay={overlay}
               hiddenAnnotations={hiddenPdfAnnotations}
               focus={focusRects}
+              spotsFor={references.spotsFor}
+              onSpotHover={onSpotHover}
+              onSpotActivate={(page, spot) => void followSpot(page, spot)}
               onPageClick={(page, x, y) => {
                 if (!focusActive || !steps) return;
                 const i = stepUnder(steps, page, x, y);
@@ -1451,6 +1578,17 @@ export function App() {
               Drag over the page, or use the arrow keys (Shift+arrows to resize) and Enter, to capture an area. Escape
               or A to stop.
             </div>
+          )}
+          {preview && activePdf && (
+            <ReferencePreview
+              key={preview.spot.id}
+              pdf={activePdf}
+              destination={preview.destination}
+              anchor={preview.at}
+              zoom={status?.zoom ?? 1}
+              onMouseEnter={() => clearTimeout(previewTimer.current)}
+              onMouseLeave={() => onSpotHover(preview.page, null)}
+            />
           )}
           {focusActive && (
             <FocusBar
@@ -1623,7 +1761,10 @@ export function App() {
           pageCount={pageCount}
           current={currentPage}
           labels={activeTab?.labels ?? null}
-          onGo={(page) => viewerRef.current?.goToPage(page)}
+          onGo={(page) => {
+            rememberPlace();
+            viewerRef.current?.goToPage(page);
+          }}
           onClose={() => setDialog(null)}
         />
       )}

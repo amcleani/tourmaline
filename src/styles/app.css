@@ -826,3 +826,32 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .focus-bar .checkbox { margin: 0; }
 .focus-position { min-width: 8em; text-align: center; font-variant-numeric: tabular-nums; color: var(--text-muted); font-size: 0.9em; }
 .focus-field { font-size: 0.9em; }
+
+/* Links and citations on a page: invisible until pointed at or focused. */
+.link-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.link-spot {
+  position: absolute;
+  pointer-events: auto;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.link-spot:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.link-spot:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.capturing .link-layer { display: none; }
+
+/* The preview of where a link leads. */
+.reference-preview {
+  position: absolute;
+  z-index: 7;
+  max-width: min(740px, calc(100vw - 32px));
+  padding: 8px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.3);
+}
+.reference-clip { max-height: 380px; overflow: hidden; background: #fff; border-radius: 4px; }
+.reference-clip canvas { display: block; }
+.reference-where, .reference-url { margin: 6px 2px 0; font-size: 0.8rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.reference-url { margin-top: 0; color: var(--text); }

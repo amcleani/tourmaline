@@ -17,6 +17,15 @@
       "allow": [
         {
           "url": "obsidian://*"
+        },
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://*"
+        },
+        {
+          "url": "mailto:*"
         }
       ]
     }

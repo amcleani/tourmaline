@@ -1,30 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { getTextContent } from "../pdf/textCache";
-import { detectLines } from "./lines";
+import { getPageLines } from "../pdf/pageLines";
 import { buildSteps, type FocusPage, type Step, type StepUnit } from "./steps";
-
-// Each page's lines, found once per document and column setting.
-const cache = new WeakMap<PDFDocumentProxy, Map<string, Promise<FocusPage>>>();
-
-function focusPage(pdf: PDFDocumentProxy, index: number, detectColumns: boolean): Promise<FocusPage> {
-  let pages = cache.get(pdf);
-  if (!pages) cache.set(pdf, (pages = new Map()));
-  const key = `${detectColumns}:${index}`;
-  let entry = pages.get(key);
-  if (!entry) {
-    entry = Promise.all([pdf.getPage(index + 1), getTextContent(pdf, index)]).then(([page, content]) => ({
-      page: index,
-      lines: detectLines(content.items, { rotation: page.rotate, detectColumns }).lines,
-      items: content.items,
-      rotation: page.rotate,
-      top: page.view[3],
-    }));
-    entry.catch(() => pages!.delete(key));
-    pages.set(key, entry);
-  }
-  return entry;
-}
 
 /** Steps are shown once this many pages from the start page are ready, then again every BATCH pages. */
 const FIRST = 6;
@@ -68,7 +45,7 @@ export function useFocusSteps(
         setResult({ key, value: { steps: buildSteps(pages, unit), pagesDone: found.length, pageCount: total } });
       };
       for (const index of order) {
-        found.push(await focusPage(pdf, index, detectColumns));
+        found.push(await getPageLines(pdf, index, detectColumns));
         if (cancelled) return;
         const n = found.length;
         if (n === total || n === Math.min(FIRST, total) || (n > FIRST && (n - FIRST) % BATCH === 0)) publish();
