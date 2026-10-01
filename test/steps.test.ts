@@ -1,5 +1,5 @@
 import { detectLines } from "../src/focus/lines";
-import { buildSteps, stepAt, stepUnder, type FocusPage } from "../src/focus/steps";
+import { buildSteps, placeOf, stepAt, stepAtPlace, stepUnder, type FocusPage } from "../src/focus/steps";
 import type { TextItemLike } from "../src/pdf/search";
 
 // One item per word, 0.5em per character, as in lines.test.ts.
@@ -107,6 +107,13 @@ describe("finding a step", () => {
     expect(stepAt(steps, 0, 680)).toBe(1);
     expect(stepAt(steps, 0, 100)).toBe(2);
     expect(stepAt(steps, 1, 100)).toBe(2);
+  });
+
+  it("again after more pages are read, even the second sentence on a line", () => {
+    const one = [page(3, ["First sentence here. Second one on the same line."])];
+    const before = buildSteps(one, "sentence");
+    const after = buildSteps([page(2, ["An earlier page came in."]), ...one], "sentence");
+    expect(after[stepAtPlace(after, placeOf(before[1]))].text).toBe("Second one on the same line.");
   });
 
   it("from a click", () => {

@@ -43,7 +43,7 @@ import {
   type OpenedDocument,
 } from "./platform";
 import { useVaultMath } from "./math/useVaultMath";
-import { stepAt, stepUnder, type StepUnit } from "./focus/steps";
+import { placeOf, stepAt, stepAtPlace, stepUnder, type StepPlace, type StepUnit } from "./focus/steps";
 import { useFocusSteps } from "./focus/useFocusSteps";
 import { citationVariables } from "./vault/bibliography";
 import { parseReaderLink, readerLink } from "./vault/links";
@@ -917,10 +917,20 @@ export function App() {
   }, [activeWork]);
   const detectColumns = !(activeWork && noColumns.has(activeWork));
   const focusActive = focusOn && activePdf !== null && !versionPending;
-  const steps = useFocusSteps(activePdf, focusActive, focusSettings.unit, detectColumns, reportError);
-  const [stepIndex, setStepIndex] = useState<number | null>(null);
   /** Where to start once the steps are (re)built: the reader's eye, or the current step's place. */
   const focusAnchor = useRef<{ page: number; y: number } | null>(null);
+  const focusSteps = useFocusSteps(
+    activePdf,
+    focusActive,
+    focusSettings.unit,
+    detectColumns,
+    focusAnchor.current?.page ?? status?.page ?? 0,
+    reportError,
+  );
+  const steps = focusSteps?.steps ?? null;
+  const [stepIndex, setStepIndex] = useState<number | null>(null);
+  /** The current step's place: the steps grow as pages are read, so it is found again by place, not number. */
+  const stepPlace = useRef<StepPlace | null>(null);
   /** When focus mode last scrolled: a step press during its scroll doesn't count as the reader scrolling away. */
   const focusScrolledAt = useRef(0);
   const step = steps && stepIndex !== null ? (steps[stepIndex] ?? null) : null;
@@ -929,20 +939,28 @@ export function App() {
   useEffect(() => {
     setFocusOn(false);
     setStepIndex(null);
+    stepPlace.current = null;
   }, [activeKey]);
 
   useEffect(() => {
     if (!steps) return;
     const anchor = focusAnchor.current;
     focusAnchor.current = null;
-    if (anchor) setStepIndex(steps.length ? stepAt(steps, anchor.page, anchor.y) : null);
-    else setStepIndex((i) => (i === null || !steps.length ? null : Math.min(i, steps.length - 1)));
+    const place = stepPlace.current;
+    if (!steps.length) setStepIndex(null);
+    else if (anchor) setStepIndex(stepAt(steps, anchor.page, anchor.y));
+    else setStepIndex(place ? stepAtPlace(steps, place) : 0);
   }, [steps]);
 
-  // The current step goes to the eye line.
+  // The current step goes to the eye line when it moves (not when more pages come in).
+  const scrolledTo = useRef("");
   useEffect(() => {
     if (!step) return;
     const [page, ...rect] = step.rects[0];
+    stepPlace.current = placeOf(step);
+    const key = `${page}:${rect.join(",")}:${focusSettings.eye}`;
+    if (key === scrolledTo.current) return;
+    scrolledTo.current = key;
     focusScrolledAt.current = Date.now();
     void viewerRef.current?.scrollToEye(page, rect as PdfRect, focusSettings.eye);
   }, [step, focusSettings.eye]);
@@ -984,6 +1002,8 @@ export function App() {
     if (latest.current.focusActive) {
       setFocusOn(false);
       setStepIndex(null);
+      stepPlace.current = null;
+      scrolledTo.current = "";
       return;
     }
     // Start at the line under the eye line.
@@ -1438,19 +1458,31 @@ export function App() {
               eye={focusSettings.eye}
               detectColumns={detectColumns}
               position={
-                !steps
+                !focusSteps
                   ? "Finding the lines…"
-                  : steps.length === 0
-                    ? "No text to step through"
-                    : `Step ${(stepIndex ?? 0) + 1} of ${steps.length}`
+                  : focusSteps.pagesDone < focusSteps.pageCount
+                    ? `Reading pages: ${focusSteps.pagesDone} of ${focusSteps.pageCount}`
+                    : focusSteps.steps.length === 0
+                      ? "No text to step through"
+                      : `Step ${(stepIndex ?? 0) + 1} of ${focusSteps.steps.length}`
               }
               announcement={step ? (step.kind === "figure" ? "Figure" : step.text) : ""}
               onUnit={(unit) => saveFocusSettings({ ...focusSettings, unit })}
               onEye={(eye) => saveFocusSettings({ ...focusSettings, eye })}
               onColumns={setColumnsFor}
-              onPrevious={() => registry.execute("focus.previous", "other")}
-              onNext={() => registry.execute("focus.next", "other")}
-              onExit={() => registry.execute("view.focusMode", "other")}
+              // Back to the document after a click, so Up and Down step again.
+              onPrevious={() => {
+                registry.execute("focus.previous", "other");
+                viewerRef.current?.focus();
+              }}
+              onNext={() => {
+                registry.execute("focus.next", "other");
+                viewerRef.current?.focus();
+              }}
+              onExit={() => {
+                registry.execute("view.focusMode", "other");
+                viewerRef.current?.focus();
+              }}
             />
           )}
         </main>

@@ -104,7 +104,8 @@ function units(p: FocusPage): Unit[] {
   const out: Unit[] = [];
   const after = new Map<Line, PdfRect>();
   for (const line of lines) {
-    if (CAPTION.test(line.text.trim())) {
+    // (On a rotated page "above" isn't up in PDF space; figures are left out there.)
+    if (p.rotation % 360 === 0 && CAPTION.test(line.text.trim())) {
       const band = figureBand(p, lines, line, s);
       if (band?.above) out.push({ page: p.page, figure: band.rect });
       else if (band) after.set(line, band.rect);
@@ -163,19 +164,58 @@ function lineSteps(pages: readonly FocusPage[], count: number): Step[] {
 
 // ---- Sentences ------------------------------------------------------------------
 
-interface Char {
-  ch: string;
-  /** Null for a space put between lines. */
-  at: { page: number; line: Line; x0: number; x1: number } | null;
+/**
+ * The text of a run of lines and, for each UTF-16 unit of it, the line it
+ * is on and where across that line (null for a space put between lines).
+ * Flat arrays rather than an object per character: a book has millions.
+ */
+class Stream {
+  private parts: string[] = [];
+  /** Code points pushed, so the last ones can be looked at and taken back. */
+  private sizes: number[] = [];
+  line: (Line | null)[] = [];
+  page: number[] = [];
+  x0: number[] = [];
+  x1: number[] = [];
+
+  get length() {
+    return this.line.length;
+  }
+  get empty() {
+    return this.parts.length === 0;
+  }
+  /** The code point `back` places from the end (1 = the last). */
+  last(back = 1): string | undefined {
+    return this.parts[this.parts.length - back];
+  }
+  /** `line` null: a space put between lines. */
+  push(ch: string, line: Line | null, page = -1, x0 = 0, x1 = 0) {
+    this.parts.push(ch);
+    this.sizes.push(ch.length);
+    for (let u = 0; u < ch.length; u++) {
+      this.line.push(line);
+      this.page.push(page);
+      this.x0.push(x0);
+      this.x1.push(x1);
+    }
+  }
+  pop() {
+    this.parts.pop();
+    const n = this.sizes.pop() ?? 0;
+    for (const a of [this.line, this.page, this.x0, this.x1]) a.length -= n;
+  }
+  text(): string {
+    return this.parts.join("");
+  }
 }
 
 const isText = (item: unknown): item is TextItemLike => typeof (item as TextItemLike)?.str === "string";
 
-/** A line's characters with where each sits across the line (estimated within each text item). */
-function lineChars(p: FocusPage, line: Line): Char[] {
+/** Adds a line's characters, placing each across the line (estimated within each text item). */
+function pushLine(stream: Stream, p: FocusPage, line: Line) {
   const whole = p.rotation % 360 !== 0;
-  const out: Char[] = [];
   let lastX1: number | null = null;
+  let pushed = false;
   for (const index of line.items) {
     const item = p.items[index];
     if (!isText(item)) continue;
@@ -183,17 +223,17 @@ function lineChars(p: FocusPage, line: Line): Char[] {
     const width = Math.max(item.width, 0);
     const chars = [...item.str];
     // A visible gap between items is a space, as in the line's own text.
-    if (lastX1 !== null && x - lastX1 > 0.15 * (item.height || 10) && out.length && out[out.length - 1].ch !== " ") {
-      out.push({ ch: " ", at: { page: p.page, line, x0: lastX1, x1: x } });
+    if (lastX1 !== null && x - lastX1 > 0.15 * (item.height || 10) && pushed && stream.last() !== " ") {
+      stream.push(" ", line, p.page, lastX1, x);
     }
-    chars.forEach((ch, i) => {
+    for (let i = 0; i < chars.length; i++) {
       const x0 = whole ? line.bbox[0] : x + (width * i) / chars.length;
       const x1 = whole ? line.bbox[2] : x + (width * (i + 1)) / chars.length;
-      out.push({ ch, at: { page: p.page, line, x0, x1 } });
-    });
+      stream.push(chars[i], line, p.page, x0, x1);
+      pushed = true;
+    }
     lastX1 = x + width;
   }
-  return out;
 }
 
 // Words after which a full stop doesn't end a sentence.
@@ -221,13 +261,16 @@ function sentenceEnds(text: string, hardBreaks: ReadonlySet<number>): number[] {
       ends.push(i);
       continue;
     }
-    if (!/[.?!]/.test(text[i])) continue;
+    const c = text[i];
+    if (c !== "." && c !== "?" && c !== "!") continue;
     // Closing quotes and brackets belong to the sentence.
     let j = i + 1;
     while (j < text.length && /["'”’)\]]/.test(text[j])) j++;
     if (j < text.length && text[j] !== " ") continue;
-    const next = /\S/.exec(text.slice(j));
-    const startsNext = !next || /[\p{Lu}\p{N}"'“‘(\[]/u.test(next[0]);
+    // The next sentence's first character (scanning on, not slicing: books are long).
+    let k = j;
+    while (k < text.length && text[k] === " ") k++;
+    const startsNext = k === text.length || /^[\p{Lu}\p{N}"'“‘(\[]/u.test(text.slice(k, k + 2));
     if (startsNext && endsSentence(text, i)) ends.push(j);
   }
   ends.push(text.length);
@@ -243,42 +286,51 @@ function headingBreak(a: Line, b: Line | undefined, s: PageShape): boolean {
   if (!b) return false;
   const text = a.text.trim();
   if (/[,;:\-–—]$/.test(text) || !/^[\p{Lu}\p{N}"“(\[]/u.test(b.text.trim())) return false;
-  return newBlock(a, b, s) || (widthOf(a) < 0.7 * (s.extent(a.column)[1] - s.extent(a.column)[0]) && /^[\p{Lu}\p{N}]/u.test(text) && !/[.?!]$/.test(text) && !/[=+<>∑∫]/.test(text));
+  if (newBlock(a, b, s)) return true;
+  const [x0, x1] = s.extent(a.column);
+  const short = widthOf(a) < 0.7 * (x1 - x0);
+  return short && /^[\p{Lu}\p{N}]/u.test(text) && !/[.?!]$/.test(text) && !/[=+<>∑∫]/.test(text);
 }
 
 function sentenceSteps(pages: readonly FocusPage[]): Step[] {
   const steps: Step[] = [];
-  let stream: Char[] = [];
+  let stream = new Stream();
   const breaks = new Set<number>();
   const flush = () => {
-    const text = stream.map((c) => c.ch).join("");
+    const text = stream.text();
     let start = 0;
     for (const end of sentenceEnds(text, breaks)) {
-      const chars = stream.slice(start, end);
+      const from = start;
       start = end;
-      const sentence = chars.map((c) => c.ch).join("").replace(/\s+/g, " ").trim();
+      const sentence = text.slice(from, end).replace(/\s+/g, " ").trim();
       if (!sentence) continue;
       // One rectangle per line the sentence touches.
       const rects: PageRect[] = [];
-      let current: { line: Line; rect: PageRect } | null = null;
-      for (const c of chars) {
-        if (!c.at || (c.ch === " " && current?.line !== c.at.line)) continue;
-        if (current && current.line === c.at.line) {
-          current.rect[1] = Math.min(current.rect[1], c.at.x0);
-          current.rect[3] = Math.max(current.rect[3], c.at.x1);
+      let currentLine: Line | null = null;
+      let rect: PageRect | null = null;
+      for (let i = from; i < end; i++) {
+        const line = stream.line[i];
+        if (!line || (text[i] === " " && currentLine !== line)) continue;
+        if (rect && currentLine === line) {
+          rect[1] = Math.min(rect[1], stream.x0[i]);
+          rect[3] = Math.max(rect[3], stream.x1[i]);
         } else {
-          const [, y0, , y1] = c.at.line.bbox;
-          current = { line: c.at.line, rect: [c.at.page, c.at.x0, y0, c.at.x1, y1] };
-          rects.push(current.rect);
+          currentLine = line;
+          rect = [stream.page[i], stream.x0[i], line.bbox[1], stream.x1[i], line.bbox[3]];
+          rects.push(rect);
         }
       }
       if (rects.length) steps.push({ rects, text: sentence, kind: "text" });
     }
-    stream = [];
+    stream = new Stream();
     breaks.clear();
   };
 
+  let lastPage: number | null = null;
   for (const p of pages) {
+    // Pages may come with gaps (found out of order): a sentence doesn't run over one.
+    if (lastPage !== null && p.page !== lastPage + 1) flush();
+    lastPage = p.page;
     const s = shape(p.lines);
     const pageUnits = units(p);
     pageUnits.forEach((u, k) => {
@@ -287,16 +339,14 @@ function sentenceSteps(pages: readonly FocusPage[]): Step[] {
         steps.push({ rects: [rectOf(u.page, u.figure)], text: "", kind: "figure" });
         return;
       }
-      const chars = lineChars(p, u.line);
-      if (!chars.length) return;
-      if (stream.length) {
-        const last = stream[stream.length - 1];
-        const before = stream[stream.length - 2];
+      if (!u.line.text.trim()) return;
+      if (!stream.empty) {
         // "hyphen-" + "ated": one word again.
-        if (last.ch === "-" && before && /\p{L}/u.test(before.ch) && /^\p{Ll}/u.test(chars[0].ch)) stream.pop();
-        else stream.push({ ch: " ", at: null });
+        const first = u.line.text.trimStart()[0] ?? "";
+        if (stream.last() === "-" && /\p{L}/u.test(stream.last(2) ?? "") && /^\p{Ll}/u.test(first)) stream.pop();
+        else stream.push(" ", null);
       }
-      stream.push(...chars);
+      pushLine(stream, p, u.line);
       const next = pageUnits[k + 1];
       if (next && "line" in next && headingBreak(u.line, next.line, s)) breaks.add(stream.length);
     });
@@ -327,4 +377,21 @@ export function stepUnder(steps: readonly Step[], page: number, x: number, y: nu
   return steps.findIndex((s) =>
     s.rects.some(([p, x0, y0, x1, y1]) => p === page && x >= x0 - 2 && x <= x1 + 2 && y >= y0 - 2 && y <= y1 + 2),
   );
+}
+
+/** Where a step starts: its page, and the left and top of its first rectangle. */
+export interface StepPlace {
+  page: number;
+  x: number;
+  y: number;
+}
+
+export const placeOf = (step: Step): StepPlace => ({ page: step.rects[0][0], x: step.rects[0][1], y: step.rects[0][4] });
+
+/** The step that starts at a place (steps rebuilt with more pages), else the one at that point. */
+export function stepAtPlace(steps: readonly Step[], place: StepPlace): number {
+  const same = steps.findIndex(
+    (s) => s.rects[0][0] === place.page && Math.abs(s.rects[0][1] - place.x) < 0.5 && Math.abs(s.rects[0][4] - place.y) < 0.5,
+  );
+  return same !== -1 ? same : stepAt(steps, place.page, place.y + 1);
 }

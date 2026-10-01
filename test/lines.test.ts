@@ -88,8 +88,12 @@ describe("two columns", () => {
     const a2 = ["Bea Writer", "Other Institute"];
     const l = left.map((t, i) => words(t, 72, y(i)));
     const r = right.map((t, i) => words(t, 320, y(i)));
-    const result = detectLines([...author(a1, 147), ...author(a2, 395), ...interleave(l, r).flat()]);
-    expect(result.lines.map((l) => l.text)).toEqual([...a1, ...a2, ...left, ...right]);
+    const title = words("A Title In Larger Type Across The Page", 120, 740, 16);
+    const result = detectLines([...title, ...author(a1, 147), ...author(a2, 395), ...interleave(l, r).flat()]);
+    expect(result.lines.map((l) => l.text)).toEqual([title.map((w) => w.str).join(" "), ...a1, ...a2, ...left, ...right]);
+    // Without a title above, centred lines atop both columns are just read with their column.
+    const untitled = detectLines([...author(a1, 147), ...author(a2, 395), ...interleave(l, r).flat()]);
+    expect(untitled.lines.map((l) => l.text)).toEqual([...a1, ...left, ...a2, ...right]);
   });
 
   it("can be told to ignore columns", () => {

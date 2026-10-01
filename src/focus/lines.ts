@@ -344,7 +344,11 @@ function splitWideGroups(leftCol: Fragment[], rightCol: Fragment[]): Fragment[][
  * lines centred in it, at the same height as the other's. They are read
  * before the columns (left block, then right), not with them.
  */
-function headerBlocks(leftCol: Fragment[], rightCol: Fragment[]): { left: Fragment[]; right: Fragment[] } | null {
+function headerBlocks(
+  leftCol: Fragment[],
+  rightCol: Fragment[],
+  spanning: Fragment[],
+): { left: Fragment[]; right: Fragment[] } | null {
   const byTop = (p: Fragment, q: Fragment) => q.baseline - p.baseline || p.x0 - q.x0;
   const leading = (col: Fragment[]) => {
     if (col.length === 0) return [];
@@ -371,7 +375,12 @@ function headerBlocks(leftCol: Fragment[], rightCol: Fragment[]): { left: Fragme
   const size = Math.max(...[...left, ...right].map((f) => f.size));
   left = left.filter((f) => f.y1 > r0 - size && f.y0 < r1 + size);
   right = right.filter((f) => f.y1 > l0 - size && f.y0 < l1 + size);
-  return left.length >= 2 && right.length >= 2 ? { left, right } : null;
+  if (left.length < 2 || right.length < 2) return null;
+  // Only under a title (a full-width line in larger type than the columns'),
+  // so two centred formulas level at the top of a later page aren't taken for authors.
+  const top = Math.max(...[...left, ...right].map((f) => f.y1));
+  const body = quantile([...leftCol, ...rightCol].map((f) => f.size), 0.5);
+  return spanning.some((f) => f.y0 >= top - f.size && f.size > 1.2 * body) ? { left, right } : null;
 }
 
 /** Orders fragments for reading, given an optional gutter. */
@@ -389,7 +398,7 @@ function order(fragments: Fragment[], gutter: number | null): Ordered[] {
 
   // Full-width elements, each read where it sits: what to emit there.
   const wides = spanning.map((f) => ({ baseline: f.baseline, emit: [{ ...f, column: -1 as const }] as Ordered[] }));
-  const header = headerBlocks(leftCol, rightCol);
+  const header = headerBlocks(leftCol, rightCol, spanning);
   if (header) {
     const inHeader = new Set([...header.left, ...header.right]);
     leftCol = leftCol.filter((f) => !inHeader.has(f));

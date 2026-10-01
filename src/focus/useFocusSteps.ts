@@ -1,54 +1,83 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { getTextContent } from "../pdf/textCache";
 import { detectLines } from "./lines";
 import { buildSteps, type FocusPage, type Step, type StepUnit } from "./steps";
 
-// Lines of every page, found once per document and column setting.
-const cache = new WeakMap<PDFDocumentProxy, Map<boolean, Promise<FocusPage[]>>>();
+// Each page's lines, found once per document and column setting.
+const cache = new WeakMap<PDFDocumentProxy, Map<string, Promise<FocusPage>>>();
 
-function focusPages(pdf: PDFDocumentProxy, detectColumns: boolean): Promise<FocusPage[]> {
-  let byColumns = cache.get(pdf);
-  if (!byColumns) cache.set(pdf, (byColumns = new Map()));
-  let entry = byColumns.get(detectColumns);
+function focusPage(pdf: PDFDocumentProxy, index: number, detectColumns: boolean): Promise<FocusPage> {
+  let pages = cache.get(pdf);
+  if (!pages) cache.set(pdf, (pages = new Map()));
+  const key = `${detectColumns}:${index}`;
+  let entry = pages.get(key);
   if (!entry) {
-    entry = (async () => {
-      const pages: FocusPage[] = [];
-      for (let i = 0; i < pdf.numPages; i++) {
-        const [page, content] = await Promise.all([pdf.getPage(i + 1), getTextContent(pdf, i)]);
-        const { lines } = detectLines(content.items, { rotation: page.rotate, detectColumns });
-        pages.push({ page: i, lines, items: content.items, rotation: page.rotate, top: page.view[3] });
-      }
-      return pages;
-    })();
-    entry.catch(() => byColumns!.delete(detectColumns));
-    byColumns.set(detectColumns, entry);
+    entry = Promise.all([pdf.getPage(index + 1), getTextContent(pdf, index)]).then(([page, content]) => ({
+      page: index,
+      lines: detectLines(content.items, { rotation: page.rotate, detectColumns }).lines,
+      items: content.items,
+      rotation: page.rotate,
+      top: page.view[3],
+    }));
+    entry.catch(() => pages!.delete(key));
+    pages.set(key, entry);
   }
   return entry;
 }
 
+/** Steps are shown once this many pages from the start page are ready, then again every BATCH pages. */
+const FIRST = 6;
+const BATCH = 60;
+
+export interface FocusSteps {
+  steps: Step[];
+  /** Pages whose lines are found so far, and all. */
+  pagesDone: number;
+  pageCount: number;
+}
+
 /**
- * Focus mode's steps for a document, or null while they are being worked out
- * (or when focus mode is off: nothing is computed then).
+ * Focus mode's steps for a document, or null until the first are ready (and
+ * when focus mode is off: nothing is computed then). Pages are read from
+ * `startPage` on, then the ones before it; the steps grow as they come in,
+ * so a long book can be read from where it is open straight away.
  */
 export function useFocusSteps(
   pdf: PDFDocumentProxy | null,
   active: boolean,
   unit: StepUnit,
   detectColumns: boolean,
+  startPage: number,
   onError: (what: string, err: unknown) => void,
-): Step[] | null {
-  const [result, setResult] = useState<{ key: unknown[]; steps: Step[] } | null>(null);
+): FocusSteps | null {
+  const [result, setResult] = useState<{ key: unknown[]; value: FocusSteps } | null>(null);
+  const start = useRef(startPage);
+  start.current = startPage;
   useEffect(() => {
     if (!pdf || !active) return;
     let cancelled = false;
-    focusPages(pdf, detectColumns)
-      .then((pages) => !cancelled && setResult({ key: [pdf, unit, detectColumns], steps: buildSteps(pages, unit) }))
-      .catch((e) => !cancelled && onError("Could not find the lines for focus mode", e));
+    const key = [pdf, unit, detectColumns];
+    const total = pdf.numPages;
+    const first = Math.min(Math.max(start.current, 0), total - 1);
+    const order = [...Array.from({ length: total - first }, (_, i) => first + i), ...Array.from({ length: first }, (_, i) => i)];
+    (async () => {
+      const found: FocusPage[] = [];
+      const publish = () => {
+        const pages = found.slice().sort((a, b) => a.page - b.page);
+        setResult({ key, value: { steps: buildSteps(pages, unit), pagesDone: found.length, pageCount: total } });
+      };
+      for (const index of order) {
+        found.push(await focusPage(pdf, index, detectColumns));
+        if (cancelled) return;
+        const n = found.length;
+        if (n === total || n === Math.min(FIRST, total) || (n > FIRST && (n - FIRST) % BATCH === 0)) publish();
+      }
+    })().catch((e) => !cancelled && onError("Could not find the lines for focus mode", e));
     return () => {
       cancelled = true;
     };
   }, [pdf, active, unit, detectColumns, onError]);
   const current = result && result.key[0] === pdf && result.key[1] === unit && result.key[2] === detectColumns;
-  return active && current ? result.steps : null;
+  return active && current ? result.value : null;
 }

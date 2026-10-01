@@ -36,7 +36,7 @@ interface Props {
 export function FocusBar(p: Props) {
   const id = useId();
   return (
-    <div className="focus-bar" role="toolbar" aria-label="Focus mode">
+    <div className="focus-bar" role="group" aria-label="Focus mode">
       <button type="button" className="icon-button" onClick={p.onPrevious} aria-label="Previous step" title="Previous step (Up)">
         <Icon name="up" />
       </button>

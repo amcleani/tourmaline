@@ -130,8 +130,10 @@ them into steps: 1-3 lines within a block (a change of type size or extra
 space starts one), or sentences (characters placed within text items, our
 own splitter: abbreviations, initials, headings without a full stop);
 figures and tables are the empty band beside their caption; lone page
-numbers are skipped. `useFocusSteps` builds them for the whole document
-(lines cached per document and column setting). The viewer dims every page
+numbers are skipped. `useFocusSteps` reads pages from where the reader is,
+then the rest, and the steps grow as they come in (lines cached per page and
+column setting); the current step is found again by place (`stepAtPlace`),
+not number. Keep `steps.ts` linear: a 667-page book builds in about 0.3 s. The viewer dims every page
 except the step (`focus` prop, an SVG mask that clicks pass through) and
 `scrollToEye` puts it at the eye line. Up/Down step only when the document
 has focus; a plain-key shortcut whose command can't run keeps its usual
