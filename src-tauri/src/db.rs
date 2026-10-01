@@ -162,6 +162,10 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE works ADD COLUMN citekey_declined TEXT;
     "#,
+    // v5: an annotation imported from a PDF is imported once per work.
+    r#"
+    CREATE UNIQUE INDEX annotations_source ON annotations(work_id, source_nm) WHERE source_nm IS NOT NULL;
+    "#,
 ];
 
 pub struct Db {

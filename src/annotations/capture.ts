@@ -1,4 +1,4 @@
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import { AnnotationMode, type PDFDocumentProxy } from "pdfjs-dist";
 import type { PdfRect } from "../pdf/search";
 
 /** Resolution of area captures; high enough for formulas to stay crisp in notes. */
@@ -21,7 +21,14 @@ export async function renderRegion(pdf: PDFDocumentProxy, pageIndex: number, rec
   canvas.height = Math.max(1, Math.ceil(Math.max(ay, by)) - top);
   // "print" renders straight through instead of pacing itself with animation
   // frames, which stall while the window is in the background.
-  await page.render({ canvas, viewport, transform: [1, 0, 0, 1, -left, -top], intent: "print" }).promise;
+  // ENABLE_STORAGE leaves out PDF annotations Tourmaline draws itself (imported ones).
+  await page.render({
+    canvas,
+    viewport,
+    transform: [1, 0, 0, 1, -left, -top],
+    intent: "print",
+    annotationMode: AnnotationMode.ENABLE_STORAGE,
+  }).promise;
   const blob = await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("could not encode the image"))), "image/png"),
   );

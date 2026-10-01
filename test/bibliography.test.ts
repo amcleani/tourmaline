@@ -213,7 +213,9 @@ describe.skipIf(!existsSync(join(VAULT, "Library/database.bib")))("the user's Ja
       const v = citationVariables(entry);
       // Titles have since been recased in JabRef, so case is ignored; a
       // missing author renders as "".
-      const same = (a: unknown, b: string) => String(a ?? "").toLowerCase() === b.toLowerCase();
+      // The plugin writes some apostrophes as "?" (O'Connor -> O?Connor).
+      const fold = (x: string) => x.toLowerCase().replace(/['‘’]/g, "?");
+      const same = (a: unknown, b: string) => fold(String(a ?? "")) === fold(b);
       if (!same(v.title, title)) differences.push(`${key} title: ${JSON.stringify(v.title)} vs ${JSON.stringify(title)}`);
       if (!same(v.authorString, author)) differences.push(`${key} author: ${JSON.stringify(v.authorString)} vs ${JSON.stringify(author)}`);
     }

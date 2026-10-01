@@ -79,6 +79,22 @@ pub struct NewAnnotation {
     pub placement: Placement,
     #[serde(default)]
     pub page_hashes: Vec<PageHash>,
+    /// Set for annotations imported from the PDF: its `/NM`, or a key made
+    /// from its position when it has none. One per work, ever.
+    #[serde(default)]
+    pub source_nm: Option<String>,
+    /// When it was made (imported annotations keep their date), Unix ms.
+    #[serde(default)]
+    pub created: Option<i64>,
+}
+
+/// What `import_annotations` did.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub created: Vec<Annotation>,
+    /// Keys that were imported before (even if since deleted): not imported again.
+    pub existing: Vec<String>,
 }
 
 /// The fields the user edits. All are written, so send the current values.
@@ -224,6 +240,53 @@ fn record_page_hashes(tx: &Transaction, file_id: &str, hashes: &[PageHash]) -> R
     Ok(())
 }
 
+/// Inserts an annotation with its placement; returns its id.
+fn insert_annotation(tx: &Transaction, new: &NewAnnotation, now: i64) -> Result<String> {
+    if let Some(c) = &new.colour {
+        validate_colour(c)?;
+    }
+    let id = uuid::Uuid::now_v7().to_string();
+    let source = if new.source_nm.is_some() { "imported" } else { "tourmaline" };
+    let created = new.created.unwrap_or(now);
+    // Block ids are short, so retry the rare collision.
+    let mut attempts = 0;
+    loop {
+        let inserted = tx.execute(
+            "INSERT INTO annotations (id, work_id, kind, category_id, colour, note_md, quote, prefix, suffix,
+                                      block_id, source, source_nm, created, updated)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                id,
+                new.work_id,
+                new.kind,
+                new.category_id,
+                new.colour,
+                new.note,
+                new.quote,
+                new.prefix,
+                new.suffix,
+                new_block_id(),
+                source,
+                new.source_nm,
+                created,
+                now
+            ],
+        );
+        match inserted {
+            Ok(_) => break,
+            Err(rusqlite::Error::SqliteFailure(e, Some(msg)))
+                if e.code == rusqlite::ErrorCode::ConstraintViolation && msg.contains("block_id") && attempts < 5 =>
+            {
+                attempts += 1;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    upsert_placement(tx, &id, &new.file_id, &new.placement, now)?;
+    record_page_hashes(tx, &new.file_id, &new.page_hashes)?;
+    Ok(id)
+}
+
 impl Db {
     /// A work's annotations (not deleted), placed on `file_id` where possible,
     /// in page order.
@@ -251,52 +314,57 @@ impl Db {
     }
 
     pub fn create_annotation(&self, new: &NewAnnotation) -> Result<Annotation> {
-        if let Some(c) = &new.colour {
-            validate_colour(c)?;
-        }
-        let id = uuid::Uuid::now_v7().to_string();
+        let id = {
+            let mut conn = self.conn();
+            let tx = conn.transaction()?;
+            let id = insert_annotation(&tx, new, now_millis())?;
+            tx.commit()?;
+            id
+        };
+        self.annotation(&id, &new.file_id)
+    }
+
+    /// The source keys of everything imported into a work, deleted or not.
+    pub fn imported_keys(&self, work_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT source_nm FROM annotations WHERE work_id = ?1 AND source_nm IS NOT NULL")?;
+        let rows = stmt.query_map([work_id], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Imports annotations found in a PDF, each once per work: one whose
+    /// `source_nm` the work already has (even deleted, so a deleted import
+    /// stays deleted) is skipped.
+    pub fn import_annotations(&self, list: &[NewAnnotation]) -> Result<ImportResult> {
         let now = now_millis();
+        let mut ids = Vec::new();
+        let mut existing = Vec::new();
+        let file_id = match list.first() {
+            Some(first) => first.file_id.clone(),
+            None => return Ok(ImportResult { created: vec![], existing: vec![] }),
+        };
         {
             let mut conn = self.conn();
             let tx = conn.transaction()?;
-            // Block ids are short, so retry the rare collision.
-            let mut attempts = 0;
-            loop {
-                let inserted = tx.execute(
-                    "INSERT INTO annotations (id, work_id, kind, category_id, colour, note_md, quote, prefix, suffix,
-                                              block_id, created, updated)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
-                    params![
-                        id,
-                        new.work_id,
-                        new.kind,
-                        new.category_id,
-                        new.colour,
-                        new.note,
-                        new.quote,
-                        new.prefix,
-                        new.suffix,
-                        new_block_id(),
-                        now
-                    ],
-                );
-                match inserted {
-                    Ok(_) => break,
-                    Err(rusqlite::Error::SqliteFailure(e, Some(msg)))
-                        if e.code == rusqlite::ErrorCode::ConstraintViolation
-                            && msg.contains("block_id")
-                            && attempts < 5 =>
-                    {
-                        attempts += 1;
-                    }
-                    Err(e) => return Err(e.into()),
+            for new in list {
+                let Some(key) = &new.source_nm else {
+                    return Err(Error::Message("an imported annotation needs a source key".into()));
+                };
+                let known: bool = tx.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM annotations WHERE work_id = ?1 AND source_nm = ?2)",
+                    params![new.work_id, key],
+                    |r| r.get(0),
+                )?;
+                if known {
+                    existing.push(key.clone());
+                } else {
+                    ids.push(insert_annotation(&tx, new, now)?);
                 }
             }
-            upsert_placement(&tx, &id, &new.file_id, &new.placement, now)?;
-            record_page_hashes(&tx, &new.file_id, &new.page_hashes)?;
             tx.commit()?;
         }
-        self.annotation(&id, &new.file_id)
+        let created = ids.iter().map(|id| self.annotation(id, &file_id)).collect::<Result<_>>()?;
+        Ok(ImportResult { created, existing })
     }
 
     pub fn update_annotation(&self, id: &str, file_id: &str, edit: &AnnotationEdit) -> Result<Annotation> {
@@ -465,7 +533,39 @@ pub(crate) mod tests {
             suffix: Some(" after".into()),
             placement: placement(page),
             page_hashes: vec![PageHash { page, hash: format!("hash{page}") }],
+            source_nm: None,
+            created: None,
         }
+    }
+
+    #[test]
+    fn imports_each_pdf_annotation_once() {
+        let db = Db::in_memory().unwrap();
+        let doc = open(&db, "a", "/p/a.pdf", 1);
+        let imported = |key: &str| NewAnnotation {
+            source_nm: Some(key.into()),
+            created: Some(42),
+            ..highlight(&doc.work_id, "a", 2)
+        };
+        let first = db.import_annotations(&[imported("okular-1"), imported("okular-2")]).unwrap();
+        assert_eq!(first.created.len(), 2);
+        assert!(first.existing.is_empty());
+        assert_eq!(first.created[0].source, "imported");
+        assert_eq!(first.created[0].created, 42);
+        // Deleted in Tourmaline: stays deleted when the PDF is opened again.
+        db.delete_annotation(&first.created[0].id).unwrap();
+        let again = db.import_annotations(&[imported("okular-1"), imported("okular-2"), imported("okular-3")]).unwrap();
+        assert_eq!(again.created.len(), 1);
+        assert_eq!(again.existing, ["okular-1", "okular-2"]);
+        assert_eq!(db.list_annotations(&doc.work_id, "a").unwrap().len(), 2);
+        let mut keys = db.imported_keys(&doc.work_id).unwrap();
+        keys.sort();
+        assert_eq!(keys, ["okular-1", "okular-2", "okular-3"]);
+        // Another paper with the same keys gets its own copies.
+        let other = open(&db, "b", "/p/b.pdf", 2);
+        let theirs = NewAnnotation { source_nm: Some("okular-1".into()), ..highlight(&other.work_id, "b", 0) };
+        assert_eq!(db.import_annotations(&[theirs]).unwrap().created.len(), 1);
+        assert!(db.import_annotations(&[highlight(&doc.work_id, "a", 0)]).is_err(), "needs a key");
     }
 
     #[test]

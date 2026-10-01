@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
   createAnnotation,
   deleteAnnotation,
+  importAnnotations,
   listAnnotations,
   restoreAnnotation,
   saveAttachment,
@@ -14,7 +15,15 @@ import { getPageHash, getPageText } from "../pdf/textCache";
 import { reanchor } from "./anchor";
 import { renderRegion } from "./capture";
 import { textAnchor, type CapturedSelection } from "./selection";
-import { byPosition, type Annotation, type AnnotationEdit, type PageHash, type PlacementUpdate } from "./types";
+import {
+  byPosition,
+  type Annotation,
+  type AnnotationEdit,
+  type ImportResult,
+  type NewAnnotation,
+  type PageHash,
+  type PlacementUpdate,
+} from "./types";
 
 export interface OpenDoc {
   workId: string;
@@ -187,6 +196,31 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
     [apply, enqueue],
   );
 
+  /**
+   * Adds annotations imported from the PDF (not undoable: deleting one is).
+   * Areas get their picture as captured ones do. Null if the paper changed.
+   */
+  const importFound = useCallback(
+    (list: NewAnnotation[]): Promise<ImportResult | null> => {
+      const d = docRef.current;
+      if (!d || list.some((n) => n.workId !== d.workId)) return Promise.resolve(null);
+      return enqueue(async () => {
+        const result = await importAnnotations(list);
+        apply(d.workId, (current) => result.created.reduce(upsert, current));
+        for (const a of result.created) {
+          if (a.kind !== "area" || !a.placement) continue;
+          const [page, ...rect] = a.placement.geometry.rects[0];
+          renderRegion(d.pdf, page, rect as PdfRect)
+            .then((png) => saveAttachment(a.id, png))
+            .then((imagePath) => apply(d.workId, (l) => l.map((x) => (x.id === a.id ? { ...x, imagePath } : x))))
+            .catch((err) => report.current("Could not save the picture of an imported area", err));
+        }
+        return result;
+      });
+    },
+    [apply, enqueue],
+  );
+
   const captureArea = useCallback(
     (page: number, rect: PdfRect, categoryId: string | null): Promise<Annotation | null> => {
       const d = docRef.current;
@@ -320,6 +354,7 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
     loaded: !!workId && loadedFor === `${workId}:${fileId}`,
     highlight,
     captureArea,
+    importFound,
     edit,
     remove,
     settled,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { TextLayer, type PDFDocumentProxy, type PDFPageProxy, type RenderTask } from "pdfjs-dist";
+import { AnnotationMode, TextLayer, type PDFDocumentProxy, type PDFPageProxy, type RenderTask } from "pdfjs-dist";
 import type { PageViewport } from "pdfjs-dist/types/src/display/page_viewport";
 import {
   PADDING,
@@ -89,7 +89,19 @@ interface Props {
   onSelectionChange?: (end: SelectionEnd | null) => void;
   /** Extra content drawn over a page (popovers), positioned with toCss. */
   overlay?: (page: number, toCss: (rect: PdfRect) => CssRect) => React.ReactNode;
+  /** pdf.js ids of annotations in the file that Tourmaline draws itself (imported ones). */
+  hiddenAnnotations?: ReadonlySet<string>;
 }
+
+/**
+ * Stops pdf.js drawing these annotations of the file, on screen and in area
+ * captures (pages render with AnnotationMode.ENABLE_STORAGE).
+ */
+export function hidePdfAnnotations(doc: PDFDocumentProxy, ids: Iterable<string>) {
+  for (const id of ids) doc.annotationStorage.setValue(id, { noView: true, noPrint: true });
+}
+
+const NO_IDS: ReadonlySet<string> = new Set();
 
 /** Converts a PDF-space rectangle to CSS pixels within the page. */
 function toCssRect(viewport: PageViewport, [x0, y0, x1, y1]: PdfRect) {
@@ -115,7 +127,10 @@ export function PdfViewer({
   onCapture,
   onSelectionChange,
   overlay,
+  hiddenAnnotations = NO_IDS,
 }: Props) {
+  // Before the pages' render effects run (layout effects come first).
+  useLayoutEffect(() => hidePdfAnnotations(doc, hiddenAnnotations), [doc, hiddenAnnotations]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sizes, setSizes] = useState<Size[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -414,6 +429,7 @@ export function PdfViewer({
         onCapture={onCapture}
         keyRect={keyRect?.page === i ? keyRect.rect : null}
         overlay={overlay}
+        hiddenAnnotations={hiddenAnnotations}
         onRegister={onRegister}
         onSize={onPageSize}
       />,
@@ -460,6 +476,8 @@ interface PageProps {
   /** The rectangle being placed with the keyboard on this page. */
   keyRect: CssRect | null;
   overlay?: Props["overlay"];
+  /** Only its identity matters: the page redraws when it changes. */
+  hiddenAnnotations: ReadonlySet<string>;
   onRegister: (index: number, info: PageInfo | null) => void;
   onSize: (index: number, size: Size) => void;
 }
@@ -482,6 +500,7 @@ function PageView({
   onCapture,
   keyRect,
   overlay,
+  hiddenAnnotations,
   onRegister,
   onSize,
 }: PageProps) {
@@ -529,7 +548,8 @@ function PageView({
       const scaled = page.getViewport({ scale: cssScale * dpr });
       canvas.width = Math.floor(scaled.width);
       canvas.height = Math.floor(scaled.height);
-      task = page.render({ canvas, viewport: scaled });
+      // Storage carries which annotations Tourmaline draws itself.
+      task = page.render({ canvas, viewport: scaled, annotationMode: AnnotationMode.ENABLE_STORAGE });
       await task.promise;
       setFailed(false);
     };
@@ -543,7 +563,7 @@ function PageView({
       cancelled = true;
       task?.cancel();
     };
-  }, [page, viewport, cssScale, pageNumber]);
+  }, [page, viewport, cssScale, pageNumber, hiddenAnnotations]);
 
   // Text layer: invisible, selectable text positioned over the canvas; also
   // what screen readers read.

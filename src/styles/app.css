@@ -537,6 +537,12 @@ kbd {
   background: color-mix(in srgb, var(--mark-colour) 12%, transparent);
   border: 2px solid var(--mark-colour);
 }
+/* A sticky note imported from the PDF: its icon's square. */
+.mark-note {
+  background: var(--mark-colour);
+  border: 1px solid color-mix(in srgb, var(--mark-colour) 60%, black);
+  border-radius: 3px 3px 3px 0;
+}
 .mark.selected {
   outline: 2px solid var(--accent);
   outline-offset: 1px;

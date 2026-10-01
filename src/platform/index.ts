@@ -6,6 +6,7 @@ import type {
   Annotation,
   AnnotationEdit,
   Category,
+  ImportResult,
   NewAnnotation,
   PageHash,
   PlacementUpdate,
@@ -117,6 +118,25 @@ export async function listAnnotations(workId: string, fileId: string): Promise<A
 export async function createAnnotation(annotation: NewAnnotation): Promise<Annotation> {
   if (!isTauri()) return memoryLibrary().create(annotation);
   return invoke<Annotation>("create_annotation", { annotation: annotation as unknown as Record<string, unknown> });
+}
+
+/** Imports annotations found in a PDF; each only once per paper (even after it's deleted). */
+export async function importAnnotations(annotations: NewAnnotation[]): Promise<ImportResult> {
+  if (!isTauri()) return memoryLibrary().import(annotations);
+  return invoke<ImportResult>("import_annotations", { annotations: annotations as unknown as Record<string, unknown>[] });
+}
+
+/** Keys of the annotations already imported into a paper (deleted ones too). */
+export async function importedKeys(workId: string): Promise<string[]> {
+  if (!isTauri()) return memoryLibrary().importedKeys(workId);
+  return invoke<string[]>("imported_keys", { workId });
+}
+
+/** pdf.js id → /NM name of the annotations in a PDF (pdf.js doesn't read /NM). Empty in a browser. */
+export async function pdfAnnotationNames(path: string | null, fileId: string): Promise<Map<string, string>> {
+  if (!isTauri() || !path) return new Map();
+  const names = await invoke<{ page: number; id: string; name: string }[]>("pdf_annotation_names", { path, fileId });
+  return new Map(names.map((n) => [n.id, n.name]));
 }
 
 export async function updateAnnotation(id: string, fileId: string, edit: AnnotationEdit): Promise<Annotation> {

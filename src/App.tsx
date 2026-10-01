@@ -5,6 +5,7 @@ import { appCommands } from "./commands/appCommands";
 import { isTextEditingShortcut } from "./commands/shortcuts";
 import { colourOf, type Annotation, type Category } from "./annotations/types";
 import { useAnnotations } from "./annotations/useAnnotations";
+import { usePdfImport } from "./annotations/usePdfImport";
 import { looksLikeSamePaper, textSample } from "./annotations/version";
 import { DEFAULT_ZOOM, decodePosition, decodeSession, encodePosition, encodeSession } from "./app/session";
 import { nextZoom, type Anchor } from "./pdf/layout";
@@ -534,6 +535,10 @@ export function App() {
   );
   const notes = useAnnotations(openDoc, reportError);
   annotationsSettled.current = notes.settled;
+  const activePath = activeTab?.path ?? null;
+  const importDoc = useMemo(() => (openDoc ? { ...openDoc, path: activePath } : null), [openDoc, activePath]);
+  // Annotations other programs saved in the PDF become Tourmaline's.
+  const hiddenPdfAnnotations = usePdfImport(importDoc, notes.loaded, liveCategories, notes.importFound, reportError);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [captureMode, setCaptureMode] = useState(false);
   const [selectionEnd, setSelectionEnd] = useState<SelectionEnd | null>(null);
@@ -1086,6 +1091,7 @@ export function App() {
               onCapture={onCapture}
               onSelectionChange={setSelectionEnd}
               overlay={overlay}
+              hiddenAnnotations={hiddenPdfAnnotations}
             />
           ) : activeTab ? (
             <div className="tab-placeholder" role={activeTab.status === "error" ? "alert" : "status"}>

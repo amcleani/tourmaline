@@ -3,6 +3,7 @@ mod db;
 mod documents;
 mod error;
 mod library;
+mod pdf_annotations;
 mod vault;
 
 use std::path::PathBuf;
@@ -12,7 +13,7 @@ use tauri::{
     AppHandle, Manager,
 };
 
-use annotations::{Annotation, AnnotationEdit, Category, NewAnnotation, PageHash, PlacementUpdate};
+use annotations::{Annotation, AnnotationEdit, Category, ImportResult, NewAnnotation, PageHash, PlacementUpdate};
 use db::Db;
 use error::{Error, Result};
 use library::{DocumentInfo, FileKey};
@@ -165,6 +166,36 @@ async fn create_annotation(app: AppHandle, annotation: NewAnnotation) -> Result<
     blocking(app, move |_, db| db.create_annotation(&annotation)).await
 }
 
+/// The `/NM` names of the annotations in a PDF, for the version `file_id`
+/// (refused if the file on disk has changed since).
+#[tauri::command]
+async fn pdf_annotation_names(
+    app: AppHandle,
+    path: PathBuf,
+    file_id: String,
+) -> Result<Vec<pdf_annotations::AnnotationName>> {
+    blocking(app, move |_, _| {
+        let file = documents::read(&path)?;
+        if file.sha256 != file_id {
+            return Err(Error::Message(format!("{} has changed since it was opened", path.display())));
+        }
+        pdf_annotations::annotation_names(&file.bytes)
+    })
+    .await
+}
+
+/// Keys of the annotations already imported into a paper (deleted ones too).
+#[tauri::command]
+async fn imported_keys(app: AppHandle, work_id: String) -> Result<Vec<String>> {
+    blocking(app, move |_, db| db.imported_keys(&work_id)).await
+}
+
+/// Imports annotations found in a PDF; each only once per paper.
+#[tauri::command]
+async fn import_annotations(app: AppHandle, annotations: Vec<NewAnnotation>) -> Result<ImportResult> {
+    blocking(app, move |_, db| db.import_annotations(&annotations)).await
+}
+
 #[tauri::command]
 async fn update_annotation(app: AppHandle, id: String, file_id: String, edit: AnnotationEdit) -> Result<Annotation> {
     blocking(app, move |_, db| db.update_annotation(&id, &file_id, &edit)).await
@@ -298,6 +329,9 @@ pub fn run() {
             set_state,
             list_annotations,
             create_annotation,
+            import_annotations,
+            imported_keys,
+            pdf_annotation_names,
             update_annotation,
             delete_annotation,
             restore_annotation,

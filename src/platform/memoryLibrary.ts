@@ -2,6 +2,7 @@ import type {
   Annotation,
   AnnotationEdit,
   Category,
+  ImportResult,
   NewAnnotation,
   PageHash,
   Placement,
@@ -22,6 +23,7 @@ export const DEFAULT_CATEGORIES: Category[] = [
 
 interface Stored extends Omit<Annotation, "placement" | "fallback"> {
   deleted: boolean;
+  sourceNm: string | null;
   placements: Map<string, Placement & { placedAt: number }>;
 }
 
@@ -37,7 +39,7 @@ export class MemoryLibrary {
   }
 
   private view(s: Stored, fileId: string): Annotation {
-    const { deleted: _d, placements, ...rest } = s;
+    const { deleted: _d, sourceNm: _s, placements, ...rest } = s;
     const own = placements.get(fileId);
     let fallback: Annotation["fallback"] = null;
     if (!own) {
@@ -88,14 +90,31 @@ export class MemoryLibrary {
       suffix: n.suffix,
       imagePath: null,
       blockId,
-      source: "tourmaline",
-      created: now,
+      source: n.sourceNm ? "imported" : "tourmaline",
+      sourceNm: n.sourceNm ?? null,
+      created: n.created ?? now,
       updated: now,
       deleted: false,
       placements: new Map([[n.fileId, { ...n.placement, placedAt: now }]]),
     });
     this.recordHashes(n.fileId, n.pageHashes);
     return this.view(this.annotations.get(id)!, n.fileId);
+  }
+
+  importedKeys(workId: string): string[] {
+    return [...this.annotations.values()].filter((a) => a.workId === workId && a.sourceNm).map((a) => a.sourceNm!);
+  }
+
+  /** Mirrors import_annotations: each source key once per work, even if deleted since. */
+  import(list: NewAnnotation[]): ImportResult {
+    const created: Annotation[] = [];
+    const existing: string[] = [];
+    for (const n of list) {
+      const known = [...this.annotations.values()].some((a) => a.workId === n.workId && a.sourceNm === n.sourceNm);
+      if (known) existing.push(n.sourceNm!);
+      else created.push(this.create(n));
+    }
+    return { created, existing };
   }
 
   private get(id: string): Stored {

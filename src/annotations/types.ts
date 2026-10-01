@@ -66,6 +66,17 @@ export interface NewAnnotation {
   suffix: string | null;
   placement: Placement;
   pageHashes: PageHash[];
+  /** Imported from the PDF: its /NM (or position) key. */
+  sourceNm?: string | null;
+  /** Unix ms; defaults to now. */
+  created?: number | null;
+}
+
+/** What importing a PDF's annotations did (see import_annotations in Rust). */
+export interface ImportResult {
+  created: Annotation[];
+  /** Keys imported before, maybe since deleted. */
+  existing: string[];
 }
 
 export interface AnnotationEdit {
