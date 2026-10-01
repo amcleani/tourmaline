@@ -261,6 +261,14 @@ impl Db {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
+    /// How a file came to be: "opened", "writeback" or "external"; None if unknown.
+    pub fn file_origin(&self, sha256: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT origin FROM files WHERE sha256 = ?1", [sha256], |r| r.get(0))
+            .optional()?)
+    }
+
     /// Records the file write-back produced from `old`: a new version of the
     /// same work whose annotations sit exactly where they did (the text is
     /// unchanged), now with the PDF objects they were written as.

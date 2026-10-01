@@ -180,7 +180,8 @@ annotation storage and pages render with `AnnotationMode.ENABLE_STORAGE`
 (captures too). Write-back is `writeback.rs` (lopdf `IncrementalDocument`;
 the output must start with the original bytes) behind
 `save_annotations_to_pdf`, which checks the file is still the open version,
-backs it up, writes beside it and renames; `record_writeback` adds the new
+backs it up (`prune_backups`: originals kept, backups of `writeback`
+versions deleted after 30 days), writes beside it and renames; `record_writeback` adds the new
 version with copied placements and their `pdf_obj_ref`. Never test it on
 the vault: use copies in `.dev-data/`.
 

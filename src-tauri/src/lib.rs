@@ -187,7 +187,7 @@ async fn pdf_annotation_names(
 
 /// Writes a paper's annotations into its PDF (File › Save annotations into
 /// PDF). The file must still be the version `file_id`. Its bytes are first
-/// backed up to `<data>/backups/pdf/<sha256>.pdf`; the changes are appended
+/// backed up to `<data>/backups/pdf/<sha256>.pdf` (see `prune_backups`); the changes are appended
 /// as an incremental update, written beside the file and moved over it.
 /// Returns the new version, which the tab then shows.
 #[tauri::command]
@@ -211,6 +211,11 @@ async fn save_annotations_to_pdf(
         let backup = backups.join(format!("{file_id}.pdf"));
         if !backup.exists() {
             std::fs::write(&backup, &file.bytes)?;
+        }
+        // Originals stay; backups of earlier saves go after a while.
+        let max_age = std::time::Duration::from_secs(writeback::BACKUP_DAYS * 86_400);
+        if let Err(e) = writeback::prune_backups(&backups, |sha| db.file_origin(sha), max_age) {
+            eprintln!("Tourmaline: could not prune PDF backups: {e}");
         }
         let removed = db.writeback_removals(&work_id, &file_id)?;
         let written = writeback::write_annotations(&file.bytes, &annotations, &removed)?;

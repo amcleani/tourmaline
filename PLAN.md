@@ -99,7 +99,8 @@ the originals. Ink is left drawn until phase 7.
 
 **Write-back (4b)**: File › Save annotations into PDF (Ctrl+S), asked before
 the first use, never automatic. Original bytes backed up to
-`<data>/backups/pdf/<sha256>.pdf`; changes appended as an incremental update
+`<data>/backups/pdf/<sha256>.pdf` (originals kept for good; backups of
+versions Tourmaline wrote, i.e. earlier saves, deleted after 30 days); changes appended as an incremental update
 (lopdf) and moved over the file. Imported annotations update their own
 object; Tourmaline's are named by their id; deleted ones leave the page. The
 result is a `writeback` version of the work with placements copied, each
@@ -166,7 +167,9 @@ silently dropped).
 5. **Note text**: Tourmaline's database is the master; export warns before
    overwriting edits made inside the managed region.
 6. **Block IDs**: `^hl-` + 6 base36 characters (`^hl-k3x9q2`), never changed.
-7. **Backups**: local only, next to the database.
+7. **Backups**: local only, next to the database. PDF backups: the file as
+   it was before Tourmaline first wrote into it is kept for good; backups of
+   later saves go after 30 days (decided in phase 4b).
 
 ## Phases
 

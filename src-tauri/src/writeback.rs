@@ -248,6 +248,46 @@ pub fn write_annotations(original: &[u8], list: &[WriteAnnotation], remove: &[St
     Ok(Written { bytes, refs })
 }
 
+/// How long backups of versions Tourmaline itself wrote are kept.
+pub const BACKUP_DAYS: u64 = 30;
+
+/// Prunes `<data>/backups/pdf` (files named `<sha256>.pdf`). A backup of a
+/// file Tourmaline never wrote into — the original as the user had it — is
+/// kept for good; one of a version write-back produced (an earlier save) goes
+/// after `max_age`, as the original plus the current file hold everything it
+/// did. Anything the library doesn't know is kept. Returns what was deleted.
+pub fn prune_backups(
+    dir: &std::path::Path,
+    origin: impl Fn(&str) -> Result<Option<String>>,
+    max_age: std::time::Duration,
+) -> Result<Vec<std::path::PathBuf>> {
+    let mut deleted = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else { return Ok(deleted) };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(sha) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".pdf"))
+            .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        else {
+            continue;
+        };
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| now.duration_since(t).ok())
+            .is_some_and(|age| age > max_age);
+        if old && origin(sha)?.as_deref() == Some("writeback") {
+            std::fs::remove_file(&path)?;
+            deleted.push(path);
+        }
+    }
+    Ok(deleted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,6 +373,38 @@ mod tests {
         if let Some(out) = std::env::var_os("TOURMALINE_WRITEBACK_OUT") {
             std::fs::write(out, &written.bytes).unwrap();
         }
+    }
+
+    #[test]
+    fn keeps_originals_and_prunes_old_backups_of_written_versions() {
+        use std::time::{Duration, SystemTime};
+        let dir = tempfile::tempdir().unwrap();
+        let name = |c: char| c.to_string().repeat(64);
+        let backup = |c: char, age_days: u64| {
+            let path = dir.path().join(format!("{}.pdf", name(c)));
+            let file = std::fs::File::create(&path).unwrap();
+            file.set_modified(SystemTime::now() - Duration::from_secs(age_days * 86_400)).unwrap();
+            path
+        };
+        let original = backup('a', 400);
+        let old_save = backup('b', 31);
+        let recent_save = backup('c', 2);
+        let unknown = backup('d', 400);
+        let other = dir.path().join("notes.txt");
+        std::fs::write(&other, "x").unwrap();
+        let origin = |sha: &str| -> Result<Option<String>> {
+            Ok(match sha.chars().next() {
+                Some('a') => Some("opened".into()),
+                Some('b') | Some('c') => Some("writeback".into()),
+                _ => None,
+            })
+        };
+        let deleted = prune_backups(dir.path(), origin, Duration::from_secs(BACKUP_DAYS * 86_400)).unwrap();
+        assert_eq!(deleted, std::slice::from_ref(&old_save));
+        assert!(original.exists() && recent_save.exists() && unknown.exists() && other.exists());
+        assert!(!old_save.exists());
+        // A missing folder is fine.
+        assert!(prune_backups(&dir.path().join("none"), origin, Duration::ZERO).unwrap().is_empty());
     }
 
     #[test]
