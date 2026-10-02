@@ -4,8 +4,7 @@
 
 A desktop PDF reader for academic research, built around an Obsidian vault.
 Read papers, highlight and annotate them, and send your annotations into
-your literature notes, with links that lead straight back to the highlight.
-Every feature works with the mouse and with the keyboard.
+your literature notes, with links that lead straight back to the highlight. 
 
 Tourmaline runs on Windows. It is built with Tauri, React and pdf.js.
 
