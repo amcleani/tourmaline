@@ -152,6 +152,19 @@ annotations (e.g. Okular); optional write-back via pdf-lib.
 `preamble.sty`; `\` command autocomplete. No LaTeX Suite snippets (the
 user doesn't want them).
 
+**Wikilink autocomplete (10)**: typing `[[` in a note suggests the vault's
+notes (fuzzy match on names and frontmatter `aliases`, the folder shown for
+names used twice); choosing one inserts the link as the vault's "new link
+format" setting (`.obsidian/app.json`: shortest path, relative or absolute)
+would write it, with the closing `]]`. Read-only: a Rust command lists the
+vault's `.md` files (skipping `.obsidian` and hidden folders) with their
+aliases and headings, cached and re-read when the window regains focus.
+Wikilinks are a syntax node of both note parsers (like math), so nothing is
+suggested inside code or formulas; rendered notes show them as links that
+open the note in Obsidian. To decide when starting: also suggest link
+targets that don't exist yet (as Obsidian does), and whether `#heading` /
+`#^block` suggestions are in the first version.
+
 Math matches the vault's Obsidian: its built-in MathJax 3 unless the
 latest-mathjax plugin is enabled (then its font and packages), plus the
 obsidian-latex preamble. Tourmaline uses MathJax 4 either way, with the
@@ -224,9 +237,11 @@ silently dropped).
 | 7 | **Ink** *(deferred: a later feature, after phase 9)* | Strokes survive zoom and export |
 | 8 | **Equation → LaTeX** *(deferred: a later feature, after phase 9)* | Copied LaTeX compiles |
 | 9 | **Polish**: accessibility audit, themes, UI scale, shortcut editor, installer, auto-update | Everything works mouse-only and keyboard-only |
+| 10 | **Wikilink autocomplete** in notes, from the vault | Typing `[[conc` in a note suggests `concept` from the vault |
 
 Phases 7 and 8 are put off (decided after phase 6): phase 9 comes next, and
-they follow as later features.
+they follow as later features. Phase 10 (wikilink autocomplete, added after
+phase 9) comes after phase 9's review, before 7 and 8.
 
 **Polish (9)**:
 - Zoom by trackpad pinch (smooth while pinching, the pages redrawn sharp
