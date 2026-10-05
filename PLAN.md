@@ -236,7 +236,7 @@ silently dropped).
 | 6 | **Smart navigation**: citation/figure/equation popups, back/forward, split view | Hovering "[12]" shows the reference ✅ |
 | 7 | **Ink** *(deferred: a later feature, after phase 9)* | Strokes survive zoom and export |
 | 8 | **Equation → LaTeX** *(deferred: a later feature, after phase 9)* | Copied LaTeX compiles |
-| 9 | **Polish**: accessibility audit, themes, UI scale, shortcut editor, installer, auto-update | Everything works mouse-only and keyboard-only |
+| 9 | **Polish**: accessibility audit, themes, UI scale, shortcut editor, installer, auto-update | Everything works mouse-only and keyboard-only ✅ |
 | 10 | **Wikilink autocomplete** in notes, from the vault | Typing `[[conc` in a note suggests `concept` from the vault |
 
 Phases 7 and 8 are put off (decided after phase 6): phase 9 comes next, and
