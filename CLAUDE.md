@@ -278,7 +278,8 @@ holding focus.
   anywhere inside it and puts focus back where it was. Dialog headers are
   `div`s (a `header` would be a second banner landmark).
 - *Launch and updates*: `launch.rs` takes PDF paths from the command line
-  (`take_launch_files`) and from a second launch (`open-files` event).
+  and from a second launch, queued in `LaunchFiles` until the window takes
+  them (`take_launch_files`; the `open-files` event says more have come).
   The installer's "Open with" registration is `src-tauri/windows/hooks.nsh`.
   Updates: tauri-plugin-updater (`checkForUpdate` in platform,
   `app/useUpdates.ts`); `saveEverything` runs before installing.

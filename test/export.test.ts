@@ -191,10 +191,13 @@ describe.skipIf(!existsSync(LIBRARY))("the user's literature notes (read only)",
       const note = readFileSync(`${LIBRARY}/${name}`, "utf8");
       const merged = mergeIntoNote(note, "> [!quote] x\n\n^hl-aaaaaa", s).text;
       const region = findRegion(merged)!;
-      // Without the section (and the blank lines put around it) it's the note as it was.
+      // Without the section (and the blank lines put around it) it's the note
+      // as it was, less any section an earlier export wrote.
       const squash = (t: string) => t.replace(/\s+/g, " ").trim();
+      const existing = findRegion(note);
+      const own = existing ? note.slice(0, existing.start) + note.slice(existing.end) : note;
       expect(squash(merged.slice(0, region.start) + merged.slice(region.end)), name).toBe(
-        squash(/^# Annotations\s*$/m.test(note) ? note : note + "\n# Annotations"),
+        squash(/^# Annotations\s*$/m.test(note) ? own : own + "\n# Annotations"),
       );
       if (/^# Annotations\s*$/m.test(note)) underHeading++;
     }

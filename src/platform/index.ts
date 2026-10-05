@@ -342,9 +342,15 @@ export async function onReaderLinks(handler: (url: string) => void): Promise<() 
 export async function onOpenFiles(handler: (paths: string[]) => void): Promise<() => void> {
   if (!isTauri()) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
-  const unlisten = await listen<string[]>("open-files", (e) => handler(e.payload));
-  const atStart = await invoke<string[]>("take_launch_files");
-  if (atStart.length > 0) handler(atStart);
+  // The files wait in Rust until taken, so none is lost while nothing listens.
+  const take = async () => {
+    const paths = await invoke<string[]>("take_launch_files");
+    if (paths.length > 0) handler(paths);
+  };
+  const unlisten = await listen("open-files", () => {
+    take().catch((e) => console.error("Could not take the files to open", e));
+  });
+  await take();
   return unlisten;
 }
 

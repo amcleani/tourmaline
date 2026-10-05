@@ -400,7 +400,7 @@ async fn read_attachment(app: AppHandle, id: String) -> Result<Response> {
     .await
 }
 
-/// The PDFs the app was started with (once: later calls get none).
+/// The PDFs the app was started with or handed since, not yet taken (each is given once).
 #[tauri::command]
 fn take_launch_files(files: State<'_, launch::LaunchFiles>) -> Vec<String> {
     std::mem::take(&mut *files.0.lock().unwrap_or_else(|e| e.into_inner()))
@@ -416,10 +416,15 @@ pub fn run() {
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
-            // "Open with Tourmaline" while it runs: the running window opens the file.
+            // "Open with Tourmaline" while it runs: the files wait with the
+            // launch files (the window may not be listening yet, e.g. while it
+            // restores the session) and the window is told to take them.
             let files = launch::pdf_args(&args, Path::new(&cwd));
             if !files.is_empty() {
-                let _ = app.emit("open-files", files);
+                if let Some(queue) = app.try_state::<launch::LaunchFiles>() {
+                    queue.0.lock().unwrap_or_else(|e| e.into_inner()).extend(files);
+                    let _ = app.emit("open-files", ());
+                }
             }
         }))
         // tourmaline:// links from notes. A link clicked while the app runs

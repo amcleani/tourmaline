@@ -144,7 +144,15 @@ export function ShortcutsDialog({ registry, overrides, onChange, onEditCategorie
               >
                 Use it here
               </button>{" "}
-              <button type="button" className="button small" onClick={() => setPending(null)}>
+              <button
+                type="button"
+                className="button small"
+                onClick={() => {
+                  setPending(null);
+                  // This button goes with the prompt: back to the row's Change.
+                  setTimeout(() => returnTo.current?.focus());
+                }}
+              >
                 Keep it there
               </button>
             </div>
@@ -152,9 +160,25 @@ export function ShortcutsDialog({ registry, overrides, onChange, onEditCategorie
         </td>
         <td className="row-actions">
           {isCategory(c.id) ? (
-            <button type="button" className="button small" onClick={onEditCategories} aria-describedby={labelId}>
-              Edit categories…
-            </button>
+            <>
+              <button type="button" className="button small" onClick={onEditCategories} aria-describedby={labelId}>
+                Edit categories…
+              </button>
+              {/* Its key was given to another command: take it back. */}
+              {isChanged && def && (
+                <button
+                  type="button"
+                  className="button small"
+                  aria-describedby={labelId}
+                  onClick={(e) => {
+                    returnTo.current = e.currentTarget.parentElement?.querySelector("button") ?? null;
+                    apply(c.id, def, `“${c.title}” is back to ${formatShortcut(def)}.`);
+                  }}
+                >
+                  Reset
+                </button>
+              )}
+            </>
           ) : (
             <>
               <button

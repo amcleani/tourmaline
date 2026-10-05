@@ -63,6 +63,13 @@ describe("ShortcutsDialog", () => {
     await flush();
     expect(screen.getByRole("alert").textContent).toContain("runs “Command palette”");
     expect(saved).toEqual([]);
+    // Keeping it there goes back to the row's Change button.
+    await user.click(screen.getByRole("button", { name: "Keep it there" }));
+    await flush();
+    expect(document.activeElement).toBe(buttonIn(row("Copy link"), "Change"));
+    await user.click(buttonIn(row("Copy link"), "Change"));
+    await user.keyboard("{Control>}k{/Control}");
+    await flush();
     await user.click(screen.getByRole("button", { name: "Use it here" }));
     expect(registry.get("annot.copyLink")?.shortcut).toBe("Ctrl+K");
     expect(registry.get("view.palette")?.shortcut).toBeUndefined();
@@ -79,5 +86,22 @@ describe("ShortcutsDialog", () => {
     await flush();
     expect(registry.get("view.palette")?.shortcut).toBe("Ctrl+K");
     expect(document.activeElement).toBe(buttonIn(row("Command palette"), "Change"));
+  });
+
+  it("gives a category back the key another command took", async () => {
+    const user = userEvent.setup();
+    const { registry } = setup();
+    registry.register({ id: "annot.category.c1", title: "Highlight as Concept", shortcut: "1", menu: { menu: "Annotate", group: 3, order: 0 }, run: vi.fn() });
+    await user.click(buttonIn(row("Copy link"), "Change"));
+    await user.keyboard("1");
+    await flush();
+    await user.click(screen.getByRole("button", { name: "Use it here" }));
+    await flush();
+    expect(registry.get("annot.category.c1")?.shortcut).toBeUndefined();
+    await user.click(buttonIn(row("Highlight as Concept"), "Reset"));
+    await flush();
+    expect(registry.get("annot.category.c1")?.shortcut).toBe("1");
+    expect(registry.get("annot.copyLink")?.shortcut).toBeUndefined();
+    expect(document.activeElement).toBe(buttonIn(row("Highlight as Concept"), "Edit categories…"));
   });
 });

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { CommandRegistry, IDLE_CONTEXT, isTypingTarget, type CommandContext, type ShortcutOverrides } from "./commands/registry";
-import { parseOverrides } from "./commands/keymap";
+import { parseOverrides, withoutOverrides } from "./commands/keymap";
 import { contextMenuEntries, contextMenuKind, type ContextMenuEntry, type ContextMenuKind } from "./commands/contextMenus";
 import { appCommands } from "./commands/appCommands";
 import { formatShortcut, isTextEditingShortcut } from "./commands/shortcuts";
 import { RegistryContext } from "./commands/useShortcut";
+import { isPageZoomKey } from "./platform/pageZoom";
 import { colourOf, type Annotation, type Category } from "./annotations/types";
 import { useAnnotations } from "./annotations/useAnnotations";
 import { usePdfImport } from "./annotations/usePdfImport";
@@ -1612,7 +1613,9 @@ export function App() {
   // Global keyboard shortcuts.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
+      // preventPageZoom cancels the webview's own zoom for the zoom keys; the
+      // app's zoom commands still take them.
+      if (e.defaultPrevented && !isPageZoomKey(e)) return;
       // A modal dialog owns the keyboard; its own handlers deal with keys.
       if (document.querySelector('[aria-modal="true"]')) return;
       // In text fields only shortcuts with Ctrl/Alt/Meta, or function keys,
@@ -2050,7 +2053,17 @@ export function App() {
         {dialog === "categories" && (
           <CategoriesDialog
             categories={categories}
-            onSave={async (list) => setCategories(await saveCategories(list))}
+            onSave={async (list) => {
+              const saved = await saveCategories(list);
+              // A category's key the user gave to another command is free
+              // again once the category gets a key of its own.
+              const rekeyed = saved
+                .filter((c) => categories.find((o) => o.id === c.id)?.hotkey !== c.hotkey)
+                .map((c) => `annot.category.${c.id}`);
+              const overrides = withoutOverrides(shortcutOverrides, rekeyed);
+              if (overrides !== shortcutOverrides) changeShortcuts(overrides);
+              setCategories(saved);
+            }}
             onClose={() => setDialog(null)}
           />
         )}

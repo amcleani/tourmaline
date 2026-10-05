@@ -20,7 +20,7 @@ pub fn pdf_args(args: &[String], cwd: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Files the app was started with, until the window asks for them.
+/// Files the app was started with or handed by a later launch, until the window takes them.
 #[derive(Default)]
 pub struct LaunchFiles(pub Mutex<Vec<String>>);
 

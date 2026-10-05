@@ -81,6 +81,14 @@ export function assignShortcut(registry: CommandRegistry, overrides: ShortcutOve
   return next;
 }
 
+/** Overrides without those of `ids` (the same object if none of them has one). */
+export function withoutOverrides(overrides: ShortcutOverrides, ids: readonly string[]): ShortcutOverrides {
+  if (!ids.some((id) => Object.hasOwn(overrides, id))) return overrides;
+  const next: Record<string, string | null> = { ...overrides };
+  for (const id of ids) delete next[id];
+  return next;
+}
+
 /** Reads the saved overrides, dropping anything that isn't a shortcut or null. */
 export function parseOverrides(json: string | null): ShortcutOverrides {
   if (!json) return {};

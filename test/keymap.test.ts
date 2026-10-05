@@ -1,5 +1,5 @@
 import { CommandRegistry, IDLE_CONTEXT, type Command } from "../src/commands/registry";
-import { assignShortcut, checkShortcut, parseOverrides } from "../src/commands/keymap";
+import { assignShortcut, checkShortcut, parseOverrides, withoutOverrides } from "../src/commands/keymap";
 
 const command = (id: string, shortcut?: string): Command => ({ id, title: id, shortcut, run: vi.fn() });
 
@@ -72,5 +72,22 @@ describe("user shortcuts", () => {
     expect(parseOverrides("not json")).toEqual({});
     expect(parseOverrides("[1]")).toEqual({});
     expect(parseOverrides(null)).toEqual({});
+  });
+
+  it("give a category back its key when Edit categories gives it a new one", () => {
+    const registry = setup();
+    const unregister = registry.register(command("annot.category.c1", "1"));
+    let overrides = assignShortcut(registry, {}, "annot.copyLink", "1");
+    registry.setOverrides(overrides);
+    expect(registry.get("annot.category.c1")?.shortcut).toBeUndefined();
+    // Edit categories: the category's key is now 2.
+    unregister();
+    registry.register(command("annot.category.c1", "2"));
+    overrides = withoutOverrides(overrides, ["annot.category.c1"]);
+    registry.setOverrides(overrides);
+    expect(registry.get("annot.category.c1")?.shortcut).toBe("2");
+    expect(registry.get("annot.copyLink")?.shortcut).toBe("1");
+    // Nothing to remove: the same object.
+    expect(withoutOverrides(overrides, ["file.open"])).toBe(overrides);
   });
 });

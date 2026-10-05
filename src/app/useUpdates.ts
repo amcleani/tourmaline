@@ -25,21 +25,28 @@ export function useUpdates(saveEverything: () => Promise<void>) {
   const [status, setStatus] = useState<UpdateStatus>({ kind: "idle" });
   const [auto, setAutoState] = useState(true);
   const busy = useRef(false);
+  /** Someone asked during the check under way, so its result is shown. */
+  const asked = useRef(false);
 
   const check = useCallback(async (manual: boolean) => {
+    if (manual) {
+      asked.current = true;
+      setStatus({ kind: "checking" });
+    }
+    // A request during the automatic check waits for that check's answer.
     if (busy.current) return;
     busy.current = true;
-    if (manual) setStatus({ kind: "checking" });
     try {
       const update = await checkForUpdate();
       void setState("updates.lastCheck", new Date().toISOString()).catch(() => {});
       if (update) setStatus({ kind: "available", update });
-      else if (manual) setStatus({ kind: "current" });
+      else if (asked.current) setStatus({ kind: "current" });
     } catch (e) {
       // An automatic check that fails (offline) says nothing.
-      if (manual) setStatus({ kind: "failed", message: String((e as Error)?.message ?? e) });
+      if (asked.current) setStatus({ kind: "failed", message: String((e as Error)?.message ?? e) });
     } finally {
       busy.current = false;
+      asked.current = false;
     }
   }, []);
 
