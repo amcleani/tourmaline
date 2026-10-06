@@ -25,6 +25,8 @@ pub struct VaultSettings {
     pub attachment_folder: Option<String>,
     /// Obsidian's "Strict line breaks": a single newline doesn't break the line.
     pub strict_line_breaks: bool,
+    /// Obsidian's "New link format": "shortest", "relative" or "absolute".
+    pub new_link_format: String,
 }
 
 /// The Citations plugin's settings, with its defaults for anything unset.
@@ -226,6 +228,12 @@ pub fn vault_settings(vault: &Path) -> Result<VaultSettings> {
             .map(|s| s.trim_matches('/').to_owned())
             .filter(|s| !s.is_empty()),
         strict_line_breaks: app.get("strictLineBreaks").and_then(Value::as_bool).unwrap_or(false),
+        new_link_format: app
+            .get("newLinkFormat")
+            .and_then(Value::as_str)
+            .filter(|f| matches!(*f, "shortest" | "relative" | "absolute"))
+            .unwrap_or("shortest")
+            .to_owned(),
     })
 }
 
@@ -482,7 +490,7 @@ mod tests {
         );
         fs::write(
             dir.path().join(".obsidian/app.json"),
-            r#"{"attachmentFolderPath":"Obsidian/Attatchments","strictLineBreaks":true}"#,
+            r#"{"attachmentFolderPath":"Obsidian/Attatchments","strictLineBreaks":true,"newLinkFormat":"relative"}"#,
         )
         .unwrap();
         let s = vault_settings(dir.path()).unwrap();
@@ -494,6 +502,7 @@ mod tests {
         assert_eq!(c.bibliography.as_deref().map(PathBuf::from), Some(dir.path().join("Library/database.bib")));
         assert_eq!(s.attachment_folder.as_deref(), Some("Obsidian/Attatchments"));
         assert!(s.strict_line_breaks);
+        assert_eq!(s.new_link_format, "relative");
     }
 
     #[test]
@@ -506,6 +515,7 @@ mod tests {
         assert_eq!(s.citations.note_folder, "Reading notes");
         assert_eq!(s.attachment_folder, None);
         assert!(!s.strict_line_breaks);
+        assert_eq!(s.new_link_format, "shortest");
     }
 
     #[test]

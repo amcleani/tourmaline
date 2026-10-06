@@ -6,6 +6,7 @@
 
 import MarkdownIt from "markdown-it";
 import { mathAt } from "../math/delimiters";
+import { parseWikilink, wikilinkLength, type Wikilink } from "./wikilinks";
 
 export interface NoteMath {
   tex: string;
@@ -52,6 +53,28 @@ md.inline.ruler.after("escape", "math", (state, silent) => {
   state.pos = span.to;
   return true;
 });
+
+// Wikilinks, before markdown links (and images, for `![[…]]`); code spans
+// and formulas come first, so `[[` inside them stays text.
+md.inline.ruler.before("link", "wikilink", (state, silent) => {
+  const length = wikilinkLength(state.src, state.pos);
+  if (!length) return false;
+  if (!silent) {
+    const embed = state.src.charCodeAt(state.pos) === 0x21;
+    const inner = state.src.slice(state.pos + (embed ? 3 : 2), state.pos + length - 2);
+    state.push("wikilink", "", 0).meta = { ...parseWikilink(inner, embed) };
+  }
+  state.pos += length;
+  return true;
+});
+
+md.renderer.rules.wikilink = (tokens, idx) => {
+  const link = tokens[idx].meta as unknown as Wikilink;
+  const sub = link.subpath?.replace(/^\^/, "");
+  const shown = link.alias ?? ([link.note, sub].filter(Boolean).join(" > ") || "");
+  const target = link.note + (link.subpath ? `#${link.subpath}` : "");
+  return `<a href="#" class="wikilink" data-wikilink="${md.utils.escapeHtml(target)}" title="Open ${md.utils.escapeHtml(link.note || "this note")} in Obsidian">${md.utils.escapeHtml(shown)}</a>`;
+};
 
 md.renderer.rules.math = (tokens, idx, _options, env) => {
   const math = tokens[idx].meta as unknown as NoteMath;

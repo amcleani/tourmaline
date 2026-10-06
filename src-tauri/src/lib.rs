@@ -7,6 +7,7 @@ mod library;
 mod pdf_annotations;
 mod writeback;
 mod vault;
+mod vault_index;
 
 use std::path::{Path, PathBuf};
 
@@ -159,6 +160,12 @@ async fn find_block_links(
     except: String,
 ) -> Result<Vec<vault::BlockLink>> {
     blocking(app, move |_, _| vault::find_block_links(&vault, &block_ids, &except)).await
+}
+
+/// The vault's notes, aliases, headings, block IDs and unresolved link names, for `[[` autocomplete.
+#[tauri::command]
+async fn vault_index(app: AppHandle, vault: PathBuf) -> Result<vault_index::VaultIndex> {
+    blocking(app, move |app, _| vault_index::index_vault(&vault, &app.state::<vault_index::IndexCache>())).await
 }
 
 /// Reads the JabRef bibliography (never written).
@@ -461,6 +468,7 @@ pub fn run() {
             let cwd = std::env::current_dir().unwrap_or_default();
             let files = launch::pdf_args(&std::env::args().collect::<Vec<_>>(), &cwd);
             app.manage(launch::LaunchFiles(std::sync::Mutex::new(files)));
+            app.manage(vault_index::IndexCache::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -495,6 +503,7 @@ pub fn run() {
             write_note,
             export_image,
             find_block_links,
+            vault_index,
             read_bibliography,
             bibliography_modified,
             link_citekey,

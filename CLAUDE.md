@@ -174,6 +174,22 @@ packages where the TeX input can't see them). `\` autocomplete
 (`math/completions.ts`) lists the preamble's macros (`preamble.ts`) with tab
 stops, then MathJax's own names.
 
+**Wikilinks in notes.** `[[` in a note suggests the vault's notes
+(`src/notes/wikilinks.ts`): `vault_index` (`vault_index.rs`, read only)
+lists every `.md` outside hidden folders with its frontmatter aliases,
+headings and block IDs, and the link targets no note matches (offered after
+the notes as "not created yet"); notes are parsed again only when their
+size or mtime changes (`IndexCache`). `useVaultIndex` reads it when the
+vault is chosen and on window focus into a module-level context
+(`setWikilinkContext`, which App also gives the vault name, Obsidian's
+`newLinkFormat` from `app.json`, and the paper's export note as the
+`from` of relative links). `[[note#` lists headings, `[[note#^` block IDs;
+choosing one writes the link and its `]]`. Wikilinks are a node of both
+note parsers (`wikilinkSyntax`, and a markdown-it rule in
+`notes/markdown.ts`, checked against each other in `test/wikilinks.test.ts`),
+so nothing is suggested inside code or formulas; `NoteView` renders them as
+links that open the note in Obsidian (the heading isn't part of the URL).
+
 **Vault and bibliography.** `src/vault/`: `useVault` reads the Citations
 plugin settings (`vault_settings` in `vault.rs`) and the JabRef `.bib`
 (`read_bibliography`, re-read on focus when its mtime changes). `bibtex.ts`

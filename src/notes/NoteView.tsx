@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { mathGeneration, onMathChange, renderMath } from "../math/engine";
+import { openInObsidian } from "../platform";
 import { lineBreakSetting, renderNote } from "./markdown";
+import { parseWikilink, wikilinkUrl } from "./wikilinks";
 
 function blockLinks(e: React.MouseEvent) {
   if ((e.target as HTMLElement).closest("a")) e.preventDefault();
+}
+
+/** A wikilink opens its note in Obsidian (Enter on a focused link clicks it too). */
+function followLinks(e: React.MouseEvent) {
+  blockLinks(e);
+  const target = (e.target as HTMLElement).closest<HTMLElement>("a.wikilink")?.dataset.wikilink;
+  if (target === undefined) return;
+  const url = wikilinkUrl(parseWikilink(target));
+  if (url) openInObsidian(url).catch((err) => console.error("Could not open the note in Obsidian", err));
 }
 
 /** Re-renders when the math settings (preamble, font) change. */
@@ -40,7 +51,7 @@ export function NoteView({ text, className }: { text: string; className?: string
       className={`note-view${className ? ` ${className}` : ""}`}
       dangerouslySetInnerHTML={{ __html: rendered.html }}
       // Links would navigate the app's own window away (middle-click: open a new one).
-      onClick={blockLinks}
+      onClick={followLinks}
       onAuxClick={blockLinks}
     />
   );

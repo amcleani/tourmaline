@@ -13,6 +13,7 @@ import type {
 } from "../annotations/types";
 import type { VaultMathSettings } from "../math/settings";
 import type { VaultSettings } from "../vault/notes";
+import type { VaultIndex } from "../notes/wikilinks";
 import type { WriteAnnotation } from "../annotations/writeback";
 import { sha256Hex } from "../util/hash";
 import { MemoryLibrary } from "./memoryLibrary";
@@ -247,6 +248,12 @@ export async function readMathSettings(vault: string): Promise<VaultMathSettings
 export async function readVaultSettings(vault: string): Promise<VaultSettings | null> {
   if (!isTauri()) return null;
   return invoke<VaultSettings>("vault_settings", { vault });
+}
+
+/** The vault's notes for `[[` autocomplete (read only; re-reads only notes that changed). */
+export async function readVaultIndex(vault: string): Promise<VaultIndex | null> {
+  if (!isTauri()) return null;
+  return invoke<VaultIndex>("vault_index", { vault });
 }
 
 /** Whether a file exists at a path relative to the vault. */

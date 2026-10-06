@@ -29,6 +29,7 @@ function browserSettings(): VaultSettings | null {
     },
     attachmentFolder: null,
     strictLineBreaks: false,
+    newLinkFormat: "shortest",
   };
 }
 

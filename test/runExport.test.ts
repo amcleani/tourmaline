@@ -40,6 +40,7 @@ const vaultSettings: VaultSettings = {
   },
   attachmentFolder: "Obsidian/Attatchments",
   strictLineBreaks: false,
+  newLinkFormat: "shortest",
 };
 
 const highlight = (n: number, extra: Partial<Annotation> = {}): Annotation => ({

@@ -66,7 +66,9 @@ import { useLinkPreview } from "./nav/useLinkPreview";
 import { useReferences, type Spot } from "./nav/useReferences";
 import { citationVariables } from "./vault/bibliography";
 import { parseReaderLink, readerLink } from "./vault/links";
-import { DEFAULT_EXPORT_SETTINGS, NoteFormatError, parseExportSettings, type ExportSettings, type SectionInput } from "./vault/export";
+import { DEFAULT_EXPORT_SETTINGS, NoteFormatError, exportNotePath, parseExportSettings, type ExportSettings, type SectionInput } from "./vault/export";
+import { useVaultIndex } from "./vault/useVaultIndex";
+import { setWikilinkContext } from "./notes/wikilinks";
 import { literatureNotePath, obsidianUrl, renderHighlight } from "./vault/notes";
 import { runExport, type ExportQuestion } from "./vault/runExport";
 import { useVault } from "./vault/useVault";
@@ -882,6 +884,19 @@ export function App() {
       .then((json) => setExportSettings(parseExportSettings(json)))
       .catch((e) => console.error("Could not load the export settings", e));
   }, []);
+
+  // `[[` in notes: the vault's notes, and the note the text will end up in
+  // (for relative links), written as the vault's "New link format" asks.
+  useVaultIndex(vault);
+  const linkFromCitekey = activeTab?.citekey ?? null;
+  useEffect(() => {
+    let from: string | null = null;
+    if (vaultSettings && linkFromCitekey) {
+      const entry = bibliography?.get(linkFromCitekey);
+      from = exportNotePath(vaultSettings.citations, exportSettings, entry ? citationVariables(entry) : { citekey: linkFromCitekey });
+    }
+    setWikilinkContext({ vaultName: vaultSettings?.name ?? null, format: vaultSettings?.newLinkFormat ?? "shortest", from });
+  }, [vaultSettings, bibliography, exportSettings, linkFromCitekey]);
 
   /** A question asked during an export, answered through `resolve`. */
   const [question, setQuestion] = useState<{ q: ExportQuestion; resolve: (yes: boolean) => void } | null>(null);

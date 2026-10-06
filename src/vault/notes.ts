@@ -21,6 +21,8 @@ export interface VaultSettings {
   };
   attachmentFolder: string | null;
   strictLineBreaks: boolean;
+  /** Obsidian's "New link format". */
+  newLinkFormat: "shortest" | "relative" | "absolute";
 }
 
 /**

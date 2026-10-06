@@ -161,9 +161,9 @@ vault's `.md` files (skipping `.obsidian` and hidden folders) with their
 aliases and headings, cached and re-read when the window regains focus.
 Wikilinks are a syntax node of both note parsers (like math), so nothing is
 suggested inside code or formulas; rendered notes show them as links that
-open the note in Obsidian. To decide when starting: also suggest link
-targets that don't exist yet (as Obsidian does), and whether `#heading` /
-`#^block` suggestions are in the first version.
+open the note in Obsidian. Also suggested: names other notes link to that
+don't exist yet (after the existing notes, marked as not created yet), and
+after `[[note#` that note's headings, after `[[note#^` its block IDs.
 
 Math matches the vault's Obsidian: its built-in MathJax 3 unless the
 latest-mathjax plugin is enabled (then its font and packages), plus the
