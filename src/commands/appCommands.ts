@@ -50,6 +50,7 @@ export interface AppActions {
   cancel: () => void;
   undo: () => void;
   copyText: () => Promise<void>;
+  openLinkedNote: () => void;
   redo: () => void;
   toggleAnnotations: () => void;
   highlight: () => void;
@@ -555,6 +556,14 @@ export function appCommands(a: AppActions): Command[] {
       menu: { menu: "Annotate", group: 2, order: 3 },
       when: annotationSelected,
       run: a.copyLink,
+    },
+    {
+      id: "annot.openLinkedNote",
+      title: "Open linked note in Obsidian",
+      keywords: ["wikilink", "link", "note", "obsidian", "follow"],
+      menu: { menu: "Annotate", group: 2, order: 4 },
+      when: (ctx) => ctx.annotationHasLinks,
+      run: a.openLinkedNote,
     },
     {
       id: "annot.categories",

@@ -65,4 +65,15 @@ describe("ContextMenu", () => {
     await user.click(opener);
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("hands an entry made for one menu to onRun instead of the registry", async () => {
+    const user = userEvent.setup();
+    const registry = new CommandRegistry(() => IDLE_CONTEXT);
+    const onRun = vi.fn();
+    const entries: Command[] = [{ id: "linked-note-0", title: "concept", run: vi.fn() }];
+    render(<ContextMenu registry={registry} entries={entries} at={{ x: 0, y: 0 }} label="Linked notes" onClose={vi.fn()} onRun={onRun} />);
+    await user.keyboard("{Enter}");
+    await flush();
+    expect(onRun).toHaveBeenCalledWith(entries[0]);
+  });
 });

@@ -13,6 +13,8 @@ function followLinks(e: React.MouseEvent) {
   blockLinks(e);
   const target = (e.target as HTMLElement).closest<HTMLElement>("a.wikilink")?.dataset.wikilink;
   if (target === undefined) return;
+  // Only the link: not also whatever holds the note (an annotation in the list).
+  e.stopPropagation();
   const url = wikilinkUrl(parseWikilink(target));
   if (url) openInObsidian(url).catch((err) => console.error("Could not open the note in Obsidian", err));
 }
@@ -23,12 +25,20 @@ export function useMathGeneration(): number {
 }
 
 // A note rendered as Obsidian's reading view shows it: markdown with MathJax.
-export function NoteView({ text, className }: { text: string; className?: string }) {
+// In a list whose items are chosen with the arrow keys (`inList`), links
+// aren't Tab stops of their own: a click still follows one, and the
+// keyboard uses Annotate › Open linked note.
+export function NoteView({ text, className, inList = false }: { text: string; className?: string; inList?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const strict = useSyncExternalStore(lineBreakSetting.subscribe, lineBreakSetting.strict);
   // `strict` changes how the same text renders.
   const rendered = useMemo(() => renderNote(text), [text, strict]);
   const generation = useMathGeneration();
+
+  useEffect(() => {
+    if (!inList) return;
+    for (const a of ref.current?.querySelectorAll("a.wikilink") ?? []) a.removeAttribute("href");
+  }, [rendered, inList]);
 
   useEffect(() => {
     let cancelled = false;

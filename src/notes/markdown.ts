@@ -86,6 +86,19 @@ md.renderer.rules.math = (tokens, idx, _options, env) => {
   )}</span>`;
 };
 
+/** The wikilinks in a note, in order (as the reading view finds them: not in code or formulas). */
+export function noteWikilinks(text: string): Wikilink[] {
+  const links: Wikilink[] = [];
+  const walk = (tokens: ReturnType<typeof md.parse>) => {
+    for (const t of tokens) {
+      if (t.type === "wikilink") links.push(t.meta as unknown as Wikilink);
+      if (t.children) walk(t.children);
+    }
+  };
+  walk(md.parse(text, { math: [] }));
+  return links;
+}
+
 export interface RenderedNote {
   html: string;
   /** The formulas, indexed by the placeholders' `data-math`. */

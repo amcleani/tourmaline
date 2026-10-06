@@ -189,6 +189,10 @@ note parsers (`wikilinkSyntax`, and a markdown-it rule in
 `notes/markdown.ts`, checked against each other in `test/wikilinks.test.ts`),
 so nothing is suggested inside code or formulas; `NoteView` renders them as
 links that open the note in Obsidian (the heading isn't part of the URL).
+In the annotations list (`inList`) they lose `href`, so they aren't Tab
+stops inside the listbox's options and a click doesn't also select the
+item; the keyboard uses Annotate › Open linked note (`noteWikilinks`; a
+menu of them when there are several, via `ContextMenu`'s `onRun`).
 
 **Vault and bibliography.** `src/vault/`: `useVault` reads the Citations
 plugin settings (`vault_settings` in `vault.rs`) and the JabRef `.bib`

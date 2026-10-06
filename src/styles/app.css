@@ -745,7 +745,7 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .note-view ul, .note-view ol { padding-left: 1.4em; }
 .note-view blockquote { padding-left: 0.6em; border-left: 3px solid var(--border); }
 .note-view code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; }
-.note-view a.wikilink { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.note-view a.wikilink { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .note-view a.wikilink:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
 .note-math.display { display: block; text-align: center; margin: 0.3em 0; overflow-x: auto; overflow-y: hidden; }
 .popover-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }

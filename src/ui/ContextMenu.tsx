@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ContextMenuEntry } from "../commands/contextMenus";
-import type { CommandRegistry } from "../commands/registry";
+import type { Command, CommandRegistry } from "../commands/registry";
 import { formatShortcut, toAriaShortcut } from "../commands/shortcuts";
 
 interface Props {
@@ -10,13 +10,15 @@ interface Props {
   at: { x: number; y: number };
   label: string;
   onClose: () => void;
+  /** Runs a chosen entry instead of executing it as a registry command (entries made for this menu). */
+  onRun?: (entry: Command) => void;
 }
 
 // A right-click menu (ARIA menu): focus starts on the first item, Up/Down/
 // Home/End move, Enter or Space runs one, Escape or Tab closes it. It closes
 // on a click elsewhere, scrolling or the window losing focus; focus goes
 // back where it was.
-export function ContextMenu({ registry, entries, at, label, onClose }: Props) {
+export function ContextMenu({ registry, entries, at, label, onClose, onRun }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
   const returnTo = useRef<HTMLElement | null>(null);
@@ -49,10 +51,10 @@ export function ContextMenu({ registry, entries, at, label, onClose }: Props) {
     };
   }, [onClose]);
 
-  const run = (id: string) => {
+  const run = (entry: Command) => {
     onClose();
     // After the menu has gone and focus is back on the document.
-    setTimeout(() => registry.execute(id, "menu"));
+    setTimeout(() => (onRun ? onRun(entry) : registry.execute(entry.id, "menu")));
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -109,7 +111,7 @@ export function ContextMenu({ registry, entries, at, label, onClose }: Props) {
             className="context-item"
             data-title={entry.title}
             aria-keyshortcuts={entry.shortcut ? toAriaShortcut(entry.shortcut) : undefined}
-            onClick={() => run(entry.id)}
+            onClick={() => run(entry)}
           >
             <span>{entry.title}</span>
             {entry.shortcut && <kbd aria-hidden="true">{formatShortcut(entry.shortcut)}</kbd>}

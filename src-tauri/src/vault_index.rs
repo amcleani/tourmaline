@@ -71,6 +71,41 @@ fn unquote(s: &str) -> String {
     if quoted { s[1..s.len() - 1].to_owned() } else { s.to_owned() }
 }
 
+/// `a, "b, c", 'd'` → the items, splitting only on commas outside quotes.
+fn split_list(inner: &str) -> Vec<&str> {
+    let mut items = Vec::new();
+    let mut quote: Option<char> = None;
+    let mut start = 0;
+    for (i, c) in inner.char_indices() {
+        match (quote, c) {
+            (None, '"' | '\'') => quote = Some(c),
+            (Some(q), _) if c == q => quote = None,
+            (None, ',') => {
+                items.push(&inner[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    items.push(&inner[start..]);
+    items
+}
+
+/// `a/b/../c` → `a/c`; None if it climbs out of the vault.
+fn normalise(path: &str) -> Option<String> {
+    let mut out: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                out.pop()?;
+            }
+            _ => out.push(part),
+        }
+    }
+    Some(out.join("/"))
+}
+
 /// The `aliases` (or `alias`) of a note's frontmatter: `[a, "b"]`, a single
 /// name, or a list of `- a` lines.
 fn frontmatter_aliases(lines: &[&str]) -> Vec<String> {
@@ -88,7 +123,7 @@ fn frontmatter_aliases(lines: &[&str]) -> Vec<String> {
         }
         let value = value.trim();
         if let Some(inner) = value.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
-            out.extend(inner.split(',').map(unquote));
+            out.extend(split_list(inner).into_iter().map(unquote));
         } else if !value.is_empty() {
             out.push(unquote(value));
         } else {
@@ -298,17 +333,25 @@ pub fn index_vault(vault: &Path, cache: &IndexCache) -> Result<VaultIndex> {
         known.insert(stem);
     }
     let mut counts: HashMap<String, (String, u32)> = HashMap::new();
-    for (_, _, p) in parsed.values() {
+    for (path, (_, _, p)) in &parsed {
         for target in &p.links {
             if !names_a_note(target) {
                 continue;
             }
-            let target = target.strip_suffix(".md").unwrap_or(target).trim_start_matches('/');
+            let target = target.strip_suffix(".md").unwrap_or(target);
+            // `./x` and `../x` (Obsidian's relative link format) are from the linking note's folder.
+            let target = if target.starts_with("./") || target.starts_with("../") {
+                let folder = path.rsplit_once('/').map_or("", |(f, _)| f);
+                let Some(t) = normalise(&format!("{folder}/{target}")) else { continue };
+                t
+            } else {
+                target.trim_start_matches('/').to_owned()
+            };
             let key = target.to_lowercase();
             if key.is_empty() || known.contains(&key) {
                 continue;
             }
-            counts.entry(key).or_insert_with(|| (target.to_owned(), 0)).1 += 1;
+            counts.entry(key).or_insert_with(|| (target, 0)).1 += 1;
         }
     }
     let mut unresolved: Vec<Unresolved> = counts.into_values().map(|(name, count)| Unresolved { name, count }).collect();
@@ -341,6 +384,9 @@ mod tests {
         assert_eq!(p.aliases, vec!["quantifier generalism", "qg"]);
         assert_eq!(parse_note("---\nalias: solo\n---\n").aliases, vec!["solo"]);
         assert!(parse_note("---\naliases: []\n---\n").aliases.is_empty());
+        // Commas inside quotes belong to the alias.
+        let p = parse_note("---\naliases: [\"Lewis, David\", 'K, L', plain]\n---\n");
+        assert_eq!(p.aliases, vec!["Lewis, David", "K, L", "plain"]);
         assert!(parse_note("---\naliases: \ncreated: 1\n---\n").aliases.is_empty());
         // Not frontmatter unless it opens the note.
         assert!(parse_note("text\n---\naliases: [x]\n---\n").aliases.is_empty());
@@ -384,20 +430,29 @@ A `[[code]]` span and [[Folder/Deep note]].
         fs::write(v.join("Concepts/concept.md"), "---\naliases: [idea]\n---\n# Def\n").unwrap();
         fs::write(v.join("index.md"), "[[concept]] [[Concepts/Concept]] [[missing]] [[Missing#x]] [[pic.png]] [[later.md]]").unwrap();
         fs::write(v.join(".trash/old.md"), "[[ghost]]").unwrap();
+        // Relative links (Obsidian's "Relative path to file"), from the linking note's folder.
+        fs::write(v.join("Concepts/rel.md"), "[[./concept]] [[../index]] [[../Concepts/gone]] [[../../out]]").unwrap();
         let cache = IndexCache::default();
         let index = index_vault(v, &cache).unwrap();
         let paths: Vec<&str> = index.notes.iter().map(|n| n.path.as_str()).collect();
-        assert_eq!(paths, vec!["Concepts/concept.md", "index.md"]);
+        assert_eq!(paths, vec!["Concepts/concept.md", "Concepts/rel.md", "index.md"]);
         assert_eq!(index.notes[0].aliases, vec!["idea"]);
         assert_eq!(
             index.unresolved,
-            vec![Unresolved { name: "missing".into(), count: 2 }, Unresolved { name: "later".into(), count: 1 }]
+            vec![
+                Unresolved { name: "missing".into(), count: 2 },
+                Unresolved { name: "Concepts/gone".into(), count: 1 },
+                Unresolved { name: "later".into(), count: 1 },
+            ]
         );
 
         // Creating the missing note resolves its links; unchanged notes come from the cache.
         fs::write(v.join("missing.md"), "").unwrap();
         let again = index_vault(v, &cache).unwrap();
-        assert_eq!(again.unresolved, vec![Unresolved { name: "later".into(), count: 1 }]);
+        assert_eq!(
+            again.unresolved,
+            vec![Unresolved { name: "Concepts/gone".into(), count: 1 }, Unresolved { name: "later".into(), count: 1 }]
+        );
         assert!(index_vault(&v.join("Concepts"), &cache).is_err());
     }
 

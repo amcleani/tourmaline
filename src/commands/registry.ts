@@ -16,6 +16,8 @@ export interface CommandContext {
   /** Text is selected in the document. */
   hasTextSelection: boolean;
   annotationSelected: boolean;
+  /** The selected annotation's note links to notes in the vault. */
+  annotationHasLinks: boolean;
   /** Dragging on a page draws an area to capture. */
   captureMode: boolean;
   canUndo: boolean;
@@ -45,6 +47,7 @@ export const IDLE_CONTEXT: CommandContext = {
   modalOpen: false,
   hasTextSelection: false,
   annotationSelected: false,
+  annotationHasLinks: false,
   captureMode: false,
   canUndo: false,
   canRedo: false,

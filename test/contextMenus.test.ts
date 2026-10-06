@@ -12,6 +12,7 @@ function setup() {
   add("annot.editNote", (c) => c.hasTextSelection || c.annotationSelected);
   add("edit.copyText", (c) => c.hasTextSelection);
   add("annot.delete", (c) => c.annotationSelected);
+  add("annot.openLinkedNote", (c) => c.annotationHasLinks);
   add("nav.back", (c) => c.canGoBack);
   add("nav.find");
   add("view.zoomIn");
@@ -41,6 +42,16 @@ describe("context menus", () => {
       "annot.editNote",
       "annot.category.a",
       "annot.category.b",
+      "-",
+      "annot.delete",
+    ]);
+    // A note with links: Open linked note joins the copy group.
+    expect(ids("annotation", { ...doc, annotationSelected: true, annotationHasLinks: true })).toEqual([
+      "annot.editNote",
+      "annot.category.a",
+      "annot.category.b",
+      "-",
+      "annot.openLinkedNote",
       "-",
       "annot.delete",
     ]);

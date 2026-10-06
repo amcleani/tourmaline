@@ -8,7 +8,7 @@ export type ContextMenuKind = "selection" | "annotation" | "page";
 
 const MENUS: Record<ContextMenuKind, readonly string[]> = {
   selection: ["annot.highlight", "annot.category.*", "-", "annot.editNote", "edit.copyText"],
-  annotation: ["annot.editNote", "annot.category.*", "-", "annot.copyMarkdown", "annot.copyLink", "-", "annot.delete"],
+  annotation: ["annot.editNote", "annot.category.*", "-", "annot.copyMarkdown", "annot.copyLink", "annot.openLinkedNote", "-", "annot.delete"],
   page: [
     "nav.back",
     "nav.forward",

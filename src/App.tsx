@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { CommandRegistry, IDLE_CONTEXT, isTypingTarget, type CommandContext, type ShortcutOverrides } from "./commands/registry";
+import { CommandRegistry, IDLE_CONTEXT, isTypingTarget, type Command, type CommandContext, type ShortcutOverrides } from "./commands/registry";
 import { parseOverrides, withoutOverrides } from "./commands/keymap";
 import { contextMenuEntries, contextMenuKind, type ContextMenuEntry, type ContextMenuKind } from "./commands/contextMenus";
 import { appCommands } from "./commands/appCommands";
@@ -68,7 +68,8 @@ import { citationVariables } from "./vault/bibliography";
 import { parseReaderLink, readerLink } from "./vault/links";
 import { DEFAULT_EXPORT_SETTINGS, NoteFormatError, exportNotePath, parseExportSettings, type ExportSettings, type SectionInput } from "./vault/export";
 import { useVaultIndex } from "./vault/useVaultIndex";
-import { setWikilinkContext } from "./notes/wikilinks";
+import { setWikilinkContext, wikilinkUrl, type Wikilink } from "./notes/wikilinks";
+import { noteWikilinks } from "./notes/markdown";
 import { literatureNotePath, obsidianUrl, renderHighlight } from "./vault/notes";
 import { runExport, type ExportQuestion } from "./vault/runExport";
 import { useVault } from "./vault/useVault";
@@ -1259,6 +1260,7 @@ export function App() {
       modalOpen: dialog !== null || versionPending || question !== null,
       hasTextSelection: selectionEnd !== null,
       annotationSelected: selected !== null,
+      annotationHasLinks: vaultSettings !== null && !!selected?.note && noteWikilinks(selected.note).some((l) => !!l.note),
       captureMode,
       canUndo: notes.canUndo,
       canRedo: notes.canRedo,
@@ -1505,6 +1507,34 @@ export function App() {
       focusColumns: () => latest.current.setColumnsFor(!latest.current.detectColumns),
       copyMarkdown: () => latest.current.copyAnnotation("markdown"),
       copyLink: () => latest.current.copyAnnotation("link"),
+      openLinkedNote: () => {
+        const note = latest.current.selected?.note;
+        if (!note) return;
+        const seen = new Set<string>();
+        const links = noteWikilinks(note).filter((l) => {
+          const key = l.note.toLowerCase();
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        const open = (link: Wikilink) => {
+          const url = wikilinkUrl(link);
+          if (url) openInObsidian(url).catch((e) => reportError("Could not open the note in Obsidian", e));
+        };
+        if (links.length <= 1) {
+          if (links[0]) open(links[0]);
+          return;
+        }
+        // Several: a menu of them, by the selected highlight.
+        const viewer = document.querySelector<HTMLElement>(".document-area .viewer-scroll");
+        setContextMenu({
+          at: viewer ? keyboardMenuPoint(viewer) : { x: 80, y: 120 },
+          kind: "annotation",
+          label: "Linked notes",
+          entries: links.map((l, i) => ({ id: `linked-note-${i}`, title: l.alias ? `${l.alias} (${l.note})` : l.note, run: () => open(l) })),
+          onRun: (entry) => open(links[Number(entry.id.slice("linked-note-".length))]),
+        });
+      },
       copyText: async () => {
         const quote = viewerRef.current?.captureSelection()?.quote;
         if (!quote) return;
@@ -1598,7 +1628,14 @@ export function App() {
   // fire the same event at the focused element). Elsewhere the webview's own
   // menu (Reload, Save as...) is suppressed, except in text fields and to
   // copy selected text.
-  const [contextMenu, setContextMenu] = useState<{ at: { x: number; y: number }; kind: ContextMenuKind; entries: ContextMenuEntry[] } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    at: { x: number; y: number };
+    kind: ContextMenuKind;
+    entries: ContextMenuEntry[];
+    /** A menu made for one use (Open linked note): its name and what choosing an entry does. */
+    label?: string;
+    onRun?: (entry: Command) => void;
+  } | null>(null);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   useEffect(() => {
     const onContextMenu = (e: MouseEvent) => {
@@ -1797,8 +1834,9 @@ export function App() {
                 registry={registry}
                 entries={contextMenu.entries}
                 at={contextMenu.at}
-                label={contextMenu.kind === "selection" ? "Selected text" : contextMenu.kind === "annotation" ? "Annotation" : "Page"}
+                label={contextMenu.label ?? (contextMenu.kind === "selection" ? "Selected text" : contextMenu.kind === "annotation" ? "Annotation" : "Page")}
                 onClose={closeContextMenu}
+                onRun={contextMenu.onRun}
               />
             )}
             {activePdf && findOpen && (

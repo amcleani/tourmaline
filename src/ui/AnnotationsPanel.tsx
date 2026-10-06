@@ -171,7 +171,7 @@ export function AnnotationsPanel({
                 </div>
                 {a.kind === "area" && a.imagePath && <AttachmentImage id={a.id} />}
                 {a.quote && <p className="annotation-quote">{a.quote}</p>}
-                {a.note && <NoteView className="annotation-note" text={a.note} />}
+                {a.note && <NoteView className="annotation-note" text={a.note} inList />}
               </li>
             );
           })}
