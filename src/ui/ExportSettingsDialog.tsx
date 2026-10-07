@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { Annotation } from "../annotations/types";
+import type { Annotation, Category } from "../annotations/types";
 import {
   DEFAULT_EXPORT_SETTINGS,
+  DEFAULT_PRESET,
+  exportable,
   exportNotePath,
   REGION_BEGIN,
   REGION_END,
@@ -9,6 +11,7 @@ import {
   type ExportSettings,
   type SectionInput,
 } from "../vault/export";
+import { ExportPresetsEditor, presetProblem } from "./ExportPresetsEditor";
 import type { VaultSettings } from "../vault/notes";
 import { renderTemplate } from "../vault/templates";
 
@@ -18,6 +21,8 @@ interface Props {
   preview: SectionInput | null;
   /** The vault's Citations plugin settings, if a vault is chosen. */
   citations: VaultSettings["citations"] | null;
+  /** The categories (for filters and their own templates). */
+  categories: readonly Category[];
   onSave: (settings: ExportSettings) => void;
   onCancel: () => void;
 }
@@ -61,8 +66,12 @@ const VARIABLES =
 // Export › Export settings: where the highlights go in the vault, and the
 // Handlebars templates they're written with, previewed live on the open
 // paper. Nothing is saved until Save.
-export function ExportSettingsDialog({ settings, preview, citations, onSave, onCancel }: Props) {
+export function ExportSettingsDialog({ settings, preview, citations, categories, onSave, onCancel }: Props) {
   const [draft, setDraft] = useState<ExportSettings>(settings);
+  /** The preset being edited, and shown in the preview. */
+  const [presetId, setPresetId] = useState(settings.defaultPreset);
+  /** Whose highlight template is shown: "" for the shared one, else a category id. */
+  const [templateOf, setTemplateOf] = useState("");
   const [ownNote, setOwnNote] = useState(settings.noteTitle !== null || settings.noteFolder !== null || settings.noteTemplate !== null);
   const id = useId();
   const firstRef = useRef<HTMLInputElement>(null);
@@ -92,8 +101,30 @@ export function ExportSettingsDialog({ settings, preview, citations, onSave, onC
       return e instanceof Error ? e.message : String(e);
     }
   };
+  const preset = draft.presets.find((p) => p.id === presetId) ?? draft.presets[0] ?? DEFAULT_PRESET;
+  const categoryTemplate = templateOf ? draft.categoryTemplates[templateOf] : undefined;
+  const setCategoryTemplate = (text: string | null) => {
+    const next = { ...draft.categoryTemplates };
+    if (text === null) delete next[templateOf];
+    else next[templateOf] = text;
+    set({ categoryTemplates: next });
+  };
+  // A template is tried on every annotation (all of them use it here).
+  const tryHighlight = (template: string) =>
+    attempt(() => renderSection({ ...draft, highlightTemplate: template, categoryTemplates: {}, sectionTemplate: DEFAULT_EXPORT_SETTINGS.sectionTemplate }, input));
+  const categoryProblems = Object.entries(draft.categoryTemplates)
+    .map(([id, template]) => ({ id, problem: tryHighlight(template) }))
+    .filter((p) => p.problem);
   const problems = {
-    highlight: attempt(() => renderSection({ ...draft, sectionTemplate: DEFAULT_EXPORT_SETTINGS.sectionTemplate }, input)),
+    highlight: tryHighlight(draft.highlightTemplate),
+    category: categoryTemplate !== undefined ? tryHighlight(categoryTemplate) : null,
+    otherCategories: categoryProblems.some((p) => p.id !== templateOf)
+      ? `The template of ${categoryProblems
+          .filter((p) => p.id !== templateOf)
+          .map((p) => categories.find((c) => c.id === p.id)?.name ?? "a deleted category")
+          .join(", ")} has a problem.`
+      : null,
+    presets: draft.presets.map((p) => presetProblem(p, draft.presets)).find(Boolean) ?? null,
     section: attempt(() => renderSection({ ...draft, highlightTemplate: DEFAULT_EXPORT_SETTINGS.highlightTemplate }, input)),
     title: attempt(() => renderTemplate(draft.destination === "note" ? draft.separateTitle : (effective.noteTitle ?? "x"), input.entry)),
     note: ownNote ? attempt(() => renderTemplate(effective.noteTemplate ?? "", input.entry)) : null,
@@ -104,7 +135,9 @@ export function ExportSettingsDialog({ settings, preview, citations, onSave, onC
     ? null
     : {
         path: citations ? exportNotePath(citations, effective, input.entry) : null,
-        text: `${REGION_BEGIN}\n${renderSection(effective, input)}\n${REGION_END}`,
+        text: `${REGION_BEGIN}\n${renderSection(effective, input, preset)}\n${REGION_END}`,
+        count: exportable(input.annotations, preset.filter).length,
+        total: exportable(input.annotations).length,
       };
 
   const field = (name: string) => `${id}-${name}`;
@@ -259,22 +292,82 @@ export function ExportSettingsDialog({ settings, preview, citations, onSave, onC
                 {problems.title && <p className="field-error">Title: {problems.title}</p>}
               </fieldset>
 
-              {templateField("highlight", "Each highlight", "highlightTemplate", 12)}
+              <ExportPresetsEditor
+                presets={draft.presets}
+                defaultId={draft.defaultPreset}
+                selectedId={preset.id}
+                categories={categories}
+                onSelect={setPresetId}
+                onChange={(presets, defaultId) => set({ presets, defaultPreset: defaultId })}
+              />
+
+              <label className="field-label" htmlFor={field("template-of")}>
+                Highlight template for
+              </label>
+              <select id={field("template-of")} className="select" value={templateOf} onChange={(e) => setTemplateOf(e.target.value)}>
+                <option value="">Every category (shared)</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {draft.categoryTemplates[c.id] ? " (its own)" : ""}
+                  </option>
+                ))}
+              </select>
+              {templateOf === "" ? (
+                templateField("highlight", "Each highlight", "highlightTemplate", 12)
+              ) : (
+                <>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={categoryTemplate !== undefined}
+                      onChange={(e) => setCategoryTemplate(e.target.checked ? draft.highlightTemplate : null)}
+                    />
+                    A template of its own (otherwise the shared one)
+                  </label>
+                  {categoryTemplate !== undefined && (
+                    <>
+                      <textarea
+                        id={field("category-template")}
+                        className="text-input template-input"
+                        rows={12}
+                        spellCheck={false}
+                        aria-label={`Highlight template for ${categories.find((c) => c.id === templateOf)?.name ?? "the category"}`}
+                        value={categoryTemplate}
+                        aria-invalid={!!problems.category}
+                        aria-describedby={problems.category ? field("category-error") : undefined}
+                        onChange={(e) => setCategoryTemplate(e.target.value)}
+                      />
+                      {problems.category && (
+                        <p className="field-error" id={field("category-error")}>
+                          {problems.category}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+              {problems.otherCategories && <p className="field-error">{problems.otherCategories}</p>}
               {templateField("section", "All highlights ({{#each highlights}} … {{markdown}} …)", "sectionTemplate", 4)}
               <p className="muted small">Fields: {VARIABLES}</p>
             </div>
 
             <section aria-labelledby={field("preview")} className="export-preview">
               <h3 id={field("preview")}>
-                Preview{input === SAMPLE ? " (a made-up paper)" : ""}
+                Preview of “{preset.name.trim() || "(no name)"}”{input === SAMPLE ? " (a made-up paper)" : ""}
               </h3>
+              {output && output.count !== output.total && (
+                <p className="small">
+                  {output.count} of {output.total} annotations
+                </p>
+              )}
               {output?.path && (
                 <p className="small">
                   Into <code>{output.path}</code>
                 </p>
               )}
               <pre className="template-preview" tabIndex={0} aria-label="What is written into the note">
-                {output ? output.text : "Fix the template to see the preview."}
+                {output ? output.text : "Fix the problems marked to see the preview."}
               </pre>
             </section>
           </div>
@@ -284,6 +377,8 @@ export function ExportSettingsDialog({ settings, preview, citations, onSave, onC
               className="button"
               onClick={() => {
                 setDraft(DEFAULT_EXPORT_SETTINGS);
+                setPresetId(DEFAULT_EXPORT_SETTINGS.defaultPreset);
+                setTemplateOf("");
                 setOwnNote(false);
               }}
             >

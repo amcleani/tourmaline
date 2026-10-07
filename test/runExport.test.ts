@@ -24,7 +24,7 @@ vi.mock("../src/platform", () => ({
   setState: vi.fn(async (key: string, value: string) => void state.set(key, value)),
 }));
 
-import { DEFAULT_EXPORT_SETTINGS } from "../src/vault/export";
+import { DEFAULT_EXPORT_SETTINGS, DEFAULT_PRESET } from "../src/vault/export";
 import type { VaultSettings } from "../src/vault/notes";
 import { runExport, type ExportJob, type ExportQuestion } from "../src/vault/runExport";
 
@@ -70,6 +70,7 @@ const job = (annotations: Annotation[]): ExportJob => ({
   vault: "C:/vault",
   vaultSettings,
   settings: DEFAULT_EXPORT_SETTINGS,
+  preset: DEFAULT_PRESET,
   workId: "w",
   input: {
     annotations,
@@ -179,5 +180,17 @@ describe("runExport", () => {
     notes.set(PATH, { text: "%% tourmaline:end %%\n%% tourmaline:begin %%\n", version: 1 });
     await expect(run([highlight(1)])).rejects.toThrow(/unclear/);
     expect(notes.get(PATH)!.version).toBe(1);
+  });
+
+  it("writes only what the preset's filter lets through, and counts both", async () => {
+    const area = highlight(4, { kind: "area", quote: null, imagePath: "attachments/id-4.png" });
+    const comments = { ...DEFAULT_PRESET, id: "c", name: "Comments", filter: { ...DEFAULT_PRESET.filter, withNote: true } };
+    const result = await runExport({ ...job([highlight(1, { note: "mine" }), highlight(2), area]), preset: comments });
+    expect(result).toMatchObject({ status: "written", count: 1, total: 3 });
+    const text = notes.get(PATH)!.text;
+    expect(text).toContain("^hl-000001");
+    expect(text).not.toContain("^hl-000002");
+    // The area isn't written, so its image isn't copied.
+    expect(images).toEqual([]);
   });
 });

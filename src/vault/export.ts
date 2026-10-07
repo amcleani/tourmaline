@@ -8,6 +8,7 @@
 // text. Reading and writing files is App.tsx's (through platform/index.ts).
 
 import type { Annotation, Category } from "../annotations/types";
+import type { OutlineNode } from "../pdf/outline";
 import { DEFAULT_HIGHLIGHT_TEMPLATE, highlightVariables, literatureNotePath, type VaultSettings } from "./notes";
 import { renderTemplate } from "./templates";
 
@@ -22,6 +23,41 @@ export const DEFAULT_SECTION_TEMPLATE = `{{#each highlights}}
 export const DEFAULT_HEADING = "# Annotations";
 export const DEFAULT_SEPARATE_TITLE = "@{{citekey}} highlights";
 
+/** What a filter can choose by kind (ink isn't exported). */
+export type ExportKind = "highlight" | "area" | "note";
+export const EXPORT_KINDS: { value: ExportKind; label: string }[] = [
+  { value: "highlight", label: "Highlights" },
+  { value: "area", label: "Area captures" },
+  { value: "note", label: "Notes (without highlighted text)" },
+];
+
+/** Stands for annotations without a category in a filter's category list. */
+export const NO_CATEGORY = "none";
+
+/** Which annotations an export writes. */
+export interface ExportFilter {
+  /** Category ids (NO_CATEGORY for none); null for every category. */
+  categories: string[] | null;
+  /** Only annotations with a note written on them. */
+  withNote: boolean;
+  kinds: ExportKind[];
+  /** Annotations not found again in a new version of the PDF (exported last, without a page). */
+  includeUnplaced: boolean;
+}
+
+export type ExportGrouping = "none" | "category" | "section";
+
+/** A named way of exporting: which annotations, and how they're grouped. */
+export interface ExportPreset {
+  id: string;
+  name: string;
+  filter: ExportFilter;
+  groupBy: ExportGrouping;
+}
+
+export const EVERYTHING: ExportFilter = { categories: null, withNote: false, kinds: ["highlight", "area", "note"], includeUnplaced: true };
+export const DEFAULT_PRESET: ExportPreset = { id: "everything", name: "Everything", filter: EVERYTHING, groupBy: "none" };
+
 export interface ExportSettings {
   /** Under a heading in the literature note, or alone in a note of their own. */
   destination: "heading" | "note";
@@ -35,6 +71,11 @@ export interface ExportSettings {
   noteTitle: string | null;
   noteFolder: string | null;
   noteTemplate: string | null;
+  presets: ExportPreset[];
+  /** The preset Export to Obsidian (Ctrl+Shift+X) uses. */
+  defaultPreset: string;
+  /** Highlight templates of their own, by category id; the others use highlightTemplate. */
+  categoryTemplates: Record<string, string>;
 }
 
 export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
@@ -46,7 +87,52 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
   noteTitle: null,
   noteFolder: null,
   noteTemplate: null,
+  presets: [DEFAULT_PRESET],
+  defaultPreset: DEFAULT_PRESET.id,
+  categoryTemplates: {},
 };
+
+const GROUPINGS: ExportGrouping[] = ["none", "category", "section"];
+
+function parsePreset(value: unknown): ExportPreset | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const f = (v.filter && typeof v.filter === "object" ? v.filter : {}) as Record<string, unknown>;
+  if (typeof v.id !== "string" || !v.id || typeof v.name !== "string" || !v.name.trim()) return null;
+  const kinds = Array.isArray(f.kinds) ? EXPORT_KINDS.map((k) => k.value).filter((k) => (f.kinds as unknown[]).includes(k)) : EVERYTHING.kinds;
+  return {
+    id: v.id,
+    name: v.name.trim(),
+    filter: {
+      categories: Array.isArray(f.categories) ? f.categories.filter((c): c is string => typeof c === "string") : null,
+      withNote: f.withNote === true,
+      kinds,
+      includeUnplaced: f.includeUnplaced !== false,
+    },
+    groupBy: GROUPINGS.includes(v.groupBy as ExportGrouping) ? (v.groupBy as ExportGrouping) : "none",
+  };
+}
+
+function parsePresets(saved: Record<string, unknown>): Pick<ExportSettings, "presets" | "defaultPreset"> {
+  const ids = new Set<string>();
+  const presets: ExportPreset[] = [];
+  for (const value of Array.isArray(saved.presets) ? saved.presets : []) {
+    const preset = parsePreset(value);
+    if (!preset || ids.has(preset.id)) continue;
+    ids.add(preset.id);
+    presets.push(preset);
+  }
+  if (!presets.length) presets.push(DEFAULT_PRESET);
+  const chosen = typeof saved.defaultPreset === "string" && presets.some((p) => p.id === saved.defaultPreset) ? saved.defaultPreset : presets[0].id;
+  return { presets, defaultPreset: chosen };
+}
+
+function parseCategoryTemplates(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string" && e[1].trim() !== ""),
+  );
+}
 
 /** Saved settings, with defaults for anything missing or of the wrong type. */
 export function parseExportSettings(json: string | null): ExportSettings {
@@ -68,8 +154,18 @@ export function parseExportSettings(json: string | null): ExportSettings {
     noteTitle: text("noteTitle"),
     noteFolder: text("noteFolder"),
     noteTemplate: text("noteTemplate"),
+    ...parsePresets(saved),
+    categoryTemplates: parseCategoryTemplates(saved.categoryTemplates),
   };
 }
+
+/** The preset Export to Obsidian uses. */
+export const defaultPreset = (s: Pick<ExportSettings, "presets" | "defaultPreset">): ExportPreset =>
+  s.presets.find((p) => p.id === s.defaultPreset) ?? s.presets[0] ?? DEFAULT_PRESET;
+
+/** The highlight template for a category's annotations: its own, else the shared one. */
+export const highlightTemplateFor = (s: Pick<ExportSettings, "highlightTemplate"> & { categoryTemplates?: Record<string, string> }, categoryId: string | null) =>
+  (categoryId && s.categoryTemplates?.[categoryId]) || s.highlightTemplate;
 
 // ---- Where -------------------------------------------------------------------
 
@@ -120,22 +216,103 @@ export interface SectionInput {
   entry: Record<string, unknown>;
   /** The PDF's file name, for {{pdfLink}}. */
   fileName?: string;
+  /** The PDF's outline, for grouping by section. */
+  outline?: readonly OutlineNode[] | null;
 }
 
-/** The annotations that go into notes (ink waits for phase 7), in reading order; orphans last. */
-export function exportable(annotations: readonly Annotation[]): Annotation[] {
-  const where = (a: Annotation): [number, number] => {
-    const p = a.placement;
-    if (!p || p.status === "orphan") return [Infinity, 0];
-    const first = p.geometry.rects.filter((r) => r[0] === p.page);
-    // Top of the first rectangle on its start page (PDF y grows upward).
-    return [p.page, -Math.max(...first.map((r) => Math.max(r[2], r[4])), -Infinity)];
+const isPlaced = (a: Annotation) => !!a.placement && a.placement.status !== "orphan";
+
+/** Where an annotation starts: its page and the top of its first rectangle there (PDF y grows upward); unplaced: null. */
+function startOf(a: Annotation): { page: number; top: number } | null {
+  const p = a.placement;
+  if (!p || p.status === "orphan") return null;
+  const first = p.geometry.rects.filter((r) => r[0] === p.page);
+  return { page: p.page, top: Math.max(...first.map((r) => Math.max(r[2], r[4])), -Infinity) };
+}
+
+/** Whether an export with this filter writes an annotation. */
+export function passes(a: Annotation, f: ExportFilter): boolean {
+  if (a.kind === "ink" || !f.kinds.includes(a.kind)) return false;
+  if (f.withNote && !a.note.trim()) return false;
+  if (f.categories && !f.categories.includes(a.categoryId ?? NO_CATEGORY)) return false;
+  return f.includeUnplaced || isPlaced(a);
+}
+
+/** The annotations that go into notes (all but ink, or those a filter lets through), in reading order; unplaced last. */
+export function exportable(annotations: readonly Annotation[], filter: ExportFilter = EVERYTHING): Annotation[] {
+  const key = (a: Annotation): [number, number] => {
+    const at = startOf(a);
+    return at ? [at.page, -at.top] : [Infinity, 0];
   };
   return annotations
-    .filter((a) => a.kind !== "ink")
-    .map((a) => ({ a, at: where(a) }))
+    .filter((a) => passes(a, filter))
+    .map((a) => ({ a, at: key(a) }))
     .sort((x, y) => x.at[0] - y.at[0] || x.at[1] - y.at[1] || x.a.created - y.a.created)
     .map(({ a }) => a);
+}
+
+/** Outline entries in reading order, each with where it starts (no y: the top of its page). */
+function outlineMarks(outline: readonly OutlineNode[]): { title: string; page: number; top: number }[] {
+  const out: { title: string; page: number; top: number; order: number }[] = [];
+  const walk = (nodes: readonly OutlineNode[]) => {
+    for (const n of nodes) {
+      if (n.target) out.push({ title: n.title, page: n.target.page, top: n.target.y ?? Infinity, order: out.length });
+      walk(n.children);
+    }
+  };
+  walk(outline);
+  // Parents before children at the same place, so the deeper entry is the later one.
+  return out.sort((x, y) => x.page - y.page || y.top - x.top || x.order - y.order);
+}
+
+export const UNPLACED_GROUP = "Not found in this version of the PDF";
+const NO_CATEGORY_GROUP = "No category";
+
+/** The annotations (in reading order) split into titled groups, in order; one untitled group when not grouping. */
+export function groupAnnotations(
+  annotations: readonly Annotation[],
+  groupBy: ExportGrouping,
+  categories: readonly Category[],
+  outline: readonly OutlineNode[] | null | undefined,
+): { title: string | null; annotations: Annotation[] }[] {
+  const marks = groupBy === "section" && outline ? outlineMarks(outline) : [];
+  if (groupBy === "none" || (groupBy === "section" && marks.length === 0)) return [{ title: null, annotations: [...annotations] }];
+  const groups = new Map<string, Annotation[]>();
+  const add = (title: string, a: Annotation) => {
+    const list = groups.get(title);
+    if (list) list.push(a);
+    else groups.set(title, [a]);
+  };
+  if (groupBy === "category") {
+    const name = new Map(categories.map((c) => [c.id, c.name]));
+    // In the categories' own order, those without one last.
+    const order = [...categories.map((c) => c.name), NO_CATEGORY_GROUP];
+    for (const a of annotations) add((a.categoryId && name.get(a.categoryId)) || NO_CATEGORY_GROUP, a);
+    return [...groups.entries()]
+      .sort(([x], [y]) => order.indexOf(x) - order.indexOf(y))
+      .map(([title, list]) => ({ title, annotations: list }));
+  }
+  for (const a of annotations) {
+    const at = startOf(a);
+    if (!at) {
+      add(UNPLACED_GROUP, a);
+      continue;
+    }
+    let section: string | null = null;
+    for (const m of marks) {
+      if (m.page < at.page || (m.page === at.page && m.top >= at.top)) section = m.title;
+      else break;
+    }
+    add(section ?? `Before “${marks[0].title}”`, a);
+  }
+  // A Map keeps first appearance, which is reading order (unplaced last).
+  return [...groups.entries()].map(([title, list]) => ({ title, annotations: list }));
+}
+
+/** The level of group subheadings: one below the export heading (in a note of their own: level 2). */
+export function groupHeadingLevel(s: Pick<ExportSettings, "destination" | "heading">): number {
+  const level = s.destination === "heading" ? (/^(#{1,6})(?:\s|$)/.exec(s.heading.trim())?.[1].length ?? 1) : 1;
+  return Math.min(6, level + 1);
 }
 
 /**
@@ -143,21 +320,30 @@ export function exportable(annotations: readonly Annotation[]): Annotation[] {
  * rendered with the highlight template, then the lot with the section
  * template. Throws TemplateError if a template is broken.
  */
-export function renderSection(s: Pick<ExportSettings, "highlightTemplate" | "sectionTemplate">, input: SectionInput): string {
-  const highlights = exportable(input.annotations).map((a) => {
-    const placed = a.placement && a.placement.status !== "orphan";
+export function renderSection(
+  s: Pick<ExportSettings, "highlightTemplate" | "sectionTemplate"> & Partial<Pick<ExportSettings, "categoryTemplates" | "destination" | "heading">>,
+  input: SectionInput,
+  preset: Pick<ExportPreset, "filter" | "groupBy"> = DEFAULT_PRESET,
+): string {
+  const render = (a: Annotation) => {
     const vars = highlightVariables({
       annotation: a,
       category: input.categories.find((c) => c.id === a.categoryId),
-      pageLabel: placed ? input.pageLabel(a.placement!.page) : "?",
+      pageLabel: isPlaced(a) ? input.pageLabel(a.placement!.page) : "?",
       entry: input.entry,
       fileName: input.fileName,
     });
     if (a.kind === "area" && a.imagePath) vars.image = `![[${imageFileName(a)}]]`;
-    return { ...vars, markdown: renderTemplate(s.highlightTemplate, vars) };
+    return { ...vars, markdown: renderTemplate(highlightTemplateFor(s, a.categoryId), vars) };
+  };
+  const groups = groupAnnotations(exportable(input.annotations, preset.filter), preset.groupBy, input.categories, input.outline);
+  const hashes = "#".repeat(groupHeadingLevel({ destination: s.destination ?? "heading", heading: s.heading ?? DEFAULT_HEADING }));
+  const parts = groups.map((g) => {
+    const highlights = g.annotations.map(render);
+    const text = renderTemplate(s.sectionTemplate, { ...input.entry, highlights, count: highlights.length, group: g.title }).replace(/\s+$/, "");
+    return g.title === null ? text : `${hashes} ${g.title}\n\n${text.replace(/^\s+/, "")}`;
   });
-  const text = renderTemplate(s.sectionTemplate, { ...input.entry, highlights, count: highlights.length });
-  return text.replace(/\s+$/, "");
+  return parts.join("\n\n").replace(/\s+$/, "");
 }
 
 // ---- Merging into the note ------------------------------------------------------

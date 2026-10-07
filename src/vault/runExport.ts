@@ -19,6 +19,7 @@ import {
   NoteFormatError,
   noteSettings,
   renderSection,
+  type ExportPreset,
   type ExportSettings,
   type SectionInput,
 } from "./export";
@@ -35,6 +36,8 @@ export interface ExportJob {
   vault: string;
   vaultSettings: VaultSettings;
   settings: ExportSettings;
+  /** Which annotations, grouped how. */
+  preset: ExportPreset;
   workId: string;
   input: SectionInput;
   /** Resolves to whether to go on. */
@@ -47,6 +50,8 @@ export interface ExportOutcome {
   path: string;
   /** Annotations in the section. */
   count: number;
+  /** The paper's annotations that could be exported (before the preset's filter). */
+  total: number;
   /** Whether the note was created. */
   created: boolean;
 }
@@ -59,8 +64,9 @@ const sectionHash = async (body: string) => sha256Hex(new TextEncoder().encode(n
 export async function runExport(job: ExportJob): Promise<ExportOutcome> {
   const { vault, settings, input } = job;
   const path = exportNotePath(job.vaultSettings.citations, settings, input.entry);
-  const body = renderSection(settings, input);
-  const count = exportable(input.annotations).length;
+  const body = renderSection(settings, input, job.preset);
+  const written = exportable(input.annotations, job.preset.filter);
+  const count = written.length;
   const note = await readNote(vault, path);
   const newNote =
     note === null && settings.destination === "heading"
@@ -82,7 +88,13 @@ export async function runExport(job: ExportJob): Promise<ExportOutcome> {
     );
   }
   const remember = async () => setState(stateKey(job.workId, path), await sectionHash(body));
-  const outcome = (status: ExportOutcome["status"]): ExportOutcome => ({ status, path, count, created: note === null });
+  const outcome = (status: ExportOutcome["status"]): ExportOutcome => ({
+    status,
+    path,
+    count,
+    total: exportable(input.annotations).length,
+    created: note === null,
+  });
 
   if (merge.previous !== null) {
     if (normaliseSection(merge.previous) === normaliseSection(body)) {
@@ -105,7 +117,7 @@ export async function runExport(job: ExportJob): Promise<ExportOutcome> {
   }
 
   const folder = attachmentFolder(job.vaultSettings.attachmentFolder, path);
-  for (const a of exportable(input.annotations)) {
+  for (const a of written) {
     if (a.kind === "area" && a.imagePath) await exportImage(vault, a.id, folder, imageFileName(a));
   }
   await writeNote(vault, path, merge.text, note?.sha256 ?? null);

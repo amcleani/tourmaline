@@ -151,6 +151,32 @@ annotations (e.g. Okular); optional write-back via pdf-lib.
 `preamble.sty`; `\` command autocomplete. No LaTeX Suite snippets (the
 user doesn't want them).
 
+**Export improvements (11)**, decided 2026-10-07:
+- *Filters*: by category (including "no category"), only annotations with a
+  note, by kind (highlights, areas, notes), with or without those not found
+  again in a new version of the PDF. The section is still replaced whole, so
+  highlights a filter leaves out leave the note (asking first if any note
+  links to them).
+- *Presets*: named filters + grouping (templates stay shared). Export
+  (Ctrl+Shift+X) uses the default preset; each other preset is a command of
+  its own (Export › Export to Obsidian: <name>).
+- *Grouping*: none, by category (in category order), or by section of the
+  paper (the last outline entry before each annotation; a paper without an
+  outline isn't grouped). Groups get a subheading one level below the
+  export heading.
+- *A template per category*, used instead of the highlight template for
+  that category's annotations (export and Copy as Markdown).
+- *Status (11b)*: what each annotation looked like when last exported (per
+  block), so the sidebar marks new and changed ones and the toolbar counts
+  changes not yet exported.
+- *Preview (11b)*: shown before writing only when highlights would leave the
+  note; a command shows it on demand.
+- *Export selected (11b)*: multi-selection in the sidebar; exporting it adds
+  or updates only those in the section and leaves everything else there as
+  it is.
+- *Export all (11c)*: every paper whose annotations changed since its last
+  export, one after another, with the same questions as a single export.
+
 **Wikilink autocomplete (10)**: typing `[[` in a note suggests the vault's
 notes (fuzzy match on names and frontmatter `aliases`, the folder shown for
 names used twice); choosing one inserts the link as the vault's "new link
@@ -232,6 +258,9 @@ silently dropped).
 | 6 | **Smart navigation**: citation/figure/equation popups, back/forward, split view | Hovering "[12]" shows the reference ✅ |
 | 9 | **Polish**: accessibility audit, themes, UI scale, shortcut editor, installer, auto-update | Everything works mouse-only and keyboard-only ✅ |
 | 10 | **Wikilink autocomplete** in notes, from the vault | Typing `[[conc` in a note suggests `concept` from the vault ✅ |
+| 11a | **Export: what goes in**: filters, presets, grouping, a template per category | Exporting with a preset "Comments" (only annotations with a note, grouped by category) writes just those, under one subheading per category |
+| 11b | **Export: seeing and choosing**: status in the sidebar, preview of removals, export selected | The sidebar shows which highlights changed since the last export; exporting two selected highlights updates only those in the note |
+| 11c | **Export all papers with changes** | One command updates the literature notes of every paper whose annotations changed since its last export |
 
 Phases 7 (Ink) and 8 (Equation → LaTeX) were taken out of the plan for now
 (2026-10-07); the other phases keep their numbers. Set aside, in case they

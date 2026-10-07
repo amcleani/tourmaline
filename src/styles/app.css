@@ -841,6 +841,10 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .radio-label { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .appearance-dialog .field-label { display: block; margin-top: 16px; }
 .text-input.indented { margin: 0 0 6px 24px; width: calc(100% - 24px); }
+.preset-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.preset-row .field-label { margin: 0; }
+.preset-row .select { flex: 1; min-width: 10em; }
+div.indented { margin-left: 24px; }
 .template-label { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
 .template-input { font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 0.85rem; resize: vertical; }
 .export-preview { min-width: 0; }

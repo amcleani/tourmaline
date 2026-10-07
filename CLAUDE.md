@@ -249,7 +249,16 @@ wouldn't read back intact is refused before writing. The only
 vault writes are these commands in `vault.rs` (only into the chosen vault): `.md` notes and
 `tourmaline-hl-xxxxxx.png` images, at plain relative paths that stay inside
 the vault and out of hidden folders. Export settings (destination, heading,
-templates, note overrides) are app state `export.settings`. Try it on
+templates, note overrides, presets, per-category templates) are app state
+`export.settings`. A preset (`ExportPreset`: filter + grouping) decides
+which annotations `exportable(…, filter)` lets through and how
+`groupAnnotations` groups them (category order, or the last outline entry
+before each annotation; subheadings one level below the export heading);
+`renderSection` without a preset is the ungrouped, unfiltered section as
+before. Ctrl+Shift+X uses the default preset; with several, App registers
+`export.preset.<id>` commands. `highlightTemplateFor` picks a category's
+own template (export and Copy as Markdown). Presets are edited in
+`ExportPresetsEditor` inside the export settings dialog. Try it on
 `.dev-data/test-vault` (a copy of the vault's settings and notes), never on
 the real vault.
 

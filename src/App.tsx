@@ -66,7 +66,17 @@ import { useLinkPreview } from "./nav/useLinkPreview";
 import { useReferences, type Spot } from "./nav/useReferences";
 import { citationVariables } from "./vault/bibliography";
 import { parseReaderLink, readerLink } from "./vault/links";
-import { DEFAULT_EXPORT_SETTINGS, NoteFormatError, exportNotePath, parseExportSettings, type ExportSettings, type SectionInput } from "./vault/export";
+import {
+  DEFAULT_EXPORT_SETTINGS,
+  NoteFormatError,
+  defaultPreset,
+  exportNotePath,
+  highlightTemplateFor,
+  parseExportSettings,
+  type ExportPreset,
+  type ExportSettings,
+  type SectionInput,
+} from "./vault/export";
 import { useVaultIndex } from "./vault/useVaultIndex";
 import { setWikilinkContext, wikilinkUrl, type Wikilink } from "./notes/wikilinks";
 import { noteWikilinks } from "./notes/markdown";
@@ -800,7 +810,7 @@ export function App() {
         return;
       }
       const entry = tab?.citekey ? bibliography?.get(tab.citekey) : undefined;
-      const markdown = renderHighlight(exportSettings.highlightTemplate, {
+      const markdown = renderHighlight(highlightTemplateFor(exportSettings, a.categoryId), {
         annotation: a,
         category: categories.find((c) => c.id === a.categoryId),
         pageLabel: pageLabelOf(tab, a),
@@ -924,11 +934,14 @@ export function App() {
       pageLabel: (page) => tab.labels?.[page] ?? String(page + 1),
       entry: entry ? citationVariables(entry) : { citekey: tab.citekey ?? "" },
       fileName: tab.name,
+      // The outline is the open paper's (for grouping by section).
+      outline: tab.key === latest.current.activeTab?.key ? latest.current.outline : null,
     };
   };
 
   const exporting = useRef(false);
-  const exportToVault = async () => {
+  /** Exports the open paper's annotations with a preset (the default one unless given). */
+  const exportToVault = async (preset: ExportPreset = defaultPreset(exportSettings)) => {
     const tab = latest.current.activeTab;
     if (!tab?.citekey || !tab.workId || tab.pendingVersion || !vault || !vaultSettings || exporting.current) return;
     exporting.current = true;
@@ -946,11 +959,15 @@ export function App() {
         vault,
         vaultSettings,
         settings: exportSettings,
+        preset,
         workId: tab.workId,
         input: sectionInput(now.activeTab, annotations),
         ask,
       });
-      const what = result.count === 1 ? "1 annotation" : `${result.count} annotations`;
+      const what =
+        (result.count === result.total ? "" : `${result.count} of `) +
+        (result.total === 1 ? "1 annotation" : `${result.total} annotations`) +
+        (exportSettings.presets.length > 1 ? ` (${preset.name})` : "");
       if (result.status === "written") setNotice(`Exported ${what} to ${result.created ? "a new note, " : ""}${result.path}`);
       else if (result.status === "unchanged") setNotice(`${result.path} is up to date`);
       else setNotice("Nothing was exported");
@@ -1310,6 +1327,7 @@ export function App() {
     openLiteratureNote,
     saveIntoPdf,
     exportToVault,
+    outline,
     writeBackConfirmed,
     focusActive,
     focusSettings,
@@ -1342,6 +1360,7 @@ export function App() {
     openLiteratureNote,
     saveIntoPdf,
     exportToVault,
+    outline,
     writeBackConfirmed,
     focusActive,
     focusSettings,
@@ -1703,6 +1722,24 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [registry]);
 
+  // With several presets, each is a command of its own (Export menu, palette,
+  // a shortcut if the user gives it one); Export to Obsidian uses the default.
+  useEffect(() => {
+    const presets = exportSettings.presets;
+    if (presets.length < 2) return;
+    const unregister = presets.map((preset, i) =>
+      registry.register({
+        id: `export.preset.${preset.id}`,
+        title: `Export to Obsidian: ${preset.name}`,
+        keywords: ["obsidian", "vault", "preset", "filter", "export"],
+        menu: { menu: "Export", group: 1, order: 10 + i },
+        when: (ctx) => ctx.hasDocument && ctx.hasCitekey && ctx.hasVault,
+        run: () => void latest.current.exportToVault(preset),
+      }),
+    );
+    return () => unregister.forEach((u) => u());
+  }, [exportSettings.presets, registry]);
+
   // One command per category: highlights the selection with it, or moves the
   // selected annotation to it. Keys 1-9 as set in Edit categories.
   useEffect(() => {
@@ -2046,6 +2083,7 @@ export function App() {
             settings={exportSettings}
             preview={activeTab && activeTab.workId === activeWork ? sectionInput(activeTab, notes.annotations) : null}
             citations={vaultSettings?.citations ?? null}
+            categories={liveCategories}
             onSave={(next) => {
               setDialog(null);
               setExportSettings(next);
