@@ -8,12 +8,11 @@ mouse (menus, toolbar, right-click) and by keyboard (shortcuts, command palette)
 
 | Layer | Choice |
 |---|---|
-| Shell | Tauri 2 (Rust): file access, SQLite, `tourmaline://` deep links, optional equation-OCR model |
+| Shell | Tauri 2 (Rust): file access, SQLite, `tourmaline://` deep links |
 | UI | React + TypeScript + Vite |
 | PDF reading | `pdfjs-dist` (pages, text layer, links, outline) |
 | PDF writing | `pdf-lib` (standard annotations, appended to the end of the file) |
 | Notes editor | CodeMirror 6 with live MathJax 3 preview |
-| Ink | `perfect-freehand`, pressure from pointer events |
 | Templates | Handlebars (same syntax as the Obsidian Citations plugin) |
 | Storage | SQLite (`rusqlite`); works (papers) with one file row per SHA-256 version |
 
@@ -116,7 +115,7 @@ Tourmaline's on first open: text markup → highlights with their quote,
 sticky notes/free text → notes, squares/circles → areas; replies join their
 parent's note; colour → the category nearest in hue. Once per paper, keyed
 by /NM (else position); deleting one keeps it deleted. pdf.js stops drawing
-the originals. Ink is left drawn until Ink (phase 7, deferred) exists.
+the originals. Ink isn't imported: pdf.js keeps drawing it.
 
 **Write-back (4b)**: File › Save annotations into PDF (Ctrl+S), asked before
 the first use, never automatic. Original bytes backed up to
@@ -170,9 +169,6 @@ latest-mathjax plugin is enabled (then its font and packages), plus the
 obsidian-latex preamble. Tourmaline uses MathJax 4 either way, with the
 classic TeX font standing in for MathJax 3's; `\href` and `\require` are
 left out.
-
-**Copy equation as LaTeX**: arXiv source matching first; otherwise an optional
-downloadable OCR model (pix2tex / UniMERNet via ONNX in Rust).
 
 ## Data model
 
@@ -234,14 +230,17 @@ silently dropped).
 | 4c | **Export**: merge into notes preserving edits; template editor with live preview | Highlight in `Goodman2023GG` → appears in `@Goodman2023GG.md` without touching the user's text → link reopens Tourmaline there ✅ |
 | 5 | **Focus mode** | A two-column arXiv paper reads in order ✅ |
 | 6 | **Smart navigation**: citation/figure/equation popups, back/forward, split view | Hovering "[12]" shows the reference ✅ |
-| 7 | **Ink** *(deferred: a later feature, after phase 9)* | Strokes survive zoom and export |
-| 8 | **Equation → LaTeX** *(deferred: a later feature, after phase 9)* | Copied LaTeX compiles |
 | 9 | **Polish**: accessibility audit, themes, UI scale, shortcut editor, installer, auto-update | Everything works mouse-only and keyboard-only ✅ |
 | 10 | **Wikilink autocomplete** in notes, from the vault | Typing `[[conc` in a note suggests `concept` from the vault ✅ |
 
-Phases 7 and 8 are put off (decided after phase 6): phase 9 comes next, and
-they follow as later features. Phase 10 (wikilink autocomplete, added after
-phase 9) comes after phase 9's review, before 7 and 8.
+Phases 7 (Ink) and 8 (Equation → LaTeX) were taken out of the plan for now
+(2026-10-07); the other phases keep their numbers. Set aside, in case they
+come back:
+- *Ink*: pen strokes with pressure (`perfect-freehand`); done when strokes
+  survive zoom and export.
+- *Copy equation as LaTeX*: arXiv source matching first, otherwise an
+  optional downloadable OCR model (pix2tex / UniMERNet via ONNX in Rust);
+  done when the copied LaTeX compiles.
 
 **Polish (9)**:
 - Zoom by trackpad pinch (smooth while pinching, the pages redrawn sharp
