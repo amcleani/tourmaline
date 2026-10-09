@@ -60,7 +60,7 @@ describe("ExportSettingsDialog presets", () => {
     expect(previewText()).toContain("## Question");
     expect(screen.getByText("2 of 3 annotations")).toBeTruthy();
 
-    await user.click(screen.getByLabelText(/Used by Export annotations to Obsidian/));
+    await user.click(screen.getByLabelText("What the export starts with"));
     await user.click(screen.getByRole("button", { name: "Save" }));
     const saved = onSave.mock.calls[0][0];
     expect(saved.presets.map((p) => p.name)).toEqual(["Everything", "Comments"]);

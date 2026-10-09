@@ -255,10 +255,12 @@ which annotations `exportable(…, filter)` lets through and how
 `groupAnnotations` groups them (category order, or the last outline entry
 before each annotation; subheadings one level below the export heading);
 `renderSection` without a preset is the ungrouped, unfiltered section as
-before. Ctrl+Shift+X uses the default preset; with several, App registers
-`export.preset.<id>` commands. `highlightTemplateFor` picks a category's
-own template (export and Copy as Markdown). Presets are edited in
-`ExportPresetsEditor` inside the export settings dialog. Try it on
+before. Every export asks first (`ExportDialog`: the filter and grouping
+choices only, starting from the default preset, or the one whose
+`export.preset.<id>` command was used; changes there are for that export
+only). `ExportChoices` is that form, shared with `ExportPresetsEditor` in
+the export settings dialog. `highlightTemplateFor` picks a category's own
+template (export and Copy as Markdown). Try it on
 `.dev-data/test-vault` (a copy of the vault's settings and notes), never on
 the real vault.
 

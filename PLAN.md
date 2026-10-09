@@ -157,9 +157,14 @@ user doesn't want them).
   again in a new version of the PDF. The section is still replaced whole, so
   highlights a filter leaves out leave the note (asking first if any note
   links to them).
-- *Presets*: named filters + grouping (templates stay shared). Export
-  (Ctrl+Shift+X) uses the default preset; each other preset is a command of
-  its own (Export › Export to Obsidian: <name>).
+- *Asked every time* (decided 2026-10-09): Export (Ctrl+Shift+X) opens a
+  small prompt with just the filter and grouping choices, starting from the
+  default preset (Enter exports them as they are); changes there apply to
+  that export only.
+- *Presets*: named filters + grouping (templates stay shared), edited in
+  Export settings; the prompt can start from any of them, and each has a
+  command (Export › Export to Obsidian: <name>…) that opens the prompt
+  starting from it.
 - *Grouping*: none, by category (in category order), or by section of the
   paper (the last outline entry before each annotation; a paper without an
   outline isn't grouped). Groups get a subheading one level below the

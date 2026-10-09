@@ -94,6 +94,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { ContextMenu } from "./ui/ContextMenu";
 import { EntryPicker } from "./ui/EntryPicker";
 import { ExportSettingsDialog } from "./ui/ExportSettingsDialog";
+import { ExportDialog } from "./ui/ExportDialog";
 import { FindBar } from "./ui/FindBar";
 import { ReferencePreview } from "./ui/ReferencePreview";
 import { EYE_HEIGHTS, FocusBar, STEP_UNITS } from "./ui/FocusBar";
@@ -135,7 +136,19 @@ interface Tab {
   citekeyDeclined: string | null;
 }
 
-type Dialog = "palette" | "shortcuts" | "appearance" | "about" | "goto" | "recent" | "categories" | "entry" | "writeback" | "exportSettings" | null;
+type Dialog =
+  | "palette"
+  | "shortcuts"
+  | "appearance"
+  | "about"
+  | "goto"
+  | "recent"
+  | "categories"
+  | "entry"
+  | "writeback"
+  | "exportSettings"
+  | "export"
+  | null;
 
 const SAVE_POSITION_MS = 800;
 
@@ -940,8 +953,17 @@ export function App() {
   };
 
   const exporting = useRef(false);
-  /** Exports the open paper's annotations with a preset (the default one unless given). */
-  const exportToVault = async (preset: ExportPreset = defaultPreset(exportSettings)) => {
+  /** The preset the export prompt starts from. */
+  const [exportStart, setExportStart] = useState<string | null>(null);
+  /** Export to Obsidian: asks which annotations this time, starting from a preset (the default unless given). */
+  const requestExport = (presetId: string = defaultPreset(exportSettings).id) => {
+    const tab = latest.current.activeTab;
+    if (!tab?.citekey || !tab.workId || tab.pendingVersion || !vault || !vaultSettings || exporting.current) return;
+    setExportStart(presetId);
+    setDialog("export");
+  };
+  /** Exports the open paper's annotations with these choices; `named` is the preset they are, if unchanged. */
+  const exportToVault = async (preset: ExportPreset, named: boolean) => {
     const tab = latest.current.activeTab;
     if (!tab?.citekey || !tab.workId || tab.pendingVersion || !vault || !vaultSettings || exporting.current) return;
     exporting.current = true;
@@ -967,7 +989,7 @@ export function App() {
       const what =
         (result.count === result.total ? "" : `${result.count} of `) +
         (result.total === 1 ? "1 annotation" : `${result.total} annotations`) +
-        (exportSettings.presets.length > 1 ? ` (${preset.name})` : "");
+        (named && exportSettings.presets.length > 1 ? ` (${preset.name})` : "");
       if (result.status === "written") setNotice(`Exported ${what} to ${result.created ? "a new note, " : ""}${result.path}`);
       else if (result.status === "unchanged") setNotice(`${result.path} is up to date`);
       else setNotice("Nothing was exported");
@@ -1327,6 +1349,7 @@ export function App() {
     openLiteratureNote,
     saveIntoPdf,
     exportToVault,
+    requestExport,
     outline,
     writeBackConfirmed,
     focusActive,
@@ -1360,6 +1383,7 @@ export function App() {
     openLiteratureNote,
     saveIntoPdf,
     exportToVault,
+    requestExport,
     outline,
     writeBackConfirmed,
     focusActive,
@@ -1497,7 +1521,7 @@ export function App() {
         else setDialog("writeback");
       },
       openNote: () => latest.current.openLiteratureNote(),
-      exportToVault: () => void latest.current.exportToVault(),
+      exportToVault: () => latest.current.requestExport(),
       exportSettings: () => setDialog("exportSettings"),
       goBack: () => latest.current.travel("back"),
       toggleSplit: () => latest.current.toggleSplit(),
@@ -1730,11 +1754,11 @@ export function App() {
     const unregister = presets.map((preset, i) =>
       registry.register({
         id: `export.preset.${preset.id}`,
-        title: `Export to Obsidian: ${preset.name}`,
+        title: `Export to Obsidian: ${preset.name}…`,
         keywords: ["obsidian", "vault", "preset", "filter", "export"],
         menu: { menu: "Export", group: 1, order: 10 + i },
         when: (ctx) => ctx.hasDocument && ctx.hasCitekey && ctx.hasVault,
-        run: () => void latest.current.exportToVault(preset),
+        run: () => latest.current.requestExport(preset.id),
       }),
     );
     return () => unregister.forEach((u) => u());
@@ -2074,6 +2098,27 @@ export function App() {
                 void setState("writeback.confirmed", "yes").catch((e) => console.error("Could not save the setting", e));
               }
               void saveIntoPdf();
+            }}
+            onCancel={() => setDialog(null)}
+          />
+        )}
+        {dialog === "export" && activeTab && exportStart !== null && (
+          <ExportDialog
+            presets={exportSettings.presets}
+            startWith={exportStart}
+            categories={liveCategories}
+            annotations={notes.annotations.filter((a) => a.workId === activeTab.workId)}
+            notePath={
+              vaultSettings && activeTab.citekey
+                ? exportNotePath(vaultSettings.citations, exportSettings, sectionInput(activeTab, []).entry)
+                : null
+            }
+            onExport={(choices, preset) => {
+              setDialog(null);
+              void exportToVault(
+                preset ?? { id: "custom", name: "your choice", filter: choices.filter, groupBy: choices.groupBy },
+                preset !== null,
+              );
             }}
             onCancel={() => setDialog(null)}
           />
