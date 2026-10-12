@@ -14,6 +14,7 @@ import {
   parseExportSettings,
   passes,
   renderSection,
+  sameChoices,
   UNPLACED_GROUP,
   type ExportPreset,
 } from "../src/vault/export";
@@ -184,5 +185,38 @@ describe("saved presets", () => {
     expect(s.categoryTemplates).toEqual({ c1: "{{quote}}" });
     // A default that no longer exists falls back to the first.
     expect(defaultPreset(parseExportSettings(JSON.stringify({ ...saved, defaultPreset: "gone" }))).id).toBe("comments");
+  });
+});
+
+describe("categories that are gone or share a name", () => {
+  const withDeleted: Category[] = [...categories, { id: "old", name: "Old", colour: "#999999", callout: "note", hotkey: null, deleted: true }];
+  const list = [at("1", 0, 700), at("2", 0, 600, { categoryId: "old" }), at("3", 0, 500, { categoryId: "c2" })];
+
+  it("count a deleted category's annotations as having none, so 'No category' can choose them", () => {
+    const filter = { ...EVERYTHING, categories: [NO_CATEGORY] };
+    expect(ids(exportable(list, filter, withDeleted))).toEqual(["2"]);
+    // Without the categories to hand, ids are taken as they are.
+    expect(ids(exportable(list, filter))).toEqual([]);
+  });
+
+  it("group by category id, in the categories' order, deleted ones with those without a category", () => {
+    const twins: Category[] = [...withDeleted, { id: "c3", name: "Claim", colour: "#000000", callout: "tip", hotkey: null, deleted: false }];
+    const groups = groupAnnotations([...list, at("4", 1, 700, { categoryId: "c3" })], "category", twins, null);
+    expect(groups.map((g) => [g.title, ids(g.annotations)])).toEqual([
+      ["Claim", ["1"]],
+      ["Question", ["3"]],
+      ["Claim", ["4"]],
+      ["No category", ["2"]],
+    ]);
+  });
+});
+
+describe("sameChoices", () => {
+  it("compares the lists as sets", () => {
+    const a = preset({ categories: ["c1", "c2"], kinds: ["highlight", "area"] });
+    expect(sameChoices(a, preset({ categories: ["c2", "c1"], kinds: ["area", "highlight"] }))).toBe(true);
+    expect(sameChoices(a, preset({ categories: ["c1"], kinds: ["highlight", "area"] }))).toBe(false);
+    expect(sameChoices(a, preset({ categories: null, kinds: ["highlight", "area"] }))).toBe(false);
+    expect(sameChoices(preset(), preset({}, "category"))).toBe(false);
   });
 });

@@ -939,7 +939,7 @@ export function App() {
   );
 
   /** What a paper's section is made of: its annotations, entry and page labels. */
-  const sectionInput = (tab: Tab, annotations: readonly Annotation[]): SectionInput => {
+  const sectionInput = (tab: Tab, annotations: readonly Annotation[], outlineNow?: readonly OutlineNode[] | null): SectionInput => {
     const entry = tab.citekey ? bibliography?.get(tab.citekey) : undefined;
     return {
       annotations,
@@ -948,7 +948,7 @@ export function App() {
       entry: entry ? citationVariables(entry) : { citekey: tab.citekey ?? "" },
       fileName: tab.name,
       // The outline is the open paper's (for grouping by section).
-      outline: tab.key === latest.current.activeTab?.key ? latest.current.outline : null,
+      outline: outlineNow !== undefined ? outlineNow : tab.key === latest.current.activeTab?.key ? latest.current.outline : null,
     };
   };
 
@@ -977,19 +977,25 @@ export function App() {
         return;
       }
       const annotations = now.notes.current().filter((a) => a.workId === tab.workId);
+      // Grouping by section needs the outline: wait for it if it is still loading.
+      let outline = now.outline;
+      if (preset.groupBy === "section" && outline === null && now.activeTab.pdf) {
+        outline = await loadOutline(now.activeTab.pdf).catch(() => []);
+      }
       const result = await runExport({
         vault,
         vaultSettings,
         settings: exportSettings,
         preset,
         workId: tab.workId,
-        input: sectionInput(now.activeTab, annotations),
+        input: sectionInput(now.activeTab, annotations, outline),
         ask,
       });
       const what =
         (result.count === result.total ? "" : `${result.count} of `) +
         (result.total === 1 ? "1 annotation" : `${result.total} annotations`) +
-        (named && exportSettings.presets.length > 1 ? ` (${preset.name})` : "");
+        (named && exportSettings.presets.length > 1 ? ` (${preset.name})` : "") +
+        (preset.groupBy === "section" && !outline?.length ? ", not grouped: the PDF has no outline" : "");
       if (result.status === "written") setNotice(`Exported ${what} to ${result.created ? "a new note, " : ""}${result.path}`);
       else if (result.status === "unchanged") setNotice(`${result.path} is up to date`);
       else setNotice("Nothing was exported");

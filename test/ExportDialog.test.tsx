@@ -111,3 +111,17 @@ describe("ExportDialog (asked on every export)", () => {
     expect(onExport).not.toHaveBeenCalled();
   });
 });
+
+describe("ExportDialog choices", () => {
+  it("still names the preset after a category is unticked and ticked again", async () => {
+    const user = userEvent.setup();
+    const picky: ExportPreset = { id: "picky", name: "Picky", filter: { ...EVERYTHING, categories: ["c1", "c2"] }, groupBy: "none" };
+    const { onExport } = setup("picky", [DEFAULT_PRESET, picky]);
+    const group = screen.getByRole("group", { name: "Categories" });
+    await user.click(within(group).getByLabelText("Claim"));
+    await user.click(within(group).getByLabelText("Claim"));
+    expect((screen.getByLabelText("Start from") as HTMLSelectElement).selectedOptions[0].textContent).toBe("Picky");
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    expect(onExport.mock.calls[0][1]).toBe(picky);
+  });
+});

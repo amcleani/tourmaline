@@ -41,7 +41,7 @@ export function ExportPresetsEditor({ presets, defaultId, selectedId, categories
   const update = (patch: Partial<ExportPreset>) => onChange(presets.map((p) => (p.id === preset.id ? { ...p, ...patch } : p)), defaultId);
 
   const addPreset = () => {
-    const added: ExportPreset = { id: `p-${Date.now().toString(36)}`, name: newName(presets), filter: EVERYTHING, groupBy: "none" };
+    const added: ExportPreset = { id: `p-${crypto.randomUUID()}`, name: newName(presets), filter: EVERYTHING, groupBy: "none" };
     onChange([...presets, added], defaultId);
     onSelect(added.id);
   };

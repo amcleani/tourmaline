@@ -85,7 +85,8 @@ describe("ExportSettingsDialog presets", () => {
     const name = screen.getByLabelText("Name");
     await user.clear(name);
     await user.type(name, "everything");
-    expect(screen.getByRole("alert").textContent).toContain("Another preset");
+    // Both presets have the clash: the one on screen, and the other named below.
+    expect(screen.getAllByRole("alert").map((a) => a.textContent).join(" ")).toMatch(/Another preset.*“Everything” needs fixing/s);
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(onSave.mock.calls[0][0].presets).toHaveLength(1);
@@ -106,5 +107,21 @@ describe("ExportSettingsDialog presets", () => {
     expect(previewText()).toContain("> [!quote]");
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(onSave.mock.calls[0][0].categoryTemplates).toEqual({ c2: "- [ ] {{quote}} ^{{blockId}}" });
+  });
+});
+
+describe("ExportSettingsDialog problems out of sight", () => {
+  it("names a preset that needs fixing when another is on screen, and goes to it", async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole("button", { name: "New" }));
+    await user.clear(screen.getByLabelText("Name"));
+    await user.selectOptions(screen.getByLabelText("Preset"), "everything");
+    expect(screen.getByRole("alert").textContent).toContain("“(no name)” needs fixing: Give the preset a name.");
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Show it" }));
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+    await user.type(screen.getByLabelText("Name"), "Mine");
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

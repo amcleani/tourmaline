@@ -159,6 +159,19 @@ export function parseExportSettings(json: string | null): ExportSettings {
   };
 }
 
+/** Whether two sets of choices export the same thing (lists compared as sets). */
+export function sameChoices(a: Pick<ExportPreset, "filter" | "groupBy">, b: Pick<ExportPreset, "filter" | "groupBy">): boolean {
+  const sameSet = (x: readonly string[] | null, y: readonly string[] | null) =>
+    x === null || y === null ? x === y : x.length === y.length && x.every((v) => y.includes(v));
+  return (
+    a.groupBy === b.groupBy &&
+    a.filter.withNote === b.filter.withNote &&
+    a.filter.includeUnplaced === b.filter.includeUnplaced &&
+    sameSet(a.filter.kinds, b.filter.kinds) &&
+    sameSet(a.filter.categories, b.filter.categories)
+  );
+}
+
 /** The preset Export to Obsidian uses. */
 export const defaultPreset = (s: Pick<ExportSettings, "presets" | "defaultPreset">): ExportPreset =>
   s.presets.find((p) => p.id === s.defaultPreset) ?? s.presets[0] ?? DEFAULT_PRESET;
@@ -230,22 +243,37 @@ function startOf(a: Annotation): { page: number; top: number } | null {
   return { page: p.page, top: Math.max(...first.map((r) => Math.max(r[2], r[4])), -Infinity) };
 }
 
+/**
+ * An annotation's category for filters and groups: its own while that
+ * category exists (given the categories), else NO_CATEGORY — a deleted
+ * category can't be chosen, so its annotations count as having none.
+ */
+export function exportCategory(a: Annotation, categories?: readonly Category[]): string {
+  if (!a.categoryId) return NO_CATEGORY;
+  if (!categories) return a.categoryId;
+  return categories.some((c) => c.id === a.categoryId && !c.deleted) ? a.categoryId : NO_CATEGORY;
+}
+
 /** Whether an export with this filter writes an annotation. */
-export function passes(a: Annotation, f: ExportFilter): boolean {
+export function passes(a: Annotation, f: ExportFilter, categories?: readonly Category[]): boolean {
   if (a.kind === "ink" || !f.kinds.includes(a.kind)) return false;
   if (f.withNote && !a.note.trim()) return false;
-  if (f.categories && !f.categories.includes(a.categoryId ?? NO_CATEGORY)) return false;
+  if (f.categories && !f.categories.includes(exportCategory(a, categories))) return false;
   return f.includeUnplaced || isPlaced(a);
 }
 
 /** The annotations that go into notes (all but ink, or those a filter lets through), in reading order; unplaced last. */
-export function exportable(annotations: readonly Annotation[], filter: ExportFilter = EVERYTHING): Annotation[] {
+export function exportable(
+  annotations: readonly Annotation[],
+  filter: ExportFilter = EVERYTHING,
+  categories?: readonly Category[],
+): Annotation[] {
   const key = (a: Annotation): [number, number] => {
     const at = startOf(a);
     return at ? [at.page, -at.top] : [Infinity, 0];
   };
   return annotations
-    .filter((a) => passes(a, filter))
+    .filter((a) => passes(a, filter, categories))
     .map((a) => ({ a, at: key(a) }))
     .sort((x, y) => x.at[0] - y.at[0] || x.at[1] - y.at[1] || x.a.created - y.a.created)
     .map(({ a }) => a);
@@ -284,13 +312,17 @@ export function groupAnnotations(
     else groups.set(title, [a]);
   };
   if (groupBy === "category") {
-    const name = new Map(categories.map((c) => [c.id, c.name]));
-    // In the categories' own order, those without one last.
-    const order = [...categories.map((c) => c.name), NO_CATEGORY_GROUP];
-    for (const a of annotations) add((a.categoryId && name.get(a.categoryId)) || NO_CATEGORY_GROUP, a);
-    return [...groups.entries()]
-      .sort(([x], [y]) => order.indexOf(x) - order.indexOf(y))
-      .map(([title, list]) => ({ title, annotations: list }));
+    // By category id (two categories may share a name), in the categories'
+    // own order, those without one (or with a deleted one) last.
+    const live = categories.filter((c) => !c.deleted);
+    const byCategory = new Map<string, Annotation[]>();
+    for (const a of annotations) {
+      const key = exportCategory(a, live);
+      byCategory.set(key, [...(byCategory.get(key) ?? []), a]);
+    }
+    return [...live.map((c) => ({ id: c.id, title: c.name })), { id: NO_CATEGORY, title: NO_CATEGORY_GROUP }]
+      .filter((g) => byCategory.has(g.id))
+      .map((g) => ({ title: g.title, annotations: byCategory.get(g.id)! }));
   }
   for (const a of annotations) {
     const at = startOf(a);
@@ -336,7 +368,7 @@ export function renderSection(
     if (a.kind === "area" && a.imagePath) vars.image = `![[${imageFileName(a)}]]`;
     return { ...vars, markdown: renderTemplate(highlightTemplateFor(s, a.categoryId), vars) };
   };
-  const groups = groupAnnotations(exportable(input.annotations, preset.filter), preset.groupBy, input.categories, input.outline);
+  const groups = groupAnnotations(exportable(input.annotations, preset.filter, input.categories), preset.groupBy, input.categories, input.outline);
   const hashes = "#".repeat(groupHeadingLevel({ destination: s.destination ?? "heading", heading: s.heading ?? DEFAULT_HEADING }));
   const parts = groups.map((g) => {
     const highlights = g.annotations.map(render);

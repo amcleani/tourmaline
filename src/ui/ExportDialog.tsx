@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { Annotation, Category } from "../annotations/types";
-import { exportable, type ExportPreset } from "../vault/export";
+import { exportable, sameChoices, type ExportPreset } from "../vault/export";
 import { ExportChoices, choicesProblem, type Choices } from "./ExportChoices";
 
 interface Props {
@@ -17,7 +17,6 @@ interface Props {
   onCancel: () => void;
 }
 
-const same = (a: Choices, b: Choices) => JSON.stringify([a.filter, a.groupBy]) === JSON.stringify([b.filter, b.groupBy]);
 
 // Export › Export annotations to Obsidian: which annotations this time and
 // how they're grouped, starting from a preset (the default one, or the one
@@ -37,7 +36,7 @@ export function ExportDialog({ presets, startWith, categories, annotations, note
   const preset = presets.find((p) => p.id === presetId) ?? initial;
   const problem = choicesProblem(choices);
   const total = exportable(annotations).length;
-  const count = exportable(annotations, choices.filter).length;
+  const count = exportable(annotations, choices.filter, categories).length;
   const field = (name: string) => `${id}-${name}`;
 
   return (
@@ -63,7 +62,7 @@ export function ExportDialog({ presets, startWith, categories, annotations, note
           className="dialog-body"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!problem) onExport(choices, same(choices, preset) ? preset : null);
+            if (!problem) onExport(choices, sameChoices(choices, preset) ? preset : null);
           }}
         >
           {presets.length > 1 && (
@@ -84,7 +83,7 @@ export function ExportDialog({ presets, startWith, categories, annotations, note
                 {presets.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
-                    {!same(choices, p) && p.id === preset.id ? " (changed)" : ""}
+                    {!sameChoices(choices, p) && p.id === preset.id ? " (changed)" : ""}
                   </option>
                 ))}
               </select>

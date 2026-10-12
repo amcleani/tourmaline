@@ -130,13 +130,15 @@ export function ExportSettingsDialog({ settings, preview, citations, categories,
     note: ownNote ? attempt(() => renderTemplate(effective.noteTemplate ?? "", input.entry)) : null,
   };
   const broken = Object.values(problems).some(Boolean);
+  // A preset that needs fixing but isn't the one on screen (its own message shows with it).
+  const hiddenBadPreset = draft.presets.find((p) => p.id !== preset.id && presetProblem(p, draft.presets));
 
   const output = broken
     ? null
     : {
         path: citations ? exportNotePath(citations, effective, input.entry) : null,
         text: `${REGION_BEGIN}\n${renderSection(effective, input, preset)}\n${REGION_END}`,
-        count: exportable(input.annotations, preset.filter).length,
+        count: exportable(input.annotations, preset.filter, input.categories).length,
         total: exportable(input.annotations).length,
       };
 
@@ -371,6 +373,14 @@ export function ExportSettingsDialog({ settings, preview, citations, categories,
               </pre>
             </section>
           </div>
+          {hiddenBadPreset && (
+            <p className="field-error" role="alert">
+              The preset “{hiddenBadPreset.name.trim() || "(no name)"}” needs fixing: {presetProblem(hiddenBadPreset, draft.presets)}{" "}
+              <button type="button" className="button small" onClick={() => setPresetId(hiddenBadPreset.id)}>
+                Show it
+              </button>
+            </p>
+          )}
           <div className="dialog-actions">
             <button
               type="button"

@@ -65,7 +65,7 @@ export async function runExport(job: ExportJob): Promise<ExportOutcome> {
   const { vault, settings, input } = job;
   const path = exportNotePath(job.vaultSettings.citations, settings, input.entry);
   const body = renderSection(settings, input, job.preset);
-  const written = exportable(input.annotations, job.preset.filter);
+  const written = exportable(input.annotations, job.preset.filter, input.categories);
   const count = written.length;
   const note = await readNote(vault, path);
   const newNote =

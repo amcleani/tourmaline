@@ -252,7 +252,8 @@ the vault and out of hidden folders. Export settings (destination, heading,
 templates, note overrides, presets, per-category templates) are app state
 `export.settings`. A preset (`ExportPreset`: filter + grouping) decides
 which annotations `exportable(…, filter)` lets through and how
-`groupAnnotations` groups them (category order, or the last outline entry
+`groupAnnotations` groups them (by category id in category order, a
+deleted category counting as none (`exportCategory`), or the last outline entry
 before each annotation; subheadings one level below the export heading);
 `renderSection` without a preset is the ungrouped, unfiltered section as
 before. Every export asks first (`ExportDialog`: the filter and grouping
