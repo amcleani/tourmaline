@@ -691,6 +691,7 @@ export function blockSnippet(markdown: string, max = 160): string {
       l
         .replace(/^(?:>\s?)+/, "")
         .replace(/^\[![^\]]*\][+-]?\s*/, "")
+        .replace(/^(?:[-*+]|\d+[.)])\s+(?:\[.\]\s+)?/, "")
         .replace(/\s*\^hl-[0-9a-z]{6}\s*$/, "")
         .replace(/!?\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, "$1")
         .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")

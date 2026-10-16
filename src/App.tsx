@@ -1006,7 +1006,8 @@ export function App() {
   const unexported = useMemo(() => {
     const record = exportRecord && exportRecord.key === exportTargetKey ? exportRecord.record : null;
     if (!record || !activeTab || activeTab.workId !== activeWork || !notes.loaded) return null;
-    const input = sectionInput(activeTab, notes.annotations);
+    // (No outline: one block doesn't need it, and `latest` isn't set up yet during render.)
+    const input = sectionInput(activeTab, notes.annotations, null);
     return exportStatus(record, notes.annotations, (a) => renderAnnotation(exportSettings, input, a));
     // sectionInput reads the tab, categories and bibliography.
   }, [exportRecord, exportTargetKey, activeTab, activeWork, notes.annotations, notes.loaded, exportSettings, categories, bibliography]);

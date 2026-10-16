@@ -48,6 +48,8 @@ describe("blocks in a section", () => {
       "p. 3 Some *quote* My note",
     );
     expect(blockSnippet("x".repeat(200), 10)).toBe("xxxxxxxxx…");
+    expect(blockSnippet("- [ ] a task — note ^hl-000001")).toBe("a task — note");
+    expect(blockSnippet("1. first")).toBe("first");
   });
 
   it("are remembered as a record that reads back, or not at all", () => {
