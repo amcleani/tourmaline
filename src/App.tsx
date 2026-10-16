@@ -71,12 +71,9 @@ import {
   NoteFormatError,
   defaultPreset,
   exportNotePath,
-  exportStatus,
   highlightTemplateFor,
   parseExportSettings,
-  renderAnnotation,
   type ExportPreset,
-  type ExportRecord,
   type ExportSettings,
   type ExportStatus,
   type SectionInput,
@@ -85,7 +82,8 @@ import { useVaultIndex } from "./vault/useVaultIndex";
 import { setWikilinkContext, wikilinkUrl, type Wikilink } from "./notes/wikilinks";
 import { noteWikilinks } from "./notes/markdown";
 import { literatureNotePath, obsidianUrl, renderHighlight } from "./vault/notes";
-import { loadExportRecord, runExport, type ExportQuestion } from "./vault/runExport";
+import { runExport, type ExportQuestion } from "./vault/runExport";
+import { useExportStatus } from "./vault/useExportStatus";
 import { ExportPreviewDialog } from "./ui/ExportPreviewDialog";
 import { useVault } from "./vault/useVault";
 import { installNativeMenu } from "./platform/menu";
@@ -968,8 +966,8 @@ export function App() {
     [],
   );
 
-  /** What a paper's section is made of: its annotations, entry and page labels. */
-  const sectionInput = (tab: Tab, annotations: readonly Annotation[], outlineNow?: readonly OutlineNode[] | null): SectionInput => {
+  /** What a paper's section is made of: its annotations, entry, page labels and outline (for grouping by section). */
+  const sectionInput = (tab: Tab, annotations: readonly Annotation[], outline: readonly OutlineNode[] | null): SectionInput => {
     const entry = tab.citekey ? bibliography?.get(tab.citekey) : undefined;
     return {
       annotations,
@@ -977,8 +975,7 @@ export function App() {
       pageLabel: (page) => tab.labels?.[page] ?? String(page + 1),
       entry: entry ? citationVariables(entry) : { citekey: tab.citekey ?? "" },
       fileName: tab.name,
-      // The outline is the open paper's (for grouping by section).
-      outline: outlineNow !== undefined ? outlineNow : tab.key === latest.current.activeTab?.key ? latest.current.outline : null,
+      outline,
     };
   };
 
@@ -989,28 +986,13 @@ export function App() {
     if (!activeTab?.workId || !activeTab.citekey || !vaultSettings || !exportEntry) return null;
     return { workId: activeTab.workId, path: exportNotePath(vaultSettings.citations, exportSettings, citationVariables(exportEntry)) };
   }, [activeTab?.workId, activeTab?.citekey, vaultSettings, exportSettings, exportEntry]);
-  const [exportRecord, setExportRecord] = useState<{ key: string; record: ExportRecord | null } | null>(null);
   const [exportsDone, setExportsDone] = useState(0);
-  const exportTargetKey = exportTarget ? `${exportTarget.workId}:${exportTarget.path}` : null;
-  useEffect(() => {
-    if (!exportTarget || !exportTargetKey) return;
-    let stale = false;
-    loadExportRecord(exportTarget.workId, exportTarget.path)
-      .then((record) => !stale && setExportRecord({ key: exportTargetKey, record }))
-      .catch((e) => console.error("Could not read what was last exported", e));
-    return () => {
-      stale = true;
-    };
-    // exportTarget changes with exportTargetKey; exportsDone re-reads after an export.
-  }, [exportTargetKey, exportsDone]);
-  const unexported = useMemo(() => {
-    const record = exportRecord && exportRecord.key === exportTargetKey ? exportRecord.record : null;
-    if (!record || !activeTab || activeTab.workId !== activeWork || !notes.loaded) return null;
-    // (No outline: one block doesn't need it, and `latest` isn't set up yet during render.)
-    const input = sectionInput(activeTab, notes.annotations, null);
-    return exportStatus(record, notes.annotations, (a) => renderAnnotation(exportSettings, input, a));
+  const statusInput = useMemo(
+    () => (activeTab && activeTab.workId === activeWork && notes.loaded ? sectionInput(activeTab, notes.annotations, null) : null),
     // sectionInput reads the tab, categories and bibliography.
-  }, [exportRecord, exportTargetKey, activeTab, activeWork, notes.annotations, notes.loaded, exportSettings, categories, bibliography]);
+    [activeTab, activeWork, notes.loaded, notes.annotations, categories, bibliography],
+  );
+  const unexported = useExportStatus(exportTarget, statusInput, exportSettings, exportsDone);
 
   const exporting = useRef(false);
   /** The preset the export prompt starts from, and whether it previews first (Export › Preview export). */
@@ -1593,9 +1575,10 @@ export function App() {
           setNoteFocusFor(latest.current.selected.id);
         }
       },
+      // Every selected annotation (several in the sidebar), as one step to undo.
       deleteAnnotation: () => {
-        const a = latest.current.selected;
-        if (a) void latest.current.notes.remove(a.id);
+        const ids = latest.current.selection;
+        if (ids.size) void latest.current.notes.remove([...ids]);
       },
       captureArea: () => {
         viewerRef.current?.clearSelection();
@@ -2221,7 +2204,7 @@ export function App() {
             annotations={notes.annotations.filter((a) => a.workId === activeTab.workId)}
             notePath={
               vaultSettings && activeTab.citekey
-                ? exportNotePath(vaultSettings.citations, exportSettings, sectionInput(activeTab, []).entry)
+                ? exportNotePath(vaultSettings.citations, exportSettings, sectionInput(activeTab, [], null).entry)
                 : null
             }
             onExport={(choices, preset, preview) => {
@@ -2238,7 +2221,7 @@ export function App() {
         {dialog === "exportSettings" && (
           <ExportSettingsDialog
             settings={exportSettings}
-            preview={activeTab && activeTab.workId === activeWork ? sectionInput(activeTab, notes.annotations) : null}
+            preview={activeTab && activeTab.workId === activeWork ? sectionInput(activeTab, notes.annotations, outline) : null}
             citations={vaultSettings?.citations ?? null}
             categories={liveCategories}
             onSave={(next) => {

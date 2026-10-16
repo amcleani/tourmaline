@@ -112,11 +112,14 @@ export function ExportPreviewDialog({ plan, path, selected, onExport, onCancel }
           )}
           <div className="dialog-actions">
             <span className="spacer" />
-            <button ref={focusRef} type="button" className="button" onClick={onCancel}>
-              Cancel
-            </button>
-            <button ref={exportRef} type="button" className={removes ? "button danger" : "button primary"} onClick={onExport} disabled={nothing}>
-              {removes ? "Export and remove" : "Export"}
+            {/* Nothing to change: one button, which goes on (the note is then counted as up to date). */}
+            {!nothing && (
+              <button ref={focusRef} type="button" className="button" onClick={onCancel}>
+                Cancel
+              </button>
+            )}
+            <button ref={exportRef} type="button" className={removes ? "button danger" : "button primary"} onClick={onExport}>
+              {removes ? "Export and remove" : nothing ? "OK" : "Export"}
             </button>
           </div>
         </div>

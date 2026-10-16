@@ -86,8 +86,11 @@ export function AnnotationsPanel({
     onSelect(id);
   };
   const range = (to: number) => {
-    const from = indexOf(anchor.current) === -1 ? Math.max(activeIndex, 0) : indexOf(anchor.current);
-    if (indexOf(anchor.current) === -1) anchor.current = visible[from].id;
+    // From the anchor while it's part of the selection; else (the selection
+    // was made elsewhere, e.g. on the page) from the active annotation.
+    const anchored = anchor.current !== null && selection.has(anchor.current) ? indexOf(anchor.current) : -1;
+    const from = anchored === -1 ? Math.max(activeIndex, 0) : anchored;
+    anchor.current = visible[from].id;
     const [lo, hi] = from <= to ? [from, to] : [to, from];
     onChoose(visible.slice(lo, hi + 1).map((a) => a.id), visible[to].id);
   };

@@ -109,7 +109,13 @@ export async function runExport(job: ExportJob): Promise<ExportOutcome> {
   })();
   const record = await loadExportRecord(job.workId, path);
   const known = record?.blocks ?? {};
-  const render = (a: (typeof input.annotations)[number]) => normaliseSection(renderAnnotation(settings, input, a));
+  // Each annotation's text, rendered once for the section and the record.
+  const rendered = new Map<string, string>();
+  const render = (a: (typeof input.annotations)[number]) => {
+    let text = rendered.get(a.id);
+    if (text === undefined) rendered.set(a.id, (text = renderAnnotation(settings, input, a)));
+    return normaliseSection(text);
+  };
 
   // What goes in: the preset's annotations, or the selected ones.
   const selected = job.only;
@@ -121,12 +127,12 @@ export async function runExport(job: ExportJob): Promise<ExportOutcome> {
         previous,
         written.map((a) => ({ blockId: a.blockId, text: render(a) })),
         // New blocks go where a whole export with the default grouping would put them.
-        groupAnnotations(exportable(input.annotations), defaultGrouping(settings), input.categories, input.outline).flatMap((g) =>
+        groupAnnotations(exportable(input.annotations), defaultGrouping(settings), input.categories, input.outline).map((g) =>
           g.annotations.map((a) => a.blockId),
         ),
         known,
       )
-    : renderSection(settings, input, job.preset);
+    : renderSection(settings, input, job.preset, rendered);
   const count = written.length;
   const newNote =
     note === null && settings.destination === "heading"
@@ -167,31 +173,33 @@ export async function runExport(job: ExportJob): Promise<ExportOutcome> {
     await setState(recordKey(job.workId, path), JSON.stringify(next));
   };
 
-  if (previous !== null && normaliseSection(previous) === normaliseSection(body) && !job.preview) {
-    // Remembered even so: the next change then isn't taken for the user's edit.
-    await remember();
-    return outcome("unchanged");
-  }
-  if (previous !== null) {
+  const unchanged = previous !== null && normaliseSection(previous) === normaliseSection(body);
+  if (previous !== null && !unchanged) {
     if (selected) {
-      // Only the blocks being replaced matter: the rest stays as it is.
+      // Only the blocks being replaced matter: the rest stays as it is. A
+      // block Tourmaline has no record of (exported before records were
+      // kept) counts as edited unless the whole section is as it wrote it.
       const edited = written
         .map((a) => a.blockId)
         .filter((id) => {
           const now = blockText(previous, id, known);
-          return now !== null && known[id] !== undefined && now !== known[id];
+          if (now === null || now === render(written.find((a) => a.blockId === id)!)) return false;
+          return known[id] !== undefined ? now !== known[id] : !sectionWasOurs;
         });
       if (edited.length && !(await job.ask({ kind: "edited", path, blocks: edited }))) return outcome("cancelled");
-    } else if (!sectionWasOurs && normaliseSection(previous) !== normaliseSection(body)) {
+    } else if (!sectionWasOurs) {
       if (!(await job.ask({ kind: "edited", path }))) return outcome("cancelled");
     }
   }
 
-  const plan = await planOf(vault, path, previous, body, merge.text, known);
-  if ((plan.removed.length || job.preview) && !(await job.ask({ kind: "preview", path, plan, selected: !!selected }))) {
-    return outcome("cancelled");
+  if (!unchanged || job.preview) {
+    const plan = await planOf(vault, path, previous, body, merge.text, known);
+    if ((plan.removed.length || job.preview) && !(await job.ask({ kind: "preview", path, plan, selected: !!selected }))) {
+      return outcome("cancelled");
+    }
   }
-  if (previous !== null && normaliseSection(previous) === normaliseSection(body)) {
+  if (unchanged) {
+    // Remembered even so: the next change then isn't taken for the user's edit.
     await remember();
     return outcome("unchanged");
   }

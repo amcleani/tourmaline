@@ -36,7 +36,8 @@ export interface OpenDoc {
 /** A change that can be undone and redone. */
 type Op =
   | { kind: "create"; id: string }
-  | { kind: "delete"; id: string }
+  /** One or several deleted together (undone together). */
+  | { kind: "delete"; ids: string[] }
   | { kind: "edit"; id: string; before: AnnotationEdit; after: AnnotationEdit };
 
 const UNDO_LIMIT = 100;
@@ -310,19 +311,27 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
     [apply, enqueue],
   );
 
+  /** Deletes one annotation, or several as one step of history. */
   const remove = useCallback(
-    (id: string): Promise<void> => {
+    (which: string | readonly string[]): Promise<void> => {
       const d = docRef.current;
-      if (!d) return Promise.resolve();
+      const ids = typeof which === "string" ? [which] : [...which];
+      if (!d || ids.length === 0) return Promise.resolve();
       return enqueue(async () => {
-        deleted.current.add(id);
+        const done: string[] = [];
         try {
-          await deleteAnnotation(id);
-          apply(d.workId, (list) => list.filter((a) => a.id !== id));
-          push(d.workId, { kind: "delete", id });
+          for (const id of ids) {
+            deleted.current.add(id);
+            await deleteAnnotation(id);
+            done.push(id);
+          }
         } catch (err) {
-          deleted.current.delete(id);
-          report.current("Could not delete the annotation", err);
+          for (const id of ids) if (!done.includes(id)) deleted.current.delete(id);
+          report.current(ids.length === 1 ? "Could not delete the annotation" : "Could not delete all the annotations", err);
+        }
+        if (done.length) {
+          apply(d.workId, (list) => list.filter((a) => !done.includes(a.id)));
+          push(d.workId, { kind: "delete", ids: done });
         }
       });
     },
@@ -344,18 +353,26 @@ export function useAnnotations(doc: OpenDoc | null, onError: (what: string, err:
           if (op.kind === "edit") {
             const updated = await updateAnnotation(op.id, d.fileId, direction === "undo" ? op.before : op.after);
             apply(d.workId, (list) => upsert(list, updated));
-          } else if (hide) {
-            deleted.current.add(op.id);
-            await deleteAnnotation(op.id);
-            apply(d.workId, (list) => list.filter((a) => a.id !== op.id));
+            (direction === "undo" ? h.redo : h.undo).push(op);
+            setHistoryVersion((v) => v + 1);
+            return op.id;
+          }
+          const ids = op.kind === "delete" ? op.ids : [op.id];
+          if (hide) {
+            for (const id of ids) {
+              deleted.current.add(id);
+              await deleteAnnotation(id);
+            }
+            apply(d.workId, (list) => list.filter((a) => !ids.includes(a.id)));
           } else {
-            const restored = await withPlacement(await restoreAnnotation(op.id, d.fileId));
-            deleted.current.delete(op.id);
-            apply(d.workId, (list) => upsert(list, restored));
+            const restored: Annotation[] = [];
+            for (const id of ids) restored.push(await withPlacement(await restoreAnnotation(id, d.fileId)));
+            for (const id of ids) deleted.current.delete(id);
+            apply(d.workId, (list) => restored.reduce(upsert, list));
           }
           (direction === "undo" ? h.redo : h.undo).push(op);
           setHistoryVersion((v) => v + 1);
-          return op.kind !== "edit" && hide ? null : op.id;
+          return hide ? null : ids[0];
         } catch (err) {
           // Put the step back so it can be tried again.
           (direction === "undo" ? h.undo : h.redo).push(op);

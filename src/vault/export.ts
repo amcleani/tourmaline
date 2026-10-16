@@ -374,8 +374,14 @@ export function renderSection(
   s: Pick<ExportSettings, "highlightTemplate" | "sectionTemplate"> & Partial<Pick<ExportSettings, "categoryTemplates" | "destination" | "heading">>,
   input: SectionInput,
   preset: Pick<ExportPreset, "filter" | "groupBy"> = DEFAULT_PRESET,
+  /** Given, each annotation's own text (by annotation id) is put in it, so it isn't rendered again. */
+  rendered?: Map<string, string>,
 ): string {
-  const render = (a: Annotation) => highlightBlock(s, input, a);
+  const render = (a: Annotation) => {
+    const block = highlightBlock(s, input, a);
+    rendered?.set(a.id, String(block.markdown));
+    return block;
+  };
   const groups = groupAnnotations(exportable(input.annotations, preset.filter, input.categories), preset.groupBy, input.categories, input.outline);
   const hashes = "#".repeat(groupHeadingLevel({ destination: s.destination ?? "heading", heading: s.heading ?? DEFAULT_HEADING }));
   const parts = groups.map((g) => {
@@ -641,16 +647,21 @@ export interface BlockUpdate {
 
 /**
  * A section with some blocks added or replaced and everything else as it
- * was (Export selected). A block already there is replaced in place; a new
- * one goes after the nearest block before it in `order` (the full export's
- * order of block ids), else before the nearest one after it, else at the end.
+ * was (Export selected). A block already there is replaced in place. A new
+ * one goes where a whole export would put it: `groups` are the block ids of
+ * each group in order (one group when not grouping). It goes after the
+ * nearest block before it in its own group, else before the nearest one
+ * after it there (so under that group's subheading); with none of its group
+ * in the note, after the nearest block before it anywhere, else before the
+ * nearest after, else at the end.
  */
 export function mergeBlocks(
   previous: string | null,
   updates: readonly BlockUpdate[],
-  order: readonly string[],
+  groups: readonly (readonly string[])[],
   known: Record<string, string> = {},
 ): string {
+  const order = groups.flat();
   let body = (previous ?? "").replace(/\r\n/g, "\n").replace(/\s+$/, "");
   for (const u of updates) {
     const text = u.text.replace(/\r\n/g, "\n").trim();
@@ -660,15 +671,37 @@ export function mergeBlocks(
       body = body.slice(0, here.start) + text + body.slice(here.end);
       continue;
     }
-    const at = order.indexOf(u.blockId);
-    const before = at === -1 ? undefined : order.slice(0, at).reverse().find((id) => spans.has(id));
-    const after = at === -1 ? undefined : order.slice(at + 1).find((id) => spans.has(id));
+    const group = groups.find((g) => g.includes(u.blockId)) ?? [];
+    const near = (list: readonly string[]) => {
+      const at = list.indexOf(u.blockId);
+      if (at === -1) return { before: undefined, after: undefined };
+      return {
+        before: list.slice(0, at).reverse().find((id) => spans.has(id)),
+        after: list.slice(at + 1).find((id) => spans.has(id)),
+      };
+    };
+    const inGroup = near(group);
+    const { before, after } = inGroup.before || inGroup.after ? inGroup : near(order);
+    // Spaced like its neighbour and the block next to that (list items on
+    // consecutive lines, callouts a blank line apart).
+    const sorted = [...spans.values()].sort((x, y) => x.start - y.start);
+    const spacing = (span: BlockSpan) => {
+      const i = sorted.indexOf(span);
+      for (const [x, y] of [
+        [sorted[i], sorted[i + 1]],
+        [sorted[i - 1], sorted[i]],
+      ]) {
+        const gap = x && y ? body.slice(x.end, y.start) : "";
+        if (gap && !gap.trim()) return gap.includes("\n\n") ? "\n\n" : "\n";
+      }
+      return "\n\n";
+    };
     if (before) {
-      const end = spans.get(before)!.end;
-      body = `${body.slice(0, end)}\n\n${text}${body.slice(end)}`;
+      const span = spans.get(before)!;
+      body = `${body.slice(0, span.end)}${spacing(span)}${text}${body.slice(span.end)}`;
     } else if (after) {
-      const start = spans.get(after)!.start;
-      body = `${body.slice(0, start)}${text}\n\n${body.slice(start)}`;
+      const span = spans.get(after)!;
+      body = `${body.slice(0, span.start)}${text}${spacing(span)}${body.slice(span.start)}`;
     } else {
       body = body ? `${body}\n\n${text}` : text;
     }

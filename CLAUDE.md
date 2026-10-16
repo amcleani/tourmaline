@@ -262,13 +262,15 @@ choices only, starting from the default preset, or the one whose
 only). `ExportChoices` is that form, shared with `ExportPresetsEditor` in
 the export settings dialog. Each export also saves an `ExportRecord` (app
 state `export.blocks:<work id>:<note path>`: each written block's text by
-block id, and when the paper was last exported whole); `exportStatus`
-compares it with `renderAnnotation` of each annotation for the sidebar's
-New/Changed marks and the toolbar's "N not exported". Export selected
+block id, and when the paper was last exported whole); `useExportStatus`
+reads it and compares it (`exportStatus`) with `renderAnnotation` of each
+annotation for the sidebar's New/Changed marks and the toolbar's "N not
+exported". Delete removes every selected annotation as one undo step. Export selected
 (`ExportJob.only`, the sidebar's multi-selection: App's `chosen` holds
 while its `active` is still the selected annotation) merges blocks with
 `mergeBlocks`, finding them as Obsidian does (`sectionBlocks`: the
-paragraph ending in `^id`, or the one above an id on its own line). Before
+paragraph ending in `^id`, or the one above an id on its own line; a new
+block goes among its own group's blocks, spaced like them). Before
 writing, `runExport` asks `preview` (`ExportPreviewDialog`: added, updated,
 removed with the notes linking to them) when blocks would leave the note,
 when asked (Export › Preview export), and always for Export selected. `highlightTemplateFor` picks a category's own

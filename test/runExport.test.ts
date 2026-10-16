@@ -245,6 +245,20 @@ describe("export selected", () => {
     expect(asked).toEqual([{ kind: "edited", path: PATH }]);
   });
 
+  it("treats a block it has no record of as edited, unless the section is as it wrote it", async () => {
+    await run([highlight(1), highlight(2)]);
+    // Exported before records were kept.
+    for (const key of [...state.keys()]) if (key.startsWith("export.blocks:")) state.delete(key);
+    expect(await only([highlight(1, { note: "n" }), highlight(2)], [1])).toMatchObject({ status: "written" });
+    expect(asked.filter((q) => q.kind === "edited")).toEqual([]);
+
+    for (const key of [...state.keys()]) if (key.startsWith("export.blocks:")) state.delete(key);
+    notes.set(PATH, { text: notes.get(PATH)!.text.replace("> quote 2", "> quote 2 (mine)"), version: 9 });
+    answer = false;
+    expect(await only([highlight(1, { note: "n" }), highlight(2, { note: "m" })], [2])).toMatchObject({ status: "cancelled" });
+    expect(asked.filter((q) => q.kind === "edited")).toEqual([{ kind: "edited", path: PATH, blocks: ["hl-000002"] }]);
+  });
+
   it("starts a section with just those when the note has none", async () => {
     expect(await only([highlight(1), highlight(2)], [2])).toMatchObject({ status: "written", created: true, count: 1 });
     const text = notes.get(PATH)!.text;

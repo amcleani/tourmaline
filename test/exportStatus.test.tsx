@@ -28,7 +28,7 @@ describe("blocks in a section", () => {
 
   it("are replaced in place or put next to their neighbours, the rest kept", () => {
     const body = ["Mine.", block(1), "## Question", block(3)].join("\n\n");
-    const order = ["hl-000001", "hl-000002", "hl-000003", "hl-000004"];
+    const order = [["hl-000001", "hl-000002", "hl-000003", "hl-000004"]];
     expect(mergeBlocks(body, [{ blockId: "hl-000001", text: block(1, " (new)") }], order)).toBe(
       ["Mine.", block(1, " (new)"), "## Question", block(3)].join("\n\n"),
     );
@@ -41,6 +41,27 @@ describe("blocks in a section", () => {
     // Line endings come in as the note has them.
     expect(mergeBlocks(body.replace(/\n/g, "\r\n"), [], order)).toBe(body);
     expect(mergeBlocks(null, [{ blockId: "hl-000002", text: block(2) }], order)).toBe(block(2));
+  });
+
+  it("go into their own group, under its subheading, when the note has it", () => {
+    const body = ["## Claim", block(1), "## Question", block(3)].join("\n\n");
+    const groups = [["hl-000001"], ["hl-000002", "hl-000003"], ["hl-000004"]];
+    // First of the Question group: before 3, not after 1 (which is under Claim).
+    expect(mergeBlocks(body, [{ blockId: "hl-000002", text: block(2) }], groups)).toBe(
+      ["## Claim", block(1), "## Question", block(2), block(3)].join("\n\n"),
+    );
+    // A group not in the note yet: after the nearest block before it.
+    expect(mergeBlocks(body, [{ blockId: "hl-000004", text: block(4) }], groups)).toBe(`${body}\n\n${block(4)}`);
+  });
+
+  it("are spaced like their neighbours", () => {
+    const list = "## Q\n\n- one ^hl-000001\n- three ^hl-000003";
+    expect(mergeBlocks(list, [{ blockId: "hl-000002", text: "- two ^hl-000002" }], [["hl-000001", "hl-000002", "hl-000003"]])).toBe(
+      "## Q\n\n- one ^hl-000001\n- two ^hl-000002\n- three ^hl-000003",
+    );
+    expect(mergeBlocks(list, [{ blockId: "hl-000000", text: "- zero ^hl-000000" }], [["hl-000000", "hl-000001"]])).toBe(
+      "## Q\n\n- zero ^hl-000000\n- one ^hl-000001\n- three ^hl-000003",
+    );
   });
 
   it("read as one line in the preview", () => {
