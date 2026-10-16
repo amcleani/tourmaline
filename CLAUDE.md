@@ -260,7 +260,18 @@ before. Every export asks first (`ExportDialog`: the filter and grouping
 choices only, starting from the default preset, or the one whose
 `export.preset.<id>` command was used; changes there are for that export
 only). `ExportChoices` is that form, shared with `ExportPresetsEditor` in
-the export settings dialog. `highlightTemplateFor` picks a category's own
+the export settings dialog. Each export also saves an `ExportRecord` (app
+state `export.blocks:<work id>:<note path>`: each written block's text by
+block id, and when the paper was last exported whole); `exportStatus`
+compares it with `renderAnnotation` of each annotation for the sidebar's
+New/Changed marks and the toolbar's "N not exported". Export selected
+(`ExportJob.only`, the sidebar's multi-selection: App's `chosen` holds
+while its `active` is still the selected annotation) merges blocks with
+`mergeBlocks`, finding them as Obsidian does (`sectionBlocks`: the
+paragraph ending in `^id`, or the one above an id on its own line). Before
+writing, `runExport` asks `preview` (`ExportPreviewDialog`: added, updated,
+removed with the notes linking to them) when blocks would leave the note,
+when asked (Export › Preview export), and always for Export selected. `highlightTemplateFor` picks a category's own
 template (export and Copy as Markdown). Try it on
 `.dev-data/test-vault` (a copy of the vault's settings and notes), never on
 the real vault.

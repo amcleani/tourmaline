@@ -347,6 +347,24 @@ export function groupHeadingLevel(s: Pick<ExportSettings, "destination" | "headi
   return Math.min(6, level + 1);
 }
 
+type BlockSettings = Pick<ExportSettings, "highlightTemplate"> & Partial<Pick<ExportSettings, "categoryTemplates">>;
+
+/** One annotation's template variables, with its rendered `markdown`. */
+function highlightBlock(s: BlockSettings, input: SectionInput, a: Annotation) {
+  const vars = highlightVariables({
+    annotation: a,
+    category: input.categories.find((c) => c.id === a.categoryId),
+    pageLabel: isPlaced(a) ? input.pageLabel(a.placement!.page) : "?",
+    entry: input.entry,
+    fileName: input.fileName,
+  });
+  if (a.kind === "area" && a.imagePath) vars.image = `![[${imageFileName(a)}]]`;
+  return { ...vars, markdown: renderTemplate(highlightTemplateFor(s, a.categoryId), vars) };
+}
+
+/** One annotation as the export writes it (the highlight template's output). Throws TemplateError. */
+export const renderAnnotation = (s: BlockSettings, input: SectionInput, a: Annotation): string => String(highlightBlock(s, input, a).markdown);
+
 /**
  * The text of Tourmaline's section (without its markers): each highlight
  * rendered with the highlight template, then the lot with the section
@@ -357,17 +375,7 @@ export function renderSection(
   input: SectionInput,
   preset: Pick<ExportPreset, "filter" | "groupBy"> = DEFAULT_PRESET,
 ): string {
-  const render = (a: Annotation) => {
-    const vars = highlightVariables({
-      annotation: a,
-      category: input.categories.find((c) => c.id === a.categoryId),
-      pageLabel: isPlaced(a) ? input.pageLabel(a.placement!.page) : "?",
-      entry: input.entry,
-      fileName: input.fileName,
-    });
-    if (a.kind === "area" && a.imagePath) vars.image = `![[${imageFileName(a)}]]`;
-    return { ...vars, markdown: renderTemplate(highlightTemplateFor(s, a.categoryId), vars) };
-  };
+  const render = (a: Annotation) => highlightBlock(s, input, a);
   const groups = groupAnnotations(exportable(input.annotations, preset.filter, input.categories), preset.groupBy, input.categories, input.outline);
   const hashes = "#".repeat(groupHeadingLevel({ destination: s.destination ?? "heading", heading: s.heading ?? DEFAULT_HEADING }));
   const parts = groups.map((g) => {
@@ -513,3 +521,182 @@ export function mergeIntoNote(note: string | null, body: string, s: Pick<ExportS
 
 /** Whether some markdown links to a block (`[[note#^hl-…]]`, `![[#^hl-…]]`, `[x](note.md#^hl-…)`). */
 export const linksToBlock = (markdown: string, blockId: string) => markdown.includes(`#^${blockId}`);
+
+// ---- What was exported (phase 11b) ------------------------------------------------
+
+/**
+ * What Tourmaline last wrote into a note for a paper, block by block: each
+ * exported annotation's text (normalised), by block id, and when the paper
+ * was last exported whole (annotations created since, and not in the note,
+ * are new; older ones were left out on purpose).
+ */
+export interface ExportRecord {
+  exportedAt: number;
+  blocks: Record<string, string>;
+}
+
+export function parseExportRecord(json: string | null): ExportRecord | null {
+  try {
+    const v: unknown = json ? JSON.parse(json) : null;
+    if (!v || typeof v !== "object") return null;
+    const r = v as Record<string, unknown>;
+    if (typeof r.exportedAt !== "number" || !r.blocks || typeof r.blocks !== "object") return null;
+    const blocks = Object.fromEntries(
+      Object.entries(r.blocks as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"),
+    );
+    return { exportedAt: r.exportedAt, blocks };
+  } catch {
+    return null;
+  }
+}
+
+export type BlockStatus = "new" | "changed";
+
+export interface ExportStatus {
+  /** Annotations not in the note yet (made since the last export) or changed since it, by annotation id. */
+  byId: Map<string, BlockStatus>;
+  /** Block ids in the note whose annotations were deleted in Tourmaline. */
+  deleted: string[];
+  /** Changes not exported yet: new, changed and deleted. */
+  count: number;
+}
+
+/** How a paper's annotations differ from what was last exported; `render` is renderAnnotation for the paper. */
+export function exportStatus(record: ExportRecord, annotations: readonly Annotation[], render: (a: Annotation) => string): ExportStatus {
+  const byId = new Map<string, BlockStatus>();
+  const live = new Set<string>();
+  for (const a of annotations) {
+    if (a.kind === "ink") continue;
+    live.add(a.blockId);
+    const before = record.blocks[a.blockId];
+    if (before === undefined) {
+      if (a.created > record.exportedAt) byId.set(a.id, "new");
+      continue;
+    }
+    let now: string | null;
+    try {
+      now = normaliseSection(render(a));
+    } catch {
+      now = null; // A broken template: exporting will say so.
+    }
+    if (now !== null && now !== before) byId.set(a.id, "changed");
+  }
+  const deleted = Object.keys(record.blocks).filter((id) => !live.has(id));
+  return { byId, deleted, count: byId.size + deleted.length };
+}
+
+/** Where a block is in a section's text (\n line endings): from its first line to the end of its `^id` line. */
+export interface BlockSpan {
+  start: number;
+  end: number;
+}
+
+const blockIdOf = (line: string) => /\^(hl-[0-9a-z]{6})\s*$/.exec(line)?.[1];
+
+/**
+ * The blocks of a section by id. A block is what Obsidian gives the id to:
+ * the lines from the last blank line (or heading, or other block, or the
+ * section's start) down to its `^id` line; an id on a line of its own after
+ * a blank line, as the default template writes it, takes the paragraph
+ * above. When `known` (what Tourmaline
+ * wrote for it) ends at that line, the block is all of that, blank lines
+ * inside included.
+ */
+export function sectionBlocks(body: string, known: Record<string, string> = {}): Map<string, BlockSpan> {
+  const out = new Map<string, BlockSpan>();
+  const all = lines(body);
+  for (let i = 0; i < all.length; i++) {
+    const id = blockIdOf(all[i].text);
+    if (!id || out.has(id)) continue;
+    const end = all[i].start + all[i].text.length;
+    const paragraphStart = (from: number) => {
+      let j = from;
+      while (j > 0 && all[j - 1].text.trim() !== "" && headingLevel(all[j - 1].text) === 0 && !blockIdOf(all[j - 1].text)) j--;
+      return j;
+    };
+    let j = paragraphStart(i);
+    if (j === i && all[i].text.trim() === `^${id}`) {
+      // An id alone after a blank line belongs to the paragraph (callout, list) above it.
+      let k = i;
+      while (k > 0 && all[k - 1].text.trim() === "") k--;
+      if (k > 0 && k < i && headingLevel(all[k - 1].text) === 0 && !blockIdOf(all[k - 1].text)) j = paragraphStart(k - 1);
+    }
+    let start = all[j].start;
+    const wrote = known[id];
+    if (wrote) {
+      // As many lines back as Tourmaline wrote, if they are what it wrote.
+      const k = i - (wrote.split("\n").length - 1);
+      if (k >= 0 && k < j && normaliseSection(body.slice(all[k].start, end)) === wrote) start = all[k].start;
+    }
+    out.set(id, { start, end });
+  }
+  return out;
+}
+
+export interface BlockUpdate {
+  blockId: string;
+  /** The block's new text. */
+  text: string;
+}
+
+/**
+ * A section with some blocks added or replaced and everything else as it
+ * was (Export selected). A block already there is replaced in place; a new
+ * one goes after the nearest block before it in `order` (the full export's
+ * order of block ids), else before the nearest one after it, else at the end.
+ */
+export function mergeBlocks(
+  previous: string | null,
+  updates: readonly BlockUpdate[],
+  order: readonly string[],
+  known: Record<string, string> = {},
+): string {
+  let body = (previous ?? "").replace(/\r\n/g, "\n").replace(/\s+$/, "");
+  for (const u of updates) {
+    const text = u.text.replace(/\r\n/g, "\n").trim();
+    const spans = sectionBlocks(body, known);
+    const here = spans.get(u.blockId);
+    if (here) {
+      body = body.slice(0, here.start) + text + body.slice(here.end);
+      continue;
+    }
+    const at = order.indexOf(u.blockId);
+    const before = at === -1 ? undefined : order.slice(0, at).reverse().find((id) => spans.has(id));
+    const after = at === -1 ? undefined : order.slice(at + 1).find((id) => spans.has(id));
+    if (before) {
+      const end = spans.get(before)!.end;
+      body = `${body.slice(0, end)}\n\n${text}${body.slice(end)}`;
+    } else if (after) {
+      const start = spans.get(after)!.start;
+      body = `${body.slice(0, start)}${text}\n\n${body.slice(start)}`;
+    } else {
+      body = body ? `${body}\n\n${text}` : text;
+    }
+  }
+  return body;
+}
+
+/** A block's text as it is in a section (normalised), if the section has it. */
+export function blockText(body: string, blockId: string, known: Record<string, string> = {}): string | null {
+  const text = body.replace(/\r\n/g, "\n");
+  const span = sectionBlocks(text, known).get(blockId);
+  return span ? normaliseSection(text.slice(span.start, span.end)) : null;
+}
+
+/** A block as one line of plain text, for lists (the preview): callout and link syntax and the block id left out. */
+export function blockSnippet(markdown: string, max = 160): string {
+  const text = markdown
+    .split(/\r?\n/)
+    .map((l) =>
+      l
+        .replace(/^(?:>\s?)+/, "")
+        .replace(/^\[![^\]]*\][+-]?\s*/, "")
+        .replace(/\s*\^hl-[0-9a-z]{6}\s*$/, "")
+        .replace(/!?\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, "$1")
+        .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .trim(),
+    )
+    .filter(Boolean)
+    .join(" ");
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}

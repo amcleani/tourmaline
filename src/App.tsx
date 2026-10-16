@@ -71,17 +71,22 @@ import {
   NoteFormatError,
   defaultPreset,
   exportNotePath,
+  exportStatus,
   highlightTemplateFor,
   parseExportSettings,
+  renderAnnotation,
   type ExportPreset,
+  type ExportRecord,
   type ExportSettings,
+  type ExportStatus,
   type SectionInput,
 } from "./vault/export";
 import { useVaultIndex } from "./vault/useVaultIndex";
 import { setWikilinkContext, wikilinkUrl, type Wikilink } from "./notes/wikilinks";
 import { noteWikilinks } from "./notes/markdown";
 import { literatureNotePath, obsidianUrl, renderHighlight } from "./vault/notes";
-import { runExport, type ExportQuestion } from "./vault/runExport";
+import { loadExportRecord, runExport, type ExportQuestion } from "./vault/runExport";
+import { ExportPreviewDialog } from "./ui/ExportPreviewDialog";
 import { useVault } from "./vault/useVault";
 import { installNativeMenu } from "./platform/menu";
 import { AnnotationPopover } from "./ui/AnnotationPopover";
@@ -134,6 +139,19 @@ interface Tab {
   citekey: string | null;
   /** An entry this paper must not be matched to again. */
   citekeyDeclined: string | null;
+}
+
+/** "2 new, 1 changed, 1 deleted". */
+function unexportedSummary(u: ExportStatus): string {
+  const of = (status: string) => [...u.byId.values()].filter((v) => v === status).length;
+  return [
+    [of("new"), "new"],
+    [of("changed"), "changed"],
+    [u.deleted.length, "deleted"],
+  ]
+    .filter(([n]) => n)
+    .map(([n, what]) => `${n} ${what}`)
+    .join(", ");
 }
 
 type Dialog =
@@ -622,6 +640,18 @@ export function App() {
   const [noteFocusFor, setNoteFocusFor] = useState<string | null>(null);
   const clearNoteFocus = useCallback(() => setNoteFocusFor(null), []);
   const selected = notes.annotations.find((a) => a.id === selectedId) ?? null;
+  /**
+   * Several annotations selected in the sidebar (Ctrl/Shift), kept while the
+   * active one is still `active`: selecting any other way selects just one.
+   */
+  const [chosen, setChosen] = useState<{ ids: ReadonlySet<string>; active: string } | null>(null);
+  const selection = useMemo<ReadonlySet<string>>(() => {
+    if (chosen && chosen.active === selectedId) {
+      const live = new Set(notes.annotations.map((a) => a.id));
+      return new Set([...chosen.ids].filter((id) => live.has(id)));
+    }
+    return new Set(selectedId ? [selectedId] : []);
+  }, [chosen, selectedId, notes.annotations]);
 
   // Nothing carries over between tabs.
   useEffect(() => {
@@ -645,12 +675,12 @@ export function App() {
       }
       for (const [page, rects] of rectsByPage) {
         const list = byPage.get(page) ?? [];
-        list.push({ id: a.id, kind: a.kind, rects, colour, selected: a.id === selectedId });
+        list.push({ id: a.id, kind: a.kind, rects, colour, selected: selection.has(a.id) });
         byPage.set(page, list);
       }
     }
     return byPage;
-  }, [notes.annotations, categories, selectedId]);
+  }, [notes.annotations, categories, selection]);
 
   /** Selects an annotation and scrolls it into view. */
   const selectAnnotation = useCallback((a: Annotation | null) => {
@@ -952,18 +982,51 @@ export function App() {
     };
   };
 
+  // What was last exported, block by block: new and changed annotations in
+  // the sidebar, and the count of changes not exported in the toolbar.
+  const exportEntry = activeTab?.citekey ? bibliography?.get(activeTab.citekey) : undefined;
+  const exportTarget = useMemo(() => {
+    if (!activeTab?.workId || !activeTab.citekey || !vaultSettings || !exportEntry) return null;
+    return { workId: activeTab.workId, path: exportNotePath(vaultSettings.citations, exportSettings, citationVariables(exportEntry)) };
+  }, [activeTab?.workId, activeTab?.citekey, vaultSettings, exportSettings, exportEntry]);
+  const [exportRecord, setExportRecord] = useState<{ key: string; record: ExportRecord | null } | null>(null);
+  const [exportsDone, setExportsDone] = useState(0);
+  const exportTargetKey = exportTarget ? `${exportTarget.workId}:${exportTarget.path}` : null;
+  useEffect(() => {
+    if (!exportTarget || !exportTargetKey) return;
+    let stale = false;
+    loadExportRecord(exportTarget.workId, exportTarget.path)
+      .then((record) => !stale && setExportRecord({ key: exportTargetKey, record }))
+      .catch((e) => console.error("Could not read what was last exported", e));
+    return () => {
+      stale = true;
+    };
+    // exportTarget changes with exportTargetKey; exportsDone re-reads after an export.
+  }, [exportTargetKey, exportsDone]);
+  const unexported = useMemo(() => {
+    const record = exportRecord && exportRecord.key === exportTargetKey ? exportRecord.record : null;
+    if (!record || !activeTab || activeTab.workId !== activeWork || !notes.loaded) return null;
+    const input = sectionInput(activeTab, notes.annotations);
+    return exportStatus(record, notes.annotations, (a) => renderAnnotation(exportSettings, input, a));
+    // sectionInput reads the tab, categories and bibliography.
+  }, [exportRecord, exportTargetKey, activeTab, activeWork, notes.annotations, notes.loaded, exportSettings, categories, bibliography]);
+
   const exporting = useRef(false);
-  /** The preset the export prompt starts from. */
-  const [exportStart, setExportStart] = useState<string | null>(null);
+  /** The preset the export prompt starts from, and whether it previews first (Export › Preview export). */
+  const [exportStart, setExportStart] = useState<{ preset: string; preview: boolean } | null>(null);
   /** Export to Obsidian: asks which annotations this time, starting from a preset (the default unless given). */
-  const requestExport = (presetId: string = defaultPreset(exportSettings).id) => {
+  const requestExport = (presetId: string = defaultPreset(exportSettings).id, preview = false) => {
     const tab = latest.current.activeTab;
     if (!tab?.citekey || !tab.workId || tab.pendingVersion || !vault || !vaultSettings || exporting.current) return;
-    setExportStart(presetId);
+    setExportStart({ preset: presetId, preview });
     setDialog("export");
   };
-  /** Exports the open paper's annotations with these choices; `named` is the preset they are, if unchanged. */
-  const exportToVault = async (preset: ExportPreset, named: boolean) => {
+  /**
+   * Exports the open paper's annotations with these choices; `named` is the
+   * preset they are, if unchanged. `only`: Export selected (those, the rest
+   * of the section left as it is); `preview`: show what will change first.
+   */
+  const exportToVault = async (preset: ExportPreset, named: boolean, opts: { only?: ReadonlySet<string>; preview?: boolean } = {}) => {
     const tab = latest.current.activeTab;
     if (!tab?.citekey || !tab.workId || tab.pendingVersion || !vault || !vaultSettings || exporting.current) return;
     exporting.current = true;
@@ -987,15 +1050,21 @@ export function App() {
         vaultSettings,
         settings: exportSettings,
         preset,
+        only: opts.only,
+        preview: opts.preview || !!opts.only,
         workId: tab.workId,
         input: sectionInput(now.activeTab, annotations, outline),
         ask,
       });
-      const what =
-        (result.count === result.total ? "" : `${result.count} of `) +
-        (result.total === 1 ? "1 annotation" : `${result.total} annotations`) +
-        (named && exportSettings.presets.length > 1 ? ` (${preset.name})` : "") +
-        (preset.groupBy === "section" && !outline?.length ? ", not grouped: the PDF has no outline" : "");
+      if (result.status !== "cancelled") setExportsDone((n) => n + 1);
+      const what = opts.only
+        ? result.count === 1
+          ? "1 selected annotation"
+          : `${result.count} selected annotations`
+        : (result.count === result.total ? "" : `${result.count} of `) +
+          (result.total === 1 ? "1 annotation" : `${result.total} annotations`) +
+          (named && exportSettings.presets.length > 1 ? ` (${preset.name})` : "") +
+          (preset.groupBy === "section" && !outline?.length ? ", not grouped: the PDF has no outline" : "");
       if (result.status === "written") setNotice(`Exported ${what} to ${result.created ? "a new note, " : ""}${result.path}`);
       else if (result.status === "unchanged") setNotice(`${result.path} is up to date`);
       else setNotice("Nothing was exported");
@@ -1005,6 +1074,14 @@ export function App() {
     } finally {
       exporting.current = false;
     }
+  };
+
+  /** Export selected: the annotations selected in the sidebar (or the selected one), the rest of the section as it is. */
+  const exportSelected = () => {
+    const tab = latest.current.activeTab;
+    const ids = latest.current.selection;
+    if (!tab?.citekey || !tab.workId || tab.pendingVersion || !vault || !vaultSettings || exporting.current || ids.size === 0) return;
+    void exportToVault(defaultPreset(exportSettings), false, { only: ids });
   };
 
   const updates = useUpdates(saveEverything);
@@ -1306,6 +1383,7 @@ export function App() {
       hasTextSelection: selectionEnd !== null,
       annotationSelected: selected !== null,
       annotationHasLinks: vaultSettings !== null && !!selected?.note && noteWikilinks(selected.note).some((l) => !!l.note),
+      selectionSize: selection.size,
       captureMode,
       canUndo: notes.canUndo,
       canRedo: notes.canRedo,
@@ -1333,6 +1411,7 @@ export function App() {
     versionPending,
     selectionEnd,
     selected,
+    selection,
     captureMode,
     notes.canUndo,
     notes.canRedo,
@@ -1356,6 +1435,8 @@ export function App() {
     saveIntoPdf,
     exportToVault,
     requestExport,
+    exportSelected,
+    selection,
     outline,
     writeBackConfirmed,
     focusActive,
@@ -1390,6 +1471,8 @@ export function App() {
     saveIntoPdf,
     exportToVault,
     requestExport,
+    exportSelected,
+    selection,
     outline,
     writeBackConfirmed,
     focusActive,
@@ -1528,6 +1611,8 @@ export function App() {
       },
       openNote: () => latest.current.openLiteratureNote(),
       exportToVault: () => latest.current.requestExport(),
+      exportSelected: () => latest.current.exportSelected(),
+      previewExport: () => latest.current.requestExport(undefined, true),
       exportSettings: () => setDialog("exportSettings"),
       goBack: () => latest.current.travel("back"),
       toggleSplit: () => latest.current.toggleSplit(),
@@ -1801,6 +1886,8 @@ export function App() {
   const pageCount = activePdf?.numPages ?? 0;
   const goToPageShortcut = registry.get("nav.goToPage")?.shortcut;
   const goToPageHint = goToPageShortcut ? ` (${formatShortcut(goToPageShortcut)})` : "";
+  const exportShortcut = registry.get("export.toVault")?.shortcut;
+  const exportHint = exportShortcut ? ` (${formatShortcut(exportShortcut)})` : "";
   const pageLabel = activeTab?.labels?.[currentPage];
   const activeKeyForView = activeTab?.key;
   const closePreview = linkPreview.close;
@@ -1848,6 +1935,16 @@ export function App() {
                 </button>
                 <span className="toolbar-status">{Math.round(status.zoom * 100)}%</span>
               </>
+            )}
+            {activePdf && unexported && unexported.count > 0 && (
+              <button
+                type="button"
+                className="toolbar-text-button unexported"
+                onClick={() => registry.execute("export.toVault", "toolbar")}
+                title={`${unexportedSummary(unexported)} since the last export. Export to Obsidian${exportHint}`}
+              >
+                {unexported.count} not exported
+              </button>
             )}
             {activePdf && activeTab && bibliography && (
               <button
@@ -2034,9 +2131,15 @@ export function App() {
                 annotations={notes.annotations}
                 categories={categories}
                 selectedId={selectedId}
+                selection={selection}
+                exportStatus={unexported?.byId}
                 reanchoring={notes.reanchoring}
                 pageLabel={(p) => activeTab?.labels?.[p] ?? String(p + 1)}
                 onSelect={(id) => selectAnnotation(notes.annotations.find((a) => a.id === id) ?? null)}
+                onChoose={(ids, active) => {
+                  setChosen({ ids: new Set(ids), active });
+                  selectAnnotation(notes.annotations.find((a) => a.id === active) ?? null);
+                }}
                 onEditNote={() => registry.execute("annot.editNote", "other")}
                 inlineEditor={
                   selected && (!selected.placement || selected.placement.status === "orphan")
@@ -2111,7 +2214,8 @@ export function App() {
         {dialog === "export" && activeTab && exportStart !== null && (
           <ExportDialog
             presets={exportSettings.presets}
-            startWith={exportStart}
+            startWith={exportStart.preset}
+            preview={exportStart.preview}
             categories={liveCategories}
             annotations={notes.annotations.filter((a) => a.workId === activeTab.workId)}
             notePath={
@@ -2119,11 +2223,12 @@ export function App() {
                 ? exportNotePath(vaultSettings.citations, exportSettings, sectionInput(activeTab, []).entry)
                 : null
             }
-            onExport={(choices, preset) => {
+            onExport={(choices, preset, preview) => {
               setDialog(null);
               void exportToVault(
                 preset ?? { id: "custom", name: "your choice", filter: choices.filter, groupBy: choices.groupBy },
                 preset !== null,
+                { preview },
               );
             }}
             onCancel={() => setDialog(null)}
@@ -2151,10 +2256,20 @@ export function App() {
             onConfirm={() => question.resolve(true)}
             onCancel={() => question.resolve(false)}
           >
-            <p>
-              The Tourmaline section of <code>{question.q.path}</code> has been edited since Tourmaline last wrote it.
-              Exporting replaces the whole section with the annotations as they are in Tourmaline.
-            </p>
+            {question.q.blocks ? (
+              <p>
+                {question.q.blocks.length === 1 ? "A highlight you are exporting was" : `${question.q.blocks.length} of the highlights you are exporting were`}{" "}
+                edited in <code>{question.q.path}</code> since Tourmaline last wrote{" "}
+                {question.q.blocks.length === 1 ? "it" : "them"}. Exporting replaces{" "}
+                {question.q.blocks.length === 1 ? "it" : "them"} with how {question.q.blocks.length === 1 ? "it is" : "they are"} in Tourmaline; the rest of
+                the section stays as it is.
+              </p>
+            ) : (
+              <p>
+                The Tourmaline section of <code>{question.q.path}</code> has been edited since Tourmaline last wrote it.
+                Exporting replaces the whole section with the annotations as they are in Tourmaline.
+              </p>
+            )}
             <p className="muted">
               The section is everything between <code>%% tourmaline:begin %%</code> and <code>%% tourmaline:end %%</code>;
               the rest of the note is never changed. To keep what you wrote there, cancel and move it out of the section
@@ -2162,24 +2277,14 @@ export function App() {
             </p>
           </ConfirmDialog>
         )}
-        {question?.q.kind === "links" && (
-          <ConfirmDialog
-            title="Remove highlights that notes link to?"
-            confirmLabel="Remove them"
-            danger
-            onConfirm={() => question.resolve(true)}
+        {question?.q.kind === "preview" && (
+          <ExportPreviewDialog
+            plan={question.q.plan}
+            path={question.q.path}
+            selected={question.q.selected}
+            onExport={() => question.resolve(true)}
             onCancel={() => question.resolve(false)}
-          >
-            <p>These highlights were deleted in Tourmaline, but notes link to them, and those links will stop working:</p>
-            <ul className="link-list">
-              {question.q.links.map((l) => (
-                <li key={`${l.path}#${l.blockId}`}>
-                  <code>^{l.blockId}</code> from <code>{l.path}</code>
-                </li>
-              ))}
-            </ul>
-            <p className="muted">To keep them, cancel and undo the deletion (Edit › Undo) before exporting.</p>
-          </ConfirmDialog>
+          />
         )}
         {dialog === "entry" && bibliography && activeTab && (
           <EntryPicker

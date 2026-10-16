@@ -18,6 +18,8 @@ export interface CommandContext {
   annotationSelected: boolean;
   /** The selected annotation's note links to notes in the vault. */
   annotationHasLinks: boolean;
+  /** How many annotations are selected (several in the sidebar, else the selected one). */
+  selectionSize: number;
   /** Dragging on a page draws an area to capture. */
   captureMode: boolean;
   canUndo: boolean;
@@ -48,6 +50,7 @@ export const IDLE_CONTEXT: CommandContext = {
   hasTextSelection: false,
   annotationSelected: false,
   annotationHasLinks: false,
+  selectionSize: 0,
   captureMode: false,
   canUndo: false,
   canRedo: false,

@@ -9,6 +9,8 @@ export interface AppActions {
   linkEntry: () => void;
   openNote: () => Promise<void>;
   exportToVault: () => void;
+  exportSelected: () => void;
+  previewExport: () => void;
   toggleFocus: () => void;
   focusNext: () => void;
   focusPrevious: () => void;
@@ -585,6 +587,22 @@ export function appCommands(a: AppActions): Command[] {
       menu: { menu: "Export", group: 1, order: 1 },
       when: (ctx) => ctx.hasDocument && ctx.hasCitekey && ctx.hasVault,
       run: a.exportToVault,
+    },
+    {
+      id: "export.selected",
+      title: "Export selected annotations to Obsidian…",
+      keywords: ["obsidian", "vault", "update", "only", "these", "highlights", "some"],
+      menu: { menu: "Export", group: 1, order: 2 },
+      when: (ctx) => ctx.hasDocument && ctx.hasCitekey && ctx.hasVault && ctx.selectionSize > 0,
+      run: a.exportSelected,
+    },
+    {
+      id: "export.preview",
+      title: "Preview export to Obsidian…",
+      keywords: ["obsidian", "vault", "changes", "diff", "what will change", "removed"],
+      menu: { menu: "Export", group: 1, order: 3 },
+      when: (ctx) => ctx.hasDocument && ctx.hasCitekey && ctx.hasVault,
+      run: a.previewExport,
     },
     {
       id: "export.settings",

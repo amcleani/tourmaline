@@ -123,36 +123,45 @@ describe("runExport", () => {
     expect(notes.get(PATH)!.text).not.toContain("my edit");
   });
 
-  it("asks before removing highlights that notes link to", async () => {
+  it("shows what will change before removing highlights, with the notes that link to them", async () => {
     await run([highlight(1), highlight(2), highlight(3)]);
     links = [{ path: "Ideas.md", blockId: "hl-000002" }];
     // A link from the note itself, outside the section, counts too.
     notes.set(PATH, { text: notes.get(PATH)!.text + "\nSee [[#^hl-000003]].\n", version: 7 });
     answer = false;
-    expect(await run([highlight(1)])).toMatchObject({ status: "cancelled" });
+    expect(await run([highlight(1), highlight(4)])).toMatchObject({ status: "cancelled" });
     expect(asked).toEqual([
       {
-        kind: "links",
+        kind: "preview",
         path: PATH,
-        links: [
-          { path: PATH, blockId: "hl-000003" },
-          { path: "Ideas.md", blockId: "hl-000002" },
-        ],
+        selected: false,
+        plan: {
+          added: [{ blockId: "hl-000004", text: "p. 5 quote 4" }],
+          updated: [],
+          removed: [
+            { blockId: "hl-000002", text: "p. 3 quote 2", linkedFrom: ["Ideas.md"] },
+            { blockId: "hl-000003", text: "p. 4 quote 3", linkedFrom: [PATH] },
+          ],
+          unchanged: 1,
+        },
       },
     ]);
-    // Removing one nobody links to doesn't ask.
+    // Without removals, no preview unless asked for.
     asked = [];
-    links = [];
-    notes.set(PATH, { text: notes.get(PATH)!.text.replace("\nSee [[#^hl-000003]].\n", ""), version: 8 });
-    expect(await run([highlight(1), highlight(2)])).toMatchObject({ status: "written" });
+    answer = true;
+    expect(await run([highlight(1), highlight(2), highlight(3), highlight(5)])).toMatchObject({ status: "written" });
     expect(asked).toEqual([]);
+    expect(await runExport({ ...job([highlight(1), highlight(2), highlight(3), highlight(5, { note: "new" })]), preview: true })).toMatchObject({
+      status: "written",
+    });
+    expect(asked).toMatchObject([{ kind: "preview", plan: { added: [], updated: [{ blockId: "hl-000005" }], removed: [], unchanged: 3 } }]);
   });
 
   it("counts a link from another highlight's note in the section", async () => {
     await run([highlight(1), highlight(2, { note: "Compare [[#^hl-000001]]" })]);
     answer = false;
     expect(await run([highlight(2, { note: "Compare [[#^hl-000001]]" })])).toMatchObject({ status: "cancelled" });
-    expect(asked).toEqual([{ kind: "links", path: PATH, links: [{ path: PATH, blockId: "hl-000001" }] }]);
+    expect(asked).toMatchObject([{ kind: "preview", plan: { removed: [{ blockId: "hl-000001", linkedFrom: [PATH] }] } }]);
   });
 
   it("remembers what it wrote in each note, so switching where highlights go doesn't look like an edit", async () => {
@@ -192,5 +201,80 @@ describe("runExport", () => {
     expect(text).not.toContain("^hl-000002");
     // The area isn't written, so its image isn't copied.
     expect(images).toEqual([]);
+  });
+});
+
+describe("export selected", () => {
+  const only = (annotations: Annotation[], ids: number[]) =>
+    runExport({ ...job(annotations), only: new Set(ids.map((n) => `id-${n}`)), preview: true });
+
+  it("adds or replaces only those blocks, leaving the rest of the section as it is", async () => {
+    await run([highlight(1), highlight(3), highlight(5)]);
+    // The user edits highlight 5's block in Obsidian, and adds a line of their own.
+    const edited = notes.get(PATH)!.text.replace("> quote 5", "> quote 5 (mine)").replace("%% tourmaline:end %%", "My line.\n%% tourmaline:end %%");
+    notes.set(PATH, { text: edited, version: 3 });
+    const now = [highlight(1, { note: "changed" }), highlight(2), highlight(3), highlight(4, { note: "x" }), highlight(5)];
+    expect(await only(now, [1, 2])).toMatchObject({ status: "written", count: 2 });
+    const text = notes.get(PATH)!.text;
+    // 1 is updated in place, 2 goes between 1 and 3; 4 isn't exported, 5's edit and the user's line stay.
+    expect(text.indexOf("> changed")).toBeGreaterThan(-1);
+    expect(text.indexOf("^hl-000001")).toBeLessThan(text.indexOf("^hl-000002"));
+    expect(text.indexOf("^hl-000002")).toBeLessThan(text.indexOf("^hl-000003"));
+    expect(text).not.toContain("hl-000004");
+    expect(text).toContain("> quote 5 (mine)");
+    expect(text).toContain("My line.\n%% tourmaline:end %%");
+    expect(asked).toMatchObject([
+      { kind: "preview", selected: true, plan: { added: [{ blockId: "hl-000002" }], updated: [{ blockId: "hl-000001" }], removed: [], unchanged: 2 } },
+    ]);
+  });
+
+  it("asks before replacing a selected block edited in the note, and keeps the section counted as edited", async () => {
+    await run([highlight(1), highlight(2)]);
+    notes.set(PATH, { text: notes.get(PATH)!.text.replace("> quote 1", "> quote 1 (mine)"), version: 4 });
+    answer = false;
+    expect(await only([highlight(1, { note: "n" }), highlight(2)], [1])).toMatchObject({ status: "cancelled" });
+    expect(asked).toEqual([{ kind: "edited", path: PATH, blocks: ["hl-000001"] }]);
+    // Exporting another block leaves the edit, and a whole export later still asks about it.
+    asked = [];
+    answer = true;
+    expect(await only([highlight(1), highlight(2, { note: "n" })], [2])).toMatchObject({ status: "written" });
+    expect(notes.get(PATH)!.text).toContain("quote 1 (mine)");
+    asked = [];
+    answer = false;
+    await run([highlight(1), highlight(2, { note: "n" })]);
+    expect(asked).toEqual([{ kind: "edited", path: PATH }]);
+  });
+
+  it("starts a section with just those when the note has none", async () => {
+    expect(await only([highlight(1), highlight(2)], [2])).toMatchObject({ status: "written", created: true, count: 1 });
+    const text = notes.get(PATH)!.text;
+    expect(text).toContain("^hl-000002\n%% tourmaline:end %%");
+    expect(text).not.toContain("hl-000001");
+  });
+});
+
+describe("the export record", () => {
+  it("is what the sidebar status compares with: new since the last export, changed, deleted", async () => {
+    const { loadExportRecord } = await import("../src/vault/runExport");
+    const { exportStatus, renderAnnotation } = await import("../src/vault/export");
+    await run([highlight(1), highlight(2)]);
+    const record = (await loadExportRecord("w", PATH))!;
+    expect(Object.keys(record.blocks)).toEqual(["hl-000001", "hl-000002"]);
+    const input = job([]).input;
+    const render = (a: Annotation) => renderAnnotation(DEFAULT_EXPORT_SETTINGS, input, a);
+    const later = record.exportedAt + 1;
+    const status = exportStatus(record, [highlight(1, { note: "now with a note" }), highlight(3, { created: later }), highlight(4)], render);
+    // 1 changed, 3 is new, 4 was left out before (older than the export), 2 was deleted.
+    expect([...status.byId]).toEqual([
+      ["id-1", "changed"],
+      ["id-3", "new"],
+    ]);
+    expect(status.deleted).toEqual(["hl-000002"]);
+    expect(status.count).toBe(3);
+    // Export selected adds to it without changing when the paper was last exported.
+    await runExport({ ...job([highlight(1), highlight(2), highlight(3, { created: later })]), only: new Set(["id-3"]) });
+    const after = (await loadExportRecord("w", PATH))!;
+    expect(after.exportedAt).toBe(record.exportedAt);
+    expect(Object.keys(after.blocks)).toEqual(["hl-000001", "hl-000002", "hl-000003"]);
   });
 });

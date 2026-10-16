@@ -57,7 +57,7 @@ describe("ExportDialog (asked on every export)", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Export" }));
     expect(status()).toBe("All 3 annotations into Obsidian/Library/@Goodman2023GG.md.");
     await user.keyboard("{Enter}");
-    expect(onExport).toHaveBeenCalledWith({ filter: EVERYTHING, groupBy: "none" }, DEFAULT_PRESET);
+    expect(onExport).toHaveBeenCalledWith({ filter: EVERYTHING, groupBy: "none" }, DEFAULT_PRESET, false);
   });
 
   it("lets this export's choices differ, counting what goes in", async () => {
@@ -75,6 +75,7 @@ describe("ExportDialog (asked on every export)", () => {
     expect(onExport).toHaveBeenCalledWith(
       { filter: { ...EVERYTHING, withNote: true, categories: ["c2", "none"] }, groupBy: "category" },
       null,
+      false,
     );
   });
 
@@ -87,7 +88,7 @@ describe("ExportDialog (asked on every export)", () => {
     expect((screen.getByLabelText("Only those with a note") as HTMLInputElement).checked).toBe(false);
     await user.selectOptions(screen.getByLabelText("Start from"), "comments");
     await user.click(screen.getByRole("button", { name: "Export" }));
-    expect(onExport).toHaveBeenCalledWith({ filter: comments.filter, groupBy: "category" }, comments);
+    expect(onExport).toHaveBeenCalledWith({ filter: comments.filter, groupBy: "category" }, comments, false);
   });
 
   it("won't export choices that let nothing through, and says when the section will be empty", async () => {
@@ -101,6 +102,13 @@ describe("ExportDialog (asked on every export)", () => {
     await user.click(screen.getByLabelText("Area captures"));
     expect(status()).toBe("0 of 3 annotations into Obsidian/Library/@Goodman2023GG.md: the section will be empty.");
     expect(onExport).not.toHaveBeenCalled();
+  });
+
+  it("previews first from its Preview button, or by Enter when opened to preview", async () => {
+    const user = userEvent.setup();
+    const { onExport } = setup();
+    await user.click(screen.getByRole("button", { name: "Preview…" }));
+    expect(onExport).toHaveBeenLastCalledWith({ filter: EVERYTHING, groupBy: "none" }, DEFAULT_PRESET, true);
   });
 
   it("closes with Escape without exporting", async () => {

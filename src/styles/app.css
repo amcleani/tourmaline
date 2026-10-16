@@ -792,6 +792,20 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .annotation-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 0.8rem; color: var(--text-muted); }
 .annotation-meta .swatch { background: var(--mark-colour); }
 .status-badge { display: inline-flex; align-items: center; gap: 3px; color: var(--danger-text); }
+/* The active one among several selected (the list's keyboard cursor). */
+.annotation-list:focus-visible .annotation-item.active { outline: 2px dashed var(--focus); outline-offset: -5px; }
+.export-badge {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--text);
+}
+.export-badge.new { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+.toolbar-text-button.unexported { font-variant-numeric: tabular-nums; }
+.export-plan h3 { margin: 12px 0 4px; font-size: 0.9rem; }
+.export-plan.removed h3 { color: var(--danger-text); }
+.export-preview-dialog { width: min(640px, calc(100vw - 32px)); }
 .annotation-quote {
   margin: 4px 0 0;
   display: -webkit-box;

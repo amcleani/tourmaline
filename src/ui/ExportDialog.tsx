@@ -12,16 +12,18 @@ interface Props {
   annotations: readonly Annotation[];
   /** The note they go into, relative to the vault. */
   notePath: string | null;
-  /** `preset` is the one chosen if the choices are still exactly its own. */
-  onExport: (choices: Choices, preset: ExportPreset | null) => void;
+  /** Opened by Export › Preview export: Enter shows what will change first. */
+  preview?: boolean;
+  /** `preset` is the one chosen if the choices are still exactly its own; `preview`: show what will change first. */
+  onExport: (choices: Choices, preset: ExportPreset | null, preview: boolean) => void;
   onCancel: () => void;
 }
 
 
 // Export › Export annotations to Obsidian: which annotations this time and
 // how they're grouped, starting from a preset (the default one, or the one
-// whose command was used). Enter exports.
-export function ExportDialog({ presets, startWith, categories, annotations, notePath, onExport, onCancel }: Props) {
+// whose command was used). Enter exports (or previews, when opened to).
+export function ExportDialog({ presets, startWith, categories, annotations, notePath, preview = false, onExport, onCancel }: Props) {
   const id = useId();
   const initial = presets.find((p) => p.id === startWith) ?? presets[0];
   const [presetId, setPresetId] = useState(initial.id);
@@ -38,6 +40,7 @@ export function ExportDialog({ presets, startWith, categories, annotations, note
   const total = exportable(annotations).length;
   const count = exportable(annotations, choices.filter, categories).length;
   const field = (name: string) => `${id}-${name}`;
+  const go = (first: boolean) => onExport(choices, sameChoices(choices, preset) ? preset : null, first);
 
   return (
     <div className="overlay" onMouseDown={onCancel}>
@@ -62,7 +65,7 @@ export function ExportDialog({ presets, startWith, categories, annotations, note
           className="dialog-body"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!problem) onExport(choices, sameChoices(choices, preset) ? preset : null);
+            if (!problem) go(preview);
           }}
         >
           {presets.length > 1 && (
@@ -103,8 +106,11 @@ export function ExportDialog({ presets, startWith, categories, annotations, note
             <button type="button" className="button" onClick={onCancel}>
               Cancel
             </button>
+            <button type="button" className="button" disabled={!!problem} onClick={() => go(!preview)}>
+              {preview ? "Export" : "Preview…"}
+            </button>
             <button ref={exportRef} type="submit" className="button primary" disabled={!!problem}>
-              Export
+              {preview ? "Preview…" : "Export"}
             </button>
           </div>
         </form>

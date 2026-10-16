@@ -173,12 +173,22 @@ user doesn't want them).
   that category's annotations (export and Copy as Markdown).
 - *Status (11b)*: what each annotation looked like when last exported (per
   block), so the sidebar marks new and changed ones and the toolbar counts
-  changes not yet exported.
+  changes not yet exported (new, changed, deleted; a click exports).
+  "New" means made since the paper was last exported whole and not in the
+  note: annotations a filter left out then aren't marked. Papers exported
+  before 11b show nothing until their next export.
 - *Preview (11b)*: shown before writing only when highlights would leave the
-  note; a command shows it on demand.
-- *Export selected (11b)*: multi-selection in the sidebar; exporting it adds
-  or updates only those in the section and leaves everything else there as
-  it is.
+  note (it replaces the old question about linked highlights, naming the
+  notes that link to each); Export › Preview export (and the prompt's
+  Preview button) shows it on demand.
+- *Export selected (11b)*: multi-selection in the sidebar (Shift/Ctrl+click;
+  Shift+arrows, Ctrl+arrows and Space, Ctrl+A); exporting it adds or
+  updates only those in the section and leaves everything else there as it
+  is. Its prompt is the preview. New blocks go next to their neighbours in
+  the order of a whole export with the default preset's grouping (without a
+  subheading if their group isn't in the note yet). A block is what
+  Obsidian gives its `^id` to; edits to other blocks never ask, edits to a
+  selected one do.
 - *Export all (11c)*: every paper whose annotations changed since its last
   export, one after another, with the same questions as a single export.
 
