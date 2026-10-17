@@ -284,7 +284,7 @@ silently dropped).
 | 10 | **Wikilink autocomplete** in notes, from the vault | Typing `[[conc` in a note suggests `concept` from the vault ✅ |
 | 11a | **Export: what goes in**: filters, presets, grouping, a template per category | Exporting with a preset "Comments" (only annotations with a note, grouped by category) writes just those, under one subheading per category ✅ |
 | 11b | **Export: seeing and choosing**: status in the sidebar, preview of removals, export selected | The sidebar shows which highlights changed since the last export; exporting two selected highlights updates only those in the note ✅ |
-| 11c | **Export all papers with changes** | One command updates the literature notes of every paper whose annotations changed since its last export |
+| 11c | **Export all papers with changes** | One command updates the literature notes of every paper whose annotations changed since its last export ✅ |
 
 Phases 7 (Ink) and 8 (Equation → LaTeX) were taken out of the plan for now
 (2026-10-07); the other phases keep their numbers. Set aside, in case they
