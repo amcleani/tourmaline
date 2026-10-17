@@ -537,11 +537,38 @@ export const linksToBlock = (markdown: string, blockId: string) => markdown.incl
  * are new; older ones were left out on purpose).
  */
 export interface ExportRecord {
+  /** When the annotations of the last whole export were read. */
   exportedAt: number;
   blocks: Record<string, string>;
   /** When blocks were written by Export selected since (by block id); the others at `exportedAt`. */
   writtenAt?: Record<string, number>;
+  /** What each block depended on besides its annotation's own fields (blockBasis), by block id. */
+  basis?: Record<string, string>;
+  /** templatesKey of the settings the whole export used. */
+  templates?: string;
 }
+
+/**
+ * What an annotation's block depends on besides the annotation's own
+ * fields (whose changes its `updated` time shows): its page, and its
+ * category's name, callout and colour. A new version that moves it to
+ * another page, or an edited category, changes this.
+ */
+export function blockBasis(a: Annotation, categories: readonly Category[]): string {
+  const page = isPlaced(a) ? String(a.placement!.page) : "-";
+  const id = exportCategory(a, categories);
+  const c = categories.find((x) => x.id === id);
+  return c ? `${page}|${c.name}|${c.callout}|${c.colour}` : page;
+}
+
+/** The settings that shape every block and section (templates and heading), as one string to compare. */
+export const templatesKey = (s: ExportSettings) =>
+  JSON.stringify([s.highlightTemplate, s.sectionTemplate, s.categoryTemplates, s.destination, s.heading]);
+
+const stringsOf = (v: unknown) =>
+  v && typeof v === "object"
+    ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"))
+    : {};
 
 export function parseExportRecord(json: string | null): ExportRecord | null {
   try {
@@ -549,14 +576,15 @@ export function parseExportRecord(json: string | null): ExportRecord | null {
     if (!v || typeof v !== "object") return null;
     const r = v as Record<string, unknown>;
     if (typeof r.exportedAt !== "number" || !r.blocks || typeof r.blocks !== "object") return null;
-    const blocks = Object.fromEntries(
-      Object.entries(r.blocks as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"),
-    );
-    const writtenAt =
-      r.writtenAt && typeof r.writtenAt === "object"
-        ? Object.fromEntries(Object.entries(r.writtenAt as Record<string, unknown>).filter((e): e is [string, number] => typeof e[1] === "number"))
-        : undefined;
-    return writtenAt && Object.keys(writtenAt).length ? { exportedAt: r.exportedAt, blocks, writtenAt } : { exportedAt: r.exportedAt, blocks };
+    const record: ExportRecord = { exportedAt: r.exportedAt, blocks: stringsOf(r.blocks) };
+    if (r.writtenAt && typeof r.writtenAt === "object") {
+      record.writtenAt = Object.fromEntries(
+        Object.entries(r.writtenAt as Record<string, unknown>).filter((e): e is [string, number] => typeof e[1] === "number"),
+      );
+    }
+    if (r.basis && typeof r.basis === "object") record.basis = stringsOf(r.basis);
+    if (typeof r.templates === "string") record.templates = r.templates;
+    return record;
   } catch {
     return null;
   }

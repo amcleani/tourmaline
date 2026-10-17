@@ -10,7 +10,6 @@ const paper = (n: string, changes: PaperToExport["changes"]): PaperToExport => (
   title: `${n} paper`,
   entry: { citekey: n },
   notePath: `Notes/@${n}.md`,
-  annotations: [],
   changes,
 });
 
@@ -33,10 +32,10 @@ function setup(papers: PaperToExport[] | Error) {
 describe("ExportAllDialog", () => {
   it("ticks the papers with changes, not those whose changes are unknown, and Enter exports them", async () => {
     const user = userEvent.setup();
-    const a = paper("Alpha2020", { added: 2, changed: 1, deleted: 0 });
+    const a = paper("Alpha2020", { added: 2, changed: 1, deleted: 0, templates: false });
     const b = paper("Beta2021", null);
     const { onExport, status } = setup([a, b]);
-    expect(await screen.findByText("2 new, 1 changed (3 changes)")).toBeTruthy();
+    expect(await screen.findByText("2 new, 1 changed")).toBeTruthy();
     expect(screen.getByText("Exported before Tourmaline kept track: changes unknown")).toBeTruthy();
     expect(status()).toBe("1 of 2 papers will be exported, one after another.");
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Export" }));

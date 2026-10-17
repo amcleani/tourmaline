@@ -8,11 +8,13 @@ interface Props {
   danger?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Another way out (e.g. Stop exporting), before Cancel. */
+  extra?: { label: string; onClick: () => void };
 }
 
 // A question with Cancel and one action. Escape or a click outside cancels;
 // Cancel has focus, so Enter never overwrites anything by accident.
-export function ConfirmDialog({ title, children, confirmLabel, danger, onConfirm, onCancel }: Props) {
+export function ConfirmDialog({ title, children, confirmLabel, danger, onConfirm, onCancel, extra }: Props) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const id = useId();
   useEffect(() => {
@@ -42,6 +44,11 @@ export function ConfirmDialog({ title, children, confirmLabel, danger, onConfirm
         <div className="dialog-body">
           <div id={`${id}-body`}>{children}</div>
           <div className="dialog-actions">
+            {extra && (
+              <button type="button" className="button" onClick={extra.onClick}>
+                {extra.label}
+              </button>
+            )}
             <button ref={cancelRef} type="button" className="button" onClick={onCancel}>
               Cancel
             </button>

@@ -20,6 +20,8 @@ export interface CommandContext {
   annotationHasLinks: boolean;
   /** How many annotations are selected (several in the sidebar, else the selected one). */
   selectionSize: number;
+  /** Export all papers with changes is running. */
+  exportingAll: boolean;
   /** Dragging on a page draws an area to capture. */
   captureMode: boolean;
   canUndo: boolean;
@@ -51,6 +53,7 @@ export const IDLE_CONTEXT: CommandContext = {
   annotationSelected: false,
   annotationHasLinks: false,
   selectionSize: 0,
+  exportingAll: false,
   captureMode: false,
   canUndo: false,
   canRedo: false,

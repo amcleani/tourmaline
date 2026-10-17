@@ -12,6 +12,7 @@ export interface AppActions {
   exportSelected: () => void;
   previewExport: () => void;
   exportAllChanged: () => void;
+  stopExportAll: () => void;
   toggleFocus: () => void;
   focusNext: () => void;
   focusPrevious: () => void;
@@ -610,8 +611,16 @@ export function appCommands(a: AppActions): Command[] {
       title: "Export all papers with changes…",
       keywords: ["obsidian", "vault", "every", "batch", "update", "notes", "library", "sync"],
       menu: { menu: "Export", group: 1, order: 4 },
-      when: (ctx) => ctx.hasVault && ctx.hasBibliography,
+      when: (ctx) => ctx.hasVault && ctx.hasBibliography && !ctx.exportingAll,
       run: a.exportAllChanged,
+    },
+    {
+      id: "export.stopAll",
+      title: "Stop exporting all papers",
+      keywords: ["cancel", "abort", "export all", "batch"],
+      menu: { menu: "Export", group: 1, order: 5 },
+      when: (ctx) => ctx.exportingAll,
+      run: a.stopExportAll,
     },
     {
       id: "export.settings",

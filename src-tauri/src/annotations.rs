@@ -590,7 +590,13 @@ pub(crate) mod tests {
         for x in only {
             db.delete_annotation(&x.id).unwrap();
         }
-        assert_eq!(db.annotated_works().unwrap(), vec![a.work_id]);
+        assert_eq!(db.annotated_works().unwrap(), vec![a.work_id.clone()]);
+
+        // A new version opened but never re-anchored has no placements; the old one does.
+        let v2 = open(&db, "a2", "/lib/A.pdf", 9);
+        assert_eq!(v2.work_id, a.work_id);
+        let placed = db.placed_files(&a.work_id).unwrap();
+        assert!(placed.contains("a") && !placed.contains("a2"));
     }
 
     pub(crate) fn highlight(work_id: &str, file_id: &str, page: u32) -> NewAnnotation {

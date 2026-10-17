@@ -1,18 +1,19 @@
 // Export › Export all papers with changes (phase 11c): which papers' notes
 // are behind their annotations. A paper counts when it was exported before
 // (it has an ExportRecord) and since then an annotation was made, changed or
-// deleted. That is told from the annotations' own times, so no PDF has to be
-// read to find out; the export itself then renders and compares as usual
-// (a paper that turns out to be up to date is left alone). Papers exported
-// before records were kept are listed apart: whether they changed can't be
-// told.
+// deleted, moved to another page (a new version) or its category edited, or
+// the templates changed. That is told from the annotations' own times and
+// what the record kept, so no PDF has to be read to find out; the export
+// itself then renders and compares as usual (a paper that turns out to be up
+// to date is left alone). Papers exported before records were kept are
+// listed apart: whether they changed can't be told.
 
 import type { Annotation, Category } from "../annotations/types";
 import { loadPdf } from "../pdf/loader";
 import { loadOutline, type OutlineNode } from "../pdf/outline";
 import { annotatedWorks, getState, listAnnotations, readPdf, type DocumentInfo } from "../platform";
 import { citationVariables, type Bibliography } from "./bibliography";
-import { exportNotePath, type ExportPreset, type ExportRecord, type ExportSettings } from "./export";
+import { blockBasis, exportNotePath, templatesKey, type ExportPreset, type ExportRecord, type ExportSettings } from "./export";
 import type { VaultSettings } from "./notes";
 import { loadExportRecord, runExport, sectionStateKey, type ExportJob, type ExportOutcome } from "./runExport";
 
@@ -21,16 +22,25 @@ export interface PaperChanges {
   added: number;
   changed: number;
   deleted: number;
+  /** The templates or heading changed since (every block may read differently). */
+  templates: boolean;
 }
 
-export const changeCount = (c: PaperChanges) => c.added + c.changed + c.deleted;
+export const hasChanges = (c: PaperChanges) => c.added + c.changed + c.deleted > 0 || c.templates;
 
 /**
- * Annotations made since the last whole export and not in the note, those in
- * the note edited since it was written (by the whole export, or Export
- * selected), and blocks whose annotations are gone.
+ * Annotations made since the last whole export and not in the note; those
+ * in the note edited since they were written (by the whole export, or
+ * Export selected), moved to another page or whose category was edited;
+ * blocks whose annotations are gone; and whether the templates changed
+ * (`templates` is templatesKey of the settings now).
  */
-export function changesSince(record: ExportRecord, annotations: readonly Annotation[]): PaperChanges {
+export function changesSince(
+  record: ExportRecord,
+  annotations: readonly Annotation[],
+  categories: readonly Category[],
+  templates: string,
+): PaperChanges {
   const live = annotations.filter((a) => a.kind !== "ink");
   const ids = new Set(live.map((a) => a.blockId));
   let added = 0;
@@ -38,17 +48,19 @@ export function changesSince(record: ExportRecord, annotations: readonly Annotat
   for (const a of live) {
     if (record.blocks[a.blockId] === undefined) {
       if (a.created > record.exportedAt) added++;
-    } else if (a.updated > (record.writtenAt?.[a.blockId] ?? record.exportedAt)) {
-      changed++;
+      continue;
     }
+    const edited = a.updated > (record.writtenAt?.[a.blockId] ?? record.exportedAt);
+    const was = record.basis?.[a.blockId];
+    if (edited || (was !== undefined && was !== blockBasis(a, categories))) changed++;
   }
   const deleted = Object.keys(record.blocks).filter((id) => !ids.has(id)).length;
-  return { added, changed, deleted };
+  return { added, changed, deleted, templates: record.templates !== undefined && record.templates !== templates };
 }
 
-/** "2 new, 1 changed, 1 deleted". */
+/** "2 new, 1 changed, 1 deleted; templates changed". */
 export function describeChanges(c: PaperChanges): string {
-  return (
+  const counts = (
     [
       [c.added, "new"],
       [c.changed, "changed"],
@@ -58,9 +70,10 @@ export function describeChanges(c: PaperChanges): string {
     .filter(([n]) => n > 0)
     .map(([n, what]) => `${n} ${what}`)
     .join(", ");
+  return [counts, c.templates && "templates changed"].filter(Boolean).join("; ");
 }
 
-/** A paper to offer for exporting: its latest file, entry, note and annotations. */
+/** A paper to offer for exporting: the file its annotations are placed on, its entry and note. */
 export interface PaperToExport {
   doc: DocumentInfo;
   citekey: string;
@@ -69,8 +82,6 @@ export interface PaperToExport {
   entry: Record<string, unknown>;
   /** Its note, relative to the vault. */
   notePath: string;
-  /** Its annotations, placed on `doc`'s file. */
-  annotations: Annotation[];
   /** What changed since it was exported; null if it was exported before records were kept. */
   changes: PaperChanges | null;
 }
@@ -83,22 +94,25 @@ export interface PaperToExport {
 export async function papersToExport(
   citations: VaultSettings["citations"],
   settings: ExportSettings,
+  categories: readonly Category[],
   bibliography: Bibliography,
 ): Promise<PaperToExport[]> {
-  const out: PaperToExport[] = [];
-  for (const doc of await annotatedWorks()) {
-    const bib = doc.citekey ? bibliography.get(doc.citekey) : undefined;
-    if (!doc.citekey || !bib) continue;
-    const entry = citationVariables(bib);
-    const notePath = exportNotePath(citations, settings, entry);
-    const record = await loadExportRecord(doc.workId, notePath);
-    if (!record && (await getState(sectionStateKey(doc.workId, notePath))) === null) continue;
-    const annotations = await listAnnotations(doc.workId, doc.fileId);
-    const changes = record ? changesSince(record, annotations) : null;
-    if (changes && changeCount(changes) === 0) continue;
-    out.push({ doc, citekey: doc.citekey, title: String(entry.title ?? ""), entry, notePath, annotations, changes });
-  }
-  return out;
+  const templates = templatesKey(settings);
+  // Each paper's lookups are independent: all at once, kept in citekey order.
+  const papers = await Promise.all(
+    (await annotatedWorks()).map(async (doc): Promise<PaperToExport | null> => {
+      const bib = doc.citekey ? bibliography.get(doc.citekey) : undefined;
+      if (!doc.citekey || !bib) return null;
+      const entry = citationVariables(bib);
+      const notePath = exportNotePath(citations, settings, entry);
+      const record = await loadExportRecord(doc.workId, notePath);
+      if (!record && (await getState(sectionStateKey(doc.workId, notePath))) === null) return null;
+      const changes = record ? changesSince(record, await listAnnotations(doc.workId, doc.fileId), categories, templates) : null;
+      if (changes && !hasChanges(changes)) return null;
+      return { doc, citekey: doc.citekey, title: String(entry.title ?? ""), entry, notePath, changes };
+    }),
+  );
+  return papers.filter((p): p is PaperToExport => p !== null);
 }
 
 export interface PaperResult {
@@ -144,6 +158,7 @@ export async function exportPapers(papers: readonly PaperToExport[], job: Export
         await pdf.loadingTask.destroy();
       }
       // As they are now (they may have changed since the papers were listed).
+      const readAt = Date.now();
       const annotations = await listAnnotations(doc.workId, doc.fileId);
       const outcome = await runExport({
         vault: job.vault,
@@ -160,6 +175,7 @@ export async function exportPapers(papers: readonly PaperToExport[], job: Export
           outline,
         },
         ask: job.ask,
+        readAt,
       });
       results.push({ paper, outcome });
     } catch (error) {
@@ -167,4 +183,23 @@ export async function exportPapers(papers: readonly PaperToExport[], job: Export
     }
   }
   return results;
+}
+
+/** "Updated 2 notes; 1 was up to date; 1 was skipped", and the papers that failed with why. */
+export function summarise(results: readonly PaperResult[], stopped = 0): { notice: string; failures: string | null } {
+  const count = (status: ExportOutcome["status"]) => results.filter((r) => r.outcome?.status === status).length;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const failed = results.filter((r) => r.error !== undefined);
+  const parts = [
+    count("written") > 0 && `updated ${plural(count("written"), "note", "notes")}`,
+    count("unchanged") > 0 && `${plural(count("unchanged"), "was", "were")} up to date`,
+    count("cancelled") > 0 && `${plural(count("cancelled"), "was", "were")} skipped`,
+    failed.length > 0 && `${failed.length} failed`,
+    stopped > 0 && `stopped before ${plural(stopped, "paper", "papers")}`,
+  ].filter(Boolean) as string[];
+  const notice = parts.join("; ").replace(/^./, (c) => c.toUpperCase()) || "Nothing was exported";
+  const failures = failed.length
+    ? `Could not export ${failed.map((r) => `@${r.paper.citekey} (${r.error instanceof Error ? r.error.message : String(r.error)})`).join(", ")}.`
+    : null;
+  return { notice, failures };
 }

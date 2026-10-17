@@ -221,14 +221,21 @@ async fn locate_work(app: AppHandle, work_id: Option<String>, block_id: Option<S
     .await
 }
 
-/// Papers with a citekey and annotations to export, each with its most
-/// recently opened file that still exists (papers without one are left out).
+/// Papers with a citekey and annotations to export, each with the most
+/// recently opened file that still exists and that its annotations were
+/// placed on (a newer version not yet checked or re-anchored would leave
+/// them all without a page). Papers without such a file are left out.
 #[tauri::command]
 async fn annotated_works(app: AppHandle) -> Result<Vec<DocumentInfo>> {
     blocking(app, move |_, db| {
         let mut out = Vec::new();
         for work in db.annotated_works()? {
-            if let Some(file) = db.work_files(&work)?.into_iter().find(|d| std::path::Path::new(&d.path).exists()) {
+            let placed = db.placed_files(&work)?;
+            if let Some(file) = db
+                .work_files(&work)?
+                .into_iter()
+                .find(|d| placed.contains(&d.file_id) && std::path::Path::new(&d.path).exists())
+            {
                 out.push(file);
             }
         }

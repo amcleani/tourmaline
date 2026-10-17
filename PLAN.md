@@ -194,8 +194,10 @@ user doesn't want them).
   Export › Export all papers with changes… lists them (ticked, with what
   changed), and those exported before 11b kept records (unticked: changes
   unknown); the prompt's choices apply to all. "Changed" comes from the
-  annotations' own times against the record, so no PDF is read to find
-  them; exporting reads each PDF only for page labels and, when grouping
+  annotations' own times against the record, plus each block's page and
+  category and the templates the record kept, so no PDF is read to find
+  them; Export › Stop exporting all papers (or Stop exporting on any
+  question it asks) ends the run after the current paper; exporting reads each PDF only for page labels and, when grouping
   by section, its outline (without recording it as opened). Papers never
   exported, or not in the bibliography, aren't listed.
 

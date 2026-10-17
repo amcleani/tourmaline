@@ -9,6 +9,8 @@ interface Props {
   selected: boolean;
   onExport: () => void;
   onCancel: () => void;
+  /** Another way out (e.g. Stop exporting), before Cancel. */
+  extra?: { label: string; onClick: () => void };
 }
 
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -17,7 +19,7 @@ const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? on
 // shown when highlights would leave the note (then Cancel has focus, as in
 // any question that removes something), when asked for (Export › Preview
 // export), and as the prompt of Export selected (then Enter exports).
-export function ExportPreviewDialog({ plan, path, selected, onExport, onCancel }: Props) {
+export function ExportPreviewDialog({ plan, path, selected, onExport, onCancel, extra }: Props) {
   const id = useId();
   const focusRef = useRef<HTMLButtonElement>(null);
   const exportRef = useRef<HTMLButtonElement>(null);
@@ -111,6 +113,11 @@ export function ExportPreviewDialog({ plan, path, selected, onExport, onCancel }
             </p>
           )}
           <div className="dialog-actions">
+            {extra && (
+              <button type="button" className="button" onClick={extra.onClick}>
+                {extra.label}
+              </button>
+            )}
             <span className="spacer" />
             {/* Nothing to change: one button, which goes on (the note is then counted as up to date). */}
             {!nothing && (

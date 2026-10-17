@@ -367,6 +367,18 @@ impl Db {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
+    /// The files of a work its annotations have been placed on (re-anchored
+    /// to): a new version opened but never checked or re-anchored has none.
+    pub fn placed_files(&self, work_id: &str) -> Result<std::collections::HashSet<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT p.file_sha256 FROM annotation_placements p
+             JOIN annotations a ON a.id = p.annotation_id WHERE a.work_id = ?1",
+        )?;
+        let rows = stmt.query_map([work_id], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     pub fn save_position(&self, work_id: &str, position: &str) -> Result<()> {
         self.conn()
             .execute("UPDATE works SET last_position = ?2 WHERE id = ?1", params![work_id, position])?;

@@ -86,7 +86,7 @@ import { runExport, type ExportQuestion } from "./vault/runExport";
 import { useExportStatus } from "./vault/useExportStatus";
 import { ExportPreviewDialog } from "./ui/ExportPreviewDialog";
 import { ExportAllDialog } from "./ui/ExportAllDialog";
-import { exportPapers, papersToExport, type PaperToExport } from "./vault/exportAll";
+import { exportPapers, papersToExport, summarise, type PaperToExport } from "./vault/exportAll";
 import { useVault } from "./vault/useVault";
 import { installNativeMenu } from "./platform/menu";
 import { AnnotationPopover } from "./ui/AnnotationPopover";
@@ -1025,6 +1025,7 @@ export function App() {
         setNotice("Nothing was exported: the tab changed. Export again when it has loaded.");
         return;
       }
+      const readAt = Date.now();
       const annotations = now.notes.current().filter((a) => a.workId === tab.workId);
       // Grouping by section needs the outline: wait for it if it is still loading.
       let outline = now.outline;
@@ -1041,6 +1042,7 @@ export function App() {
         workId: tab.workId,
         input: sectionInput(now.activeTab, annotations, outline),
         ask,
+        readAt,
       });
       if (result.status !== "cancelled") setExportsDone((n) => n + 1);
       const what = opts.only
@@ -1063,9 +1065,18 @@ export function App() {
   };
 
   /** Export all papers with changes: these papers, one after another, with these choices. */
+  /** Export all is running: which paper of how many (Export › Stop exporting all papers). */
+  const [exportRun, setExportRun] = useState<{ index: number; total: number } | null>(null);
+  const stopRun = useRef(false);
   const exportAll = async (papers: PaperToExport[], preset: ExportPreset, named: boolean) => {
-    if (!vault || !vaultSettings || exporting.current) return;
+    if (!vault || !vaultSettings) return;
+    if (exporting.current) {
+      setNotice("Nothing was exported: another export is still running.");
+      return;
+    }
     exporting.current = true;
+    stopRun.current = false;
+    let done = 0;
     try {
       // Notes still being typed, and every queued change, are saved first: papers are read from the library.
       await Promise.all([...draftFlushers.current].map((flush) => flush()));
@@ -1077,32 +1088,22 @@ export function App() {
         preset,
         categories,
         ask,
-        onPaper: (i, p) => setNotice(`Exporting ${i + 1} of ${papers.length}: @${p.citekey}…`),
+        onPaper: (i, p) => {
+          done = i;
+          setExportRun({ index: i, total: papers.length });
+          setNotice(`Exporting ${i + 1} of ${papers.length}: @${p.citekey}…`);
+        },
+        stopped: () => stopRun.current,
       });
-      const count = (status: string) => results.filter((r) => r.outcome?.status === status).length;
-      const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-      const parts = [
-        count("written") && `updated ${plural(count("written"), "note", "notes")}`,
-        count("unchanged") && `${plural(count("unchanged"), "was", "were")} up to date`,
-        count("cancelled") && `${plural(count("cancelled"), "was", "were")} skipped`,
-      ].filter(Boolean);
-      const failed = results.filter((r) => r.error !== undefined);
-      setNotice(
-        `${parts.join("; ").replace(/^./, (c) => c.toUpperCase()) || "Nothing was exported"}` +
-          (named && exportSettings.presets.length > 1 ? ` (${preset.name})` : "") +
-          (failed.length ? `; ${failed.length} failed` : ""),
-      );
-      if (failed.length) {
-        setError(
-          `Could not export ${failed
-            .map((r) => `@${r.paper.citekey} (${r.error instanceof Error ? r.error.message : String(r.error)})`)
-            .join(", ")}.`,
-        );
-      }
+      const { notice, failures } = summarise(results, papers.length - results.length);
+      setNotice(notice + (named && exportSettings.presets.length > 1 ? ` (${preset.name})` : ""));
+      if (failures) setError(failures);
+      done = results.length;
     } catch (e) {
-      reportError("Could not export the papers", e);
+      reportError(`Could not export the papers (stopped after ${done})`, e);
     } finally {
       exporting.current = false;
+      setExportRun(null);
       setExportsDone((n) => n + 1);
     }
   };
@@ -1415,6 +1416,7 @@ export function App() {
       annotationSelected: selected !== null,
       annotationHasLinks: vaultSettings !== null && !!selected?.note && noteWikilinks(selected.note).some((l) => !!l.note),
       selectionSize: selection.size,
+      exportingAll: exportRun !== null,
       captureMode,
       canUndo: notes.canUndo,
       canRedo: notes.canRedo,
@@ -1443,6 +1445,7 @@ export function App() {
     selectionEnd,
     selected,
     selection,
+    exportRun,
     captureMode,
     notes.canUndo,
     notes.canRedo,
@@ -1646,6 +1649,10 @@ export function App() {
       exportSelected: () => latest.current.exportSelected(),
       previewExport: () => latest.current.requestExport(undefined, true),
       exportAllChanged: () => setDialog("exportAll"),
+      stopExportAll: () => {
+        stopRun.current = true;
+        setNotice("Stopping after this paper…");
+      },
       exportSettings: () => setDialog("exportSettings"),
       goBack: () => latest.current.travel("back"),
       toggleSplit: () => latest.current.toggleSplit(),
@@ -1943,6 +1950,18 @@ export function App() {
   );
   const handleZoomStep = useCallback((d: 1 | -1) => zoomMain((z) => nextZoom(z, d)), [zoomMain]);
   const handleZoomTo = useCallback((zoom: number) => zoomMain(() => zoom), [zoomMain]);
+
+  /** On a question asked during Export all: skip this paper and stop there. */
+  const stopButton =
+    exportRun && question
+      ? {
+          label: "Stop exporting",
+          onClick: () => {
+            stopRun.current = true;
+            question.resolve(false);
+          },
+        }
+      : undefined;
 
   return (
     <RegistryContext.Provider value={registry}>
@@ -2272,7 +2291,7 @@ export function App() {
             presets={exportSettings.presets}
             startWith={defaultPreset(exportSettings).id}
             categories={liveCategories}
-            load={() => papersToExport(vaultSettings.citations, exportSettings, bibliography)}
+            load={() => papersToExport(vaultSettings.citations, exportSettings, categories, bibliography)}
             onExport={(papers, choices, preset) => {
               setDialog(null);
               void exportAll(papers, preset ?? { id: "custom", name: "your choice", filter: choices.filter, groupBy: choices.groupBy }, preset !== null);
@@ -2301,6 +2320,7 @@ export function App() {
             danger
             onConfirm={() => question.resolve(true)}
             onCancel={() => question.resolve(false)}
+            extra={stopButton}
           >
             {question.q.blocks ? (
               <p>
@@ -2330,6 +2350,7 @@ export function App() {
             selected={question.q.selected}
             onExport={() => question.resolve(true)}
             onCancel={() => question.resolve(false)}
+            extra={stopButton}
           />
         )}
         {dialog === "entry" && bibliography && activeTab && (

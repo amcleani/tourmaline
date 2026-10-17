@@ -10,6 +10,7 @@ import { exportImage, findBlockLinks, getState, readNote, setState, writeNote } 
 import { sha256Hex } from "../util/hash";
 import {
   attachmentFolder,
+  blockBasis,
   blockSnippet,
   blockText,
   DEFAULT_PRESET,
@@ -28,6 +29,7 @@ import {
   renderAnnotation,
   renderSection,
   sectionBlocks,
+  templatesKey,
   type ExportPreset,
   type ExportRecord,
   type ExportSettings,
@@ -70,6 +72,8 @@ export interface ExportJob {
   only?: ReadonlySet<string>;
   /** Show what will change even if nothing leaves the note. */
   preview?: boolean;
+  /** When `input.annotations` were read (what the record says was exported); default: when the export starts. */
+  readAt?: number;
   workId: string;
   input: SectionInput;
   /** Resolves to whether to go on. */
@@ -100,6 +104,7 @@ export async function loadExportRecord(workId: string, path: string): Promise<Ex
 const sectionHash = async (body: string) => sha256Hex(new TextEncoder().encode(normaliseSection(body)));
 
 export async function runExport(job: ExportJob): Promise<ExportOutcome> {
+  const readAt = job.readAt ?? Date.now();
   const { vault, settings, input } = job;
   const path = exportNotePath(job.vaultSettings.citations, settings, input.entry);
   const note = await readNote(vault, path);
@@ -165,13 +170,16 @@ export async function runExport(job: ExportJob): Promise<ExportOutcome> {
   const sectionWasOurs = previous !== null && oldHash === (await sectionHash(previous));
   const remember = async () => {
     const blocks = Object.fromEntries(written.map((a) => [a.blockId, render(a)]));
+    const basis = Object.fromEntries(written.map((a) => [a.blockId, blockBasis(a, input.categories)]));
     const next: ExportRecord = selected
       ? {
+          ...record,
           exportedAt: record?.exportedAt ?? 0,
           blocks: { ...known, ...blocks },
-          writtenAt: { ...record?.writtenAt, ...Object.fromEntries(written.map((a) => [a.blockId, Date.now()])) },
+          writtenAt: { ...record?.writtenAt, ...Object.fromEntries(written.map((a) => [a.blockId, readAt])) },
+          basis: { ...record?.basis, ...basis },
         }
-      : { exportedAt: Date.now(), blocks };
+      : { exportedAt: readAt, blocks, basis, templates: templatesKey(settings) };
     // After Export selected, the section is still the user's edit if it was one.
     if (!selected || previous === null || sectionWasOurs) await setState(sectionStateKey(job.workId, path), await sectionHash(body));
     await setState(recordKey(job.workId, path), JSON.stringify(next));

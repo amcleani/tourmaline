@@ -35,8 +35,8 @@ vi.mock("../src/pdf/loader", () => ({
 }));
 
 import { Bibliography } from "../src/vault/bibliography";
-import { DEFAULT_EXPORT_SETTINGS, DEFAULT_PRESET } from "../src/vault/export";
-import { changesSince, describeChanges, exportPapers, papersToExport } from "../src/vault/exportAll";
+import { blockBasis, DEFAULT_EXPORT_SETTINGS, DEFAULT_PRESET } from "../src/vault/export";
+import { changesSince, describeChanges, exportPapers, papersToExport, summarise } from "../src/vault/exportAll";
 import type { VaultSettings } from "../src/vault/notes";
 import { runExport } from "../src/vault/runExport";
 
@@ -126,9 +126,49 @@ describe("changes since the last export", () => {
       hl("a", 4), // older, left out on purpose
       hl("a", 5, { kind: "ink", created: 50, updated: 50 }),
     ];
-    const c = changesSince(record, list);
-    expect(c).toEqual({ added: 1, changed: 1, deleted: 1 });
+    const c = changesSince(record, list, [], "t");
+    expect(c).toEqual({ added: 1, changed: 1, deleted: 1, templates: false });
     expect(describeChanges(c)).toBe("1 new, 1 changed, 1 deleted");
+  });
+
+  it("counts a block moved to another page or whose category was edited, and changed templates", () => {
+    const cat = { id: "c1", name: "Claim", colour: "#f7d14c", callout: "quote", hotkey: 1, deleted: false };
+    const a = hl("a", 1, { categoryId: "c1" });
+    const record = { exportedAt: 10, blocks: { "hl-a00001": "x" }, basis: { "hl-a00001": blockBasis(a, [cat]) }, templates: "t" };
+    expect(changesSince(record, [a], [cat], "t")).toEqual({ added: 0, changed: 0, deleted: 0, templates: false });
+    // A new version put it on another page.
+    const moved = { ...a, placement: { ...a.placement!, page: 4 } };
+    expect(changesSince(record, [moved], [cat], "t").changed).toBe(1);
+    // Its category renamed.
+    expect(changesSince(record, [a], [{ ...cat, name: "Thesis" }], "t").changed).toBe(1);
+    // Other templates.
+    const c = changesSince(record, [a], [cat], "u");
+    expect(c).toEqual({ added: 0, changed: 0, deleted: 0, templates: true });
+    expect(describeChanges(c)).toBe("templates changed");
+    expect(describeChanges({ ...c, added: 2 })).toBe("2 new; templates changed");
+  });
+});
+
+describe("the summary", () => {
+  const paper = { doc: doc("a", "A"), citekey: "A", title: "", entry: {}, notePath: "", changes: null };
+  const outcome = (status: "written" | "unchanged" | "cancelled") => ({ status, path: "", count: 1, total: 1, created: false });
+  it("says what happened to each paper, and why any failed", () => {
+    expect(
+      summarise(
+        [
+          { paper, outcome: outcome("written") },
+          { paper, outcome: outcome("written") },
+          { paper, outcome: outcome("unchanged") },
+          { paper, outcome: outcome("cancelled") },
+          { paper: { ...paper, citekey: "B" }, error: new Error("it has changed") },
+        ],
+        2,
+      ),
+    ).toEqual({
+      notice: "Updated 2 notes; 1 was up to date; 1 was skipped; 1 failed; stopped before 2 papers",
+      failures: "Could not export @B (it has changed).",
+    });
+    expect(summarise([])).toEqual({ notice: "Nothing was exported", failures: null });
   });
 });
 
@@ -144,9 +184,9 @@ describe("papers to export", () => {
     // Delta was exported before records were kept.
     library.set("w-a", [hl("a", 1, { note: "new note", updated: Date.now() + 1000 })]);
     state.set("export.section:w-d:Notes/@Delta2023.md", "hash");
-    const papers = await papersToExport(citations, DEFAULT_EXPORT_SETTINGS, bibliography);
+    const papers = await papersToExport(citations, DEFAULT_EXPORT_SETTINGS, [], bibliography);
     expect(papers.map((p) => [p.citekey, p.title, p.notePath, p.changes])).toEqual([
-      ["Alpha2020", "Alpha Paper", "Notes/@Alpha2020.md", { added: 0, changed: 1, deleted: 0 }],
+      ["Alpha2020", "Alpha Paper", "Notes/@Alpha2020.md", { added: 0, changed: 1, deleted: 0, templates: false }],
       ["Delta2023", "Delta Paper", "Notes/@Delta2023.md", null],
     ]);
   });
@@ -158,8 +198,8 @@ describe("exporting the papers", () => {
     library.set("w-a", [hl("a", 1), hl("a", 2)]);
     library.set("w-b", [hl("b", 1)]);
     const papers = [
-      { doc: works[0], citekey: "Alpha2020", title: "", entry: { citekey: "Alpha2020" }, notePath: "", annotations: [], changes: null },
-      { doc: works[1], citekey: "Beta2021", title: "", entry: { citekey: "Beta2021" }, notePath: "", annotations: [], changes: null },
+      { doc: works[0], citekey: "Alpha2020", title: "", entry: { citekey: "Alpha2020" }, notePath: "", changes: null },
+      { doc: works[1], citekey: "Beta2021", title: "", entry: { citekey: "Beta2021" }, notePath: "", changes: null },
     ];
     changedFiles.add("f-b");
     const seen: string[] = [];
@@ -176,9 +216,26 @@ describe("exporting the papers", () => {
     expect(asked).toMatchObject([{ kind: "preview", plan: { removed: [{ blockId: "hl-a00002" }] } }]);
   });
 
+  it("records when each paper's annotations were read, so an edit made while it was written still counts", async () => {
+    works = [doc("a", "Alpha2020")];
+    library.set("w-a", [hl("a", 1)]);
+    const paper = { doc: works[0], citekey: "Alpha2020", title: "", entry: { citekey: "Alpha2020" }, notePath: "", changes: null };
+    const before = Date.now();
+    await exportPapers([paper], {
+      ...job(),
+      // While the note is being written, the user edits the annotation.
+      ask: async () => true,
+    });
+    const record = JSON.parse(state.get("export.blocks:w-a:Notes/@Alpha2020.md")!);
+    expect(record.exportedAt).toBeGreaterThanOrEqual(before);
+    expect(record.exportedAt).toBeLessThanOrEqual(Date.now());
+    expect(record.basis).toEqual({ "hl-a00001": "1" });
+    expect(typeof record.templates).toBe("string");
+  });
+
   it("stops when told to", async () => {
     works = [doc("a", "Alpha2020")];
-    const papers = [{ doc: works[0], citekey: "Alpha2020", title: "", entry: { citekey: "Alpha2020" }, notePath: "", annotations: [], changes: null }];
+    const papers = [{ doc: works[0], citekey: "Alpha2020", title: "", entry: { citekey: "Alpha2020" }, notePath: "", changes: null }];
     expect(await exportPapers(papers, { ...job(), stopped: () => true })).toEqual([]);
   });
 });

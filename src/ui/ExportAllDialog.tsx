@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { Category } from "../annotations/types";
 import { sameChoices, type ExportPreset } from "../vault/export";
-import { changeCount, describeChanges, type PaperToExport } from "../vault/exportAll";
+import { describeChanges, type PaperToExport } from "../vault/exportAll";
 import { ExportChoices, choicesProblem, type Choices } from "./ExportChoices";
 
 interface Props {
@@ -113,9 +113,7 @@ export function ExportAllDialog({ presets, startWith, categories, load, onExport
                       <span>
                         <strong>@{p.citekey}</strong> {p.title}
                         <span className="muted small paper-changes">
-                          {p.changes
-                            ? `${describeChanges(p.changes)} (${changeCount(p.changes) === 1 ? "1 change" : `${changeCount(p.changes)} changes`})`
-                            : "Exported before Tourmaline kept track: changes unknown"}
+                          {p.changes ? describeChanges(p.changes) : "Exported before Tourmaline kept track: changes unknown"}
                         </span>
                       </span>
                     </label>
