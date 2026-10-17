@@ -352,6 +352,21 @@ impl Db {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
+    /// Works linked to a bibliography entry that have annotations to export
+    /// (any but ink, not deleted), by citekey: Export › Export all papers with changes.
+    pub fn annotated_works(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT w.id FROM works w
+             WHERE w.citekey IS NOT NULL
+               AND EXISTS (SELECT 1 FROM annotations a
+                           WHERE a.work_id = w.id AND a.deleted_at IS NULL AND a.kind != 'ink')
+             ORDER BY w.citekey",
+        )?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     pub fn save_position(&self, work_id: &str, position: &str) -> Result<()> {
         self.conn()
             .execute("UPDATE works SET last_position = ?2 WHERE id = ?1", params![work_id, position])?;

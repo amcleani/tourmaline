@@ -273,7 +273,14 @@ paragraph ending in `^id`, or the one above an id on its own line; a new
 block goes among its own group's blocks, spaced like them). Before
 writing, `runExport` asks `preview` (`ExportPreviewDialog`: added, updated,
 removed with the notes linking to them) when blocks would leave the note,
-when asked (Export › Preview export), and always for Export selected. `highlightTemplateFor` picks a category's own
+when asked (Export › Preview export), and always for Export selected.
+Export › Export all papers with changes (`src/vault/exportAll.ts`):
+`annotated_works` lists papers with a citekey and annotations (each with a
+file that still exists), `changesSince` compares annotation times with each
+record (`writtenAt` covers blocks Export selected wrote later), and
+`exportPapers` runs `runExport` for each with the page labels and outline
+from `read_pdf` (bytes only, nothing recorded, refused if the file is no
+longer that version), going on past failures. `highlightTemplateFor` picks a category's own
 template (export and Copy as Markdown). Try it on
 `.dev-data/test-vault` (a copy of the vault's settings and notes), never on
 the real vault.

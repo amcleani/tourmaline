@@ -95,6 +95,18 @@ export async function recentDocuments(limit = 10): Promise<DocumentInfo[]> {
   return invoke<DocumentInfo[]>("recent_documents", { limit });
 }
 
+/** Papers with a citekey and annotations to export, each with a file that still exists (Export all papers with changes). */
+export async function annotatedWorks(): Promise<DocumentInfo[]> {
+  if (!isTauri()) return [];
+  return invoke<DocumentInfo[]>("annotated_works");
+}
+
+/** A PDF's bytes without opening it (Recent is unchanged); refused if the file is no longer the version `fileId`. */
+export async function readPdf(path: string, fileId: string): Promise<Uint8Array> {
+  if (!isTauri()) throw new Error("not available in the browser");
+  return new Uint8Array(await invoke<ArrayBuffer>("read_pdf", { path, fileId }));
+}
+
 /** Records the start of a file's text; also marks a new version as checked. */
 export async function setTextSample(fileId: string, sample: string): Promise<void> {
   if (isTauri()) await invoke("set_text_sample", { fileId, sample });

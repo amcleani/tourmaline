@@ -570,6 +570,29 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn annotated_works_are_those_with_a_citekey_and_live_annotations() {
+        let db = Db::in_memory().unwrap();
+        let a = open(&db, "a", "/lib/A.pdf", 1);
+        let b = open(&db, "b", "/lib/B.pdf", 2);
+        let c = open(&db, "c", "/lib/C.pdf", 3);
+        db.link_citekey("a", "Zed2020").unwrap();
+        db.link_citekey("b", "Abe2019").unwrap();
+        db.create_annotation(&highlight(&a.work_id, "a", 0)).unwrap();
+        let gone = db.create_annotation(&highlight(&b.work_id, "b", 0)).unwrap();
+        db.create_annotation(&highlight(&b.work_id, "b", 1)).unwrap();
+        // No citekey: not listed.
+        db.create_annotation(&highlight(&c.work_id, "c", 0)).unwrap();
+        db.delete_annotation(&gone.id).unwrap();
+        assert_eq!(db.annotated_works().unwrap(), vec![b.work_id.clone(), a.work_id.clone()]);
+        // Only deleted ones left: not listed.
+        let only = db.list_annotations(&b.work_id, "b").unwrap();
+        for x in only {
+            db.delete_annotation(&x.id).unwrap();
+        }
+        assert_eq!(db.annotated_works().unwrap(), vec![a.work_id]);
+    }
+
     pub(crate) fn highlight(work_id: &str, file_id: &str, page: u32) -> NewAnnotation {
         NewAnnotation {
             work_id: work_id.into(),

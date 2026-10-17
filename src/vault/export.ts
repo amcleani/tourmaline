@@ -539,6 +539,8 @@ export const linksToBlock = (markdown: string, blockId: string) => markdown.incl
 export interface ExportRecord {
   exportedAt: number;
   blocks: Record<string, string>;
+  /** When blocks were written by Export selected since (by block id); the others at `exportedAt`. */
+  writtenAt?: Record<string, number>;
 }
 
 export function parseExportRecord(json: string | null): ExportRecord | null {
@@ -550,7 +552,11 @@ export function parseExportRecord(json: string | null): ExportRecord | null {
     const blocks = Object.fromEntries(
       Object.entries(r.blocks as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"),
     );
-    return { exportedAt: r.exportedAt, blocks };
+    const writtenAt =
+      r.writtenAt && typeof r.writtenAt === "object"
+        ? Object.fromEntries(Object.entries(r.writtenAt as Record<string, unknown>).filter((e): e is [string, number] => typeof e[1] === "number"))
+        : undefined;
+    return writtenAt && Object.keys(writtenAt).length ? { exportedAt: r.exportedAt, blocks, writtenAt } : { exportedAt: r.exportedAt, blocks };
   } catch {
     return null;
   }

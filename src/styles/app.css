@@ -806,6 +806,11 @@ label.checkbox { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .export-plan h3 { margin: 12px 0 4px; font-size: 0.9rem; }
 .export-plan.removed h3 { color: var(--danger-text); }
 .export-preview-dialog { width: min(640px, calc(100vw - 32px)); }
+.export-all-dialog { width: min(640px, calc(100vw - 32px)); }
+.export-all-dialog .dialog-body { max-height: calc(100vh - 120px); overflow: auto; }
+.paper-list { list-style: none; margin: 0; padding: 0; max-height: 30vh; overflow: auto; }
+.paper-list li + li { margin-top: 6px; }
+.paper-changes { display: block; }
 .annotation-quote {
   margin: 4px 0 0;
   display: -webkit-box;

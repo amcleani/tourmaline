@@ -85,6 +85,8 @@ import { literatureNotePath, obsidianUrl, renderHighlight } from "./vault/notes"
 import { runExport, type ExportQuestion } from "./vault/runExport";
 import { useExportStatus } from "./vault/useExportStatus";
 import { ExportPreviewDialog } from "./ui/ExportPreviewDialog";
+import { ExportAllDialog } from "./ui/ExportAllDialog";
+import { exportPapers, papersToExport, type PaperToExport } from "./vault/exportAll";
 import { useVault } from "./vault/useVault";
 import { installNativeMenu } from "./platform/menu";
 import { AnnotationPopover } from "./ui/AnnotationPopover";
@@ -164,6 +166,7 @@ type Dialog =
   | "writeback"
   | "exportSettings"
   | "export"
+  | "exportAll"
   | null;
 
 const SAVE_POSITION_MS = 800;
@@ -1059,6 +1062,51 @@ export function App() {
     }
   };
 
+  /** Export all papers with changes: these papers, one after another, with these choices. */
+  const exportAll = async (papers: PaperToExport[], preset: ExportPreset, named: boolean) => {
+    if (!vault || !vaultSettings || exporting.current) return;
+    exporting.current = true;
+    try {
+      // Notes still being typed, and every queued change, are saved first: papers are read from the library.
+      await Promise.all([...draftFlushers.current].map((flush) => flush()));
+      await latest.current.notes.settled();
+      const results = await exportPapers(papers, {
+        vault,
+        vaultSettings,
+        settings: exportSettings,
+        preset,
+        categories,
+        ask,
+        onPaper: (i, p) => setNotice(`Exporting ${i + 1} of ${papers.length}: @${p.citekey}…`),
+      });
+      const count = (status: string) => results.filter((r) => r.outcome?.status === status).length;
+      const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+      const parts = [
+        count("written") && `updated ${plural(count("written"), "note", "notes")}`,
+        count("unchanged") && `${plural(count("unchanged"), "was", "were")} up to date`,
+        count("cancelled") && `${plural(count("cancelled"), "was", "were")} skipped`,
+      ].filter(Boolean);
+      const failed = results.filter((r) => r.error !== undefined);
+      setNotice(
+        `${parts.join("; ").replace(/^./, (c) => c.toUpperCase()) || "Nothing was exported"}` +
+          (named && exportSettings.presets.length > 1 ? ` (${preset.name})` : "") +
+          (failed.length ? `; ${failed.length} failed` : ""),
+      );
+      if (failed.length) {
+        setError(
+          `Could not export ${failed
+            .map((r) => `@${r.paper.citekey} (${r.error instanceof Error ? r.error.message : String(r.error)})`)
+            .join(", ")}.`,
+        );
+      }
+    } catch (e) {
+      reportError("Could not export the papers", e);
+    } finally {
+      exporting.current = false;
+      setExportsDone((n) => n + 1);
+    }
+  };
+
   /** Export selected: the annotations selected in the sidebar (or the selected one), the rest of the section as it is. */
   const exportSelected = () => {
     const tab = latest.current.activeTab;
@@ -1597,6 +1645,7 @@ export function App() {
       exportToVault: () => latest.current.requestExport(),
       exportSelected: () => latest.current.exportSelected(),
       previewExport: () => latest.current.requestExport(undefined, true),
+      exportAllChanged: () => setDialog("exportAll"),
       exportSettings: () => setDialog("exportSettings"),
       goBack: () => latest.current.travel("back"),
       toggleSplit: () => latest.current.toggleSplit(),
@@ -2214,6 +2263,19 @@ export function App() {
                 preset !== null,
                 { preview },
               );
+            }}
+            onCancel={() => setDialog(null)}
+          />
+        )}
+        {dialog === "exportAll" && vaultSettings && bibliography && (
+          <ExportAllDialog
+            presets={exportSettings.presets}
+            startWith={defaultPreset(exportSettings).id}
+            categories={liveCategories}
+            load={() => papersToExport(vaultSettings.citations, exportSettings, bibliography)}
+            onExport={(papers, choices, preset) => {
+              setDialog(null);
+              void exportAll(papers, preset ?? { id: "custom", name: "your choice", filter: choices.filter, groupBy: choices.groupBy }, preset !== null);
             }}
             onCancel={() => setDialog(null)}
           />

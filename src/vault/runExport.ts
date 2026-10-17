@@ -89,7 +89,7 @@ export interface ExportOutcome {
 }
 
 /** What Tourmaline last wrote into a paper's section of a note: to tell the user's edits from its own. */
-const stateKey = (workId: string, path: string) => `export.section:${workId}:${path}`;
+export const sectionStateKey = (workId: string, path: string) => `export.section:${workId}:${path}`;
 /** The same, block by block (ExportRecord): the sidebar's status and Export selected. */
 export const recordKey = (workId: string, path: string) => `export.blocks:${workId}:${path}`;
 
@@ -161,15 +161,19 @@ export async function runExport(job: ExportJob): Promise<ExportOutcome> {
     created: note === null,
   });
 
-  const oldHash = await getState(stateKey(job.workId, path));
+  const oldHash = await getState(sectionStateKey(job.workId, path));
   const sectionWasOurs = previous !== null && oldHash === (await sectionHash(previous));
   const remember = async () => {
     const blocks = Object.fromEntries(written.map((a) => [a.blockId, render(a)]));
     const next: ExportRecord = selected
-      ? { exportedAt: record?.exportedAt ?? 0, blocks: { ...known, ...blocks } }
+      ? {
+          exportedAt: record?.exportedAt ?? 0,
+          blocks: { ...known, ...blocks },
+          writtenAt: { ...record?.writtenAt, ...Object.fromEntries(written.map((a) => [a.blockId, Date.now()])) },
+        }
       : { exportedAt: Date.now(), blocks };
     // After Export selected, the section is still the user's edit if it was one.
-    if (!selected || previous === null || sectionWasOurs) await setState(stateKey(job.workId, path), await sectionHash(body));
+    if (!selected || previous === null || sectionWasOurs) await setState(sectionStateKey(job.workId, path), await sectionHash(body));
     await setState(recordKey(job.workId, path), JSON.stringify(next));
   };
 

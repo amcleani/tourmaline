@@ -11,6 +11,7 @@ export interface AppActions {
   exportToVault: () => void;
   exportSelected: () => void;
   previewExport: () => void;
+  exportAllChanged: () => void;
   toggleFocus: () => void;
   focusNext: () => void;
   focusPrevious: () => void;
@@ -603,6 +604,14 @@ export function appCommands(a: AppActions): Command[] {
       menu: { menu: "Export", group: 1, order: 3 },
       when: (ctx) => ctx.hasDocument && ctx.hasCitekey && ctx.hasVault,
       run: a.previewExport,
+    },
+    {
+      id: "export.allChanged",
+      title: "Export all papers with changes…",
+      keywords: ["obsidian", "vault", "every", "batch", "update", "notes", "library", "sync"],
+      menu: { menu: "Export", group: 1, order: 4 },
+      when: (ctx) => ctx.hasVault && ctx.hasBibliography,
+      run: a.exportAllChanged,
     },
     {
       id: "export.settings",

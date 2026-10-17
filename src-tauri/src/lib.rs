@@ -58,6 +58,22 @@ async fn open_document(app: AppHandle, path: PathBuf) -> Result<Response> {
     .await
 }
 
+/// A PDF's bytes without opening it (nothing is recorded, Recent is
+/// unchanged): Export all papers with changes reads page labels and outlines
+/// of papers that aren't open. Refused if the file is no longer the version
+/// `file_id`, whose annotation placements the export would use.
+#[tauri::command]
+async fn read_pdf(app: AppHandle, path: PathBuf, file_id: String) -> Result<Response> {
+    blocking(app, move |_, _| {
+        let file = documents::read(&path)?;
+        if file.sha256 != file_id {
+            return Err(Error::Message(format!("{} has changed since Tourmaline last opened it", file.name)));
+        }
+        Ok(Response::new(file.bytes))
+    })
+    .await
+}
+
 /// Records the start of a file's text (see `Db::set_text_sample`).
 #[tauri::command]
 async fn set_text_sample(app: AppHandle, file_id: String, sample: String) -> Result<()> {
@@ -201,6 +217,22 @@ async fn locate_work(app: AppHandle, work_id: Option<String>, block_id: Option<S
             }
         }
         Ok(None)
+    })
+    .await
+}
+
+/// Papers with a citekey and annotations to export, each with its most
+/// recently opened file that still exists (papers without one are left out).
+#[tauri::command]
+async fn annotated_works(app: AppHandle) -> Result<Vec<DocumentInfo>> {
+    blocking(app, move |_, db| {
+        let mut out = Vec::new();
+        for work in db.annotated_works()? {
+            if let Some(file) = db.work_files(&work)?.into_iter().find(|d| std::path::Path::new(&d.path).exists()) {
+                out.push(file);
+            }
+        }
+        Ok(out)
     })
     .await
 }
@@ -477,6 +509,8 @@ pub fn run() {
             set_text_sample,
             detach_file,
             recent_documents,
+            annotated_works,
+            read_pdf,
             save_position,
             get_state,
             set_state,
