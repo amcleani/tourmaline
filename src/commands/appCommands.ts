@@ -509,7 +509,8 @@ export function appCommands(a: AppActions): Command[] {
       icon: "highlight",
       toolbar: true,
       menu: { menu: "Annotate", group: 1, order: 1 },
-      when: hasSelection,
+      // In focus mode with nothing selected: the current step.
+      when: (ctx) => hasSelection(ctx) || ctx.focusStepMarkable,
       run: a.highlight,
     },
     {
@@ -519,7 +520,7 @@ export function appCommands(a: AppActions): Command[] {
       shortcut: "N",
       icon: "note",
       menu: { menu: "Annotate", group: 1, order: 2 },
-      when: (ctx) => hasSelection(ctx) || annotationSelected(ctx),
+      when: (ctx) => hasSelection(ctx) || annotationSelected(ctx) || ctx.focusStepMarkable,
       run: a.editNote,
     },
     {

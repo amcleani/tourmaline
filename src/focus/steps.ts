@@ -20,7 +20,21 @@ export interface Step {
   text: string;
   /** "figure": the drawing above or below a caption. */
   kind: "text" | "figure";
+  /**
+   * Where its text starts and ends among its first page's text items (end
+   * exclusive), as a selection's are (so it can become a highlight); none
+   * for a figure.
+   */
+  range?: { start: TextPoint; end: TextPoint };
 }
+
+/** A character of a page: its text item and UTF-16 offset in that item's string. */
+export interface TextPoint {
+  item: number;
+  char: number;
+}
+
+const before = (a: TextPoint, b: TextPoint) => a.item < b.item || (a.item === b.item && a.char < b.char);
 
 export interface FocusPage {
   /** 0-based. */
@@ -137,9 +151,16 @@ function lineSteps(pages: readonly FocusPage[], count: number): Step[] {
   const steps: Step[] = [];
   let group: Line[] = [];
   let groupPage = -1;
+  let groupItems: ReadonlyArray<unknown> = [];
   const flush = () => {
     if (group.length) {
-      steps.push({ rects: group.map((l) => rectOf(groupPage, l.bbox)), text: group.map((l) => l.text).join(" "), kind: "text" });
+      const range = rangeOfLines(groupItems, group);
+      steps.push({
+        rects: group.map((l) => rectOf(groupPage, l.bbox)),
+        text: group.map((l) => l.text).join(" "),
+        kind: "text",
+        ...(range ? { range } : {}),
+      });
     }
     group = [];
   };
@@ -154,12 +175,30 @@ function lineSteps(pages: readonly FocusPage[], count: number): Step[] {
       const last = group[group.length - 1];
       if (last && (groupPage !== u.page || newBlock(last, u.line, s))) flush();
       groupPage = u.page;
+      groupItems = p.items;
       group.push(u.line);
       if (group.length === count) flush();
     }
     flush();
   }
   return steps;
+}
+
+/** From the first to the end of the last of the lines' text items (in the page's order). */
+function rangeOfLines(items: ReadonlyArray<unknown>, lines: readonly Line[]): Step["range"] | undefined {
+  let start: TextPoint | null = null;
+  let end: TextPoint | null = null;
+  for (const l of lines) {
+    for (const index of l.items) {
+      const item = items[index];
+      if (!isText(item) || !item.str) continue;
+      const a = { item: index, char: 0 };
+      const b = { item: index, char: item.str.length };
+      if (!start || before(a, start)) start = a;
+      if (!end || before(end, b)) end = b;
+    }
+  }
+  return start && end ? { start, end } : undefined;
 }
 
 // ---- Sentences ------------------------------------------------------------------
@@ -177,6 +216,9 @@ class Stream {
   page: number[] = [];
   x0: number[] = [];
   x1: number[] = [];
+  /** The text item each unit comes from (-1 for a space put in), and its offset in the item's string. */
+  item: number[] = [];
+  char: number[] = [];
 
   get length() {
     return this.line.length;
@@ -189,7 +231,7 @@ class Stream {
     return this.parts[this.parts.length - back];
   }
   /** `line` null: a space put between lines. */
-  push(ch: string, line: Line | null, page = -1, x0 = 0, x1 = 0) {
+  push(ch: string, line: Line | null, page = -1, x0 = 0, x1 = 0, item = -1, char = 0) {
     this.parts.push(ch);
     this.sizes.push(ch.length);
     for (let u = 0; u < ch.length; u++) {
@@ -197,12 +239,14 @@ class Stream {
       this.page.push(page);
       this.x0.push(x0);
       this.x1.push(x1);
+      this.item.push(item);
+      this.char.push(char + u);
     }
   }
   pop() {
     this.parts.pop();
     const n = this.sizes.pop() ?? 0;
-    for (const a of [this.line, this.page, this.x0, this.x1]) a.length -= n;
+    for (const a of [this.line, this.page, this.x0, this.x1, this.item, this.char]) a.length -= n;
   }
   text(): string {
     return this.parts.join("");
@@ -226,10 +270,12 @@ function pushLine(stream: Stream, p: FocusPage, line: Line) {
     if (lastX1 !== null && x - lastX1 > 0.15 * (item.height || 10) && pushed && stream.last() !== " ") {
       stream.push(" ", line, p.page, lastX1, x);
     }
+    let offset = 0;
     for (let i = 0; i < chars.length; i++) {
       const x0 = whole ? line.bbox[0] : x + (width * i) / chars.length;
       const x1 = whole ? line.bbox[2] : x + (width * (i + 1)) / chars.length;
-      stream.push(chars[i], line, p.page, x0, x1);
+      stream.push(chars[i], line, p.page, x0, x1, index, offset);
+      offset += chars[i].length;
       pushed = true;
     }
     lastX1 = x + width;
@@ -320,7 +366,18 @@ function sentenceSteps(pages: readonly FocusPage[]): Step[] {
           rects.push(rect);
         }
       }
-      if (rects.length) steps.push({ rects, text: sentence, kind: "text" });
+      if (!rects.length) continue;
+      // Its text on its first page, from the first to just after the last character there.
+      let first: TextPoint | null = null;
+      let last: TextPoint | null = null;
+      for (let i = from; i < end; i++) {
+        if (stream.item[i] < 0 || stream.page[i] !== rects[0][0]) continue;
+        const at = { item: stream.item[i], char: stream.char[i] };
+        if (!first || before(at, first)) first = at;
+        if (!last || before(last, at)) last = at;
+      }
+      const range = first && last ? { start: first, end: { item: last.item, char: last.char + 1 } } : undefined;
+      steps.push({ rects, text: sentence, kind: "text", ...(range ? { range } : {}) });
     }
     stream = new Stream();
     breaks.clear();
@@ -363,13 +420,21 @@ export function buildSteps(pages: readonly FocusPage[], unit: StepUnit): Step[] 
 /**
  * The step to start from at a point of a page (where the reader's eye is):
  * the first on that page, in reading order, whose top is at or below the
- * point; else the first after the page.
+ * point (a sentence begun on the page before counts: show it with its part
+ * on this page, firstRectOn); else the last on that page, so the page never
+ * changes; only a page with no step at all goes on to the next one.
  */
 export function stepAt(steps: readonly Step[], page: number, y: number): number {
   const i = steps.findIndex((s) => s.rects.some(([p, , , , y1]) => p === page && y1 <= y + 2));
   if (i !== -1) return i;
+  for (let j = steps.length - 1; j >= 0; j--) if (steps[j].rects.some(([p]) => p === page)) return j;
   const after = steps.findIndex((s) => s.rects[0][0] > page);
   return after === -1 ? Math.max(0, steps.length - 1) : after;
+}
+
+/** A step's first rectangle on a page (where to show it when it was chosen on that page), else its first. */
+export function firstRectOn(step: Step, page: number): PageRect {
+  return step.rects.find((r) => r[0] === page) ?? step.rects[0];
 }
 
 /** The step a click on a page lands on, or -1. */

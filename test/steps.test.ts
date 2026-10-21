@@ -1,5 +1,5 @@
 import { detectLines } from "../src/focus/lines";
-import { buildSteps, placeOf, stepAt, stepAtPlace, stepUnder, type FocusPage } from "../src/focus/steps";
+import { buildSteps, firstRectOn, placeOf, stepAt, stepAtPlace, stepUnder, type FocusPage } from "../src/focus/steps";
 import type { TextItemLike } from "../src/pdf/search";
 
 // One item per word, 0.5em per character, as in lines.test.ts.
@@ -98,15 +98,54 @@ describe("figures", () => {
   });
 });
 
+describe("where a step's text is", () => {
+  it("lines: from their first text item to the end of their last", () => {
+    const p = page(0, ["alpha beta", "gamma delta", "epsilon"]);
+    const [two, one] = buildSteps([p], 2);
+    // Items are words: 0 alpha, 1 beta, 2 gamma, 3 delta, 4 epsilon.
+    expect(two.range).toEqual({ start: { item: 0, char: 0 }, end: { item: 3, char: 5 } });
+    expect(one.range).toEqual({ start: { item: 4, char: 0 }, end: { item: 4, char: 7 } });
+  });
+
+  it("sentences: within items, and only on their first page", () => {
+    const pages = [page(0, ["One here. Two goes", "on and"]), page(1, ["ends. Three."])];
+    const [first, second] = buildSteps(pages, "sentence");
+    // Items: 0 "One", 1 "here.", 2 "Two", 3 "goes", 4 "on", 5 "and".
+    expect(first.range).toEqual({ start: { item: 0, char: 0 }, end: { item: 1, char: 5 } });
+    expect(second.range).toEqual({ start: { item: 2, char: 0 }, end: { item: 5, char: 3 } });
+  });
+
+  it("figures have none", () => {
+    const p = page(0, ["text above the figure in a long line", { text: "Figure 1: What it shows.", y: 500 }]);
+    const figure = buildSteps([p], 1)[1];
+    expect(figure.kind).toBe("figure");
+    expect(figure.range).toBeUndefined();
+  });
+});
+
 describe("finding a step", () => {
   const pages = [page(0, ["line one of page one", "line two of page one"]), page(1, ["line one of page two"])];
   const steps = buildSteps(pages, 1);
 
-  it("from where the eye is", () => {
+  it("from where the eye is, never leaving its page", () => {
     expect(stepAt(steps, 0, 800)).toBe(0);
     expect(stepAt(steps, 0, 680)).toBe(1);
-    expect(stepAt(steps, 0, 100)).toBe(2);
+    // Below the page's last line: its last step, not the next page's first.
+    expect(stepAt(steps, 0, 100)).toBe(1);
+    expect(stepAt(steps, 0, -Infinity)).toBe(1);
     expect(stepAt(steps, 1, 100)).toBe(2);
+    // A page with nothing to read goes on to the next.
+    const gap = buildSteps([page(0, ["only line"]), page(1, []), page(2, ["after the gap"])], 1);
+    expect(gap[stepAt(gap, 1, 500)].text).toBe("after the gap");
+  });
+
+  it("shows a sentence begun on the page before with its part on this page", () => {
+    const pages = [page(0, ["Start of a sentence that goes on"]), page(1, ["to the next page. Another."])];
+    const sentences = buildSteps(pages, "sentence");
+    const i = stepAt(sentences, 1, 800);
+    expect(sentences[i].text).toBe("Start of a sentence that goes on to the next page.");
+    expect(firstRectOn(sentences[i], 1)[0]).toBe(1);
+    expect(firstRectOn(sentences[i], 0)[0]).toBe(0);
   });
 
   it("again after more pages are read, even the second sentence on a line", () => {

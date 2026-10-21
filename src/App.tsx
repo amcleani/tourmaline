@@ -60,7 +60,9 @@ import {
   type OpenedDocument,
 } from "./platform";
 import { useVaultMath } from "./math/useVaultMath";
-import { placeOf, stepAt, stepAtPlace, stepUnder, type StepPlace, type StepUnit } from "./focus/steps";
+import { firstRectOn, placeOf, stepAt, stepAtPlace, stepUnder, type Step, type StepPlace, type StepUnit } from "./focus/steps";
+import { getPageText } from "./pdf/textCache";
+import { textAnchor } from "./annotations/selection";
 import { useFocusSteps } from "./focus/useFocusSteps";
 import { useLinkPreview } from "./nav/useLinkPreview";
 import { useReferences, type Spot } from "./nav/useReferences";
@@ -1199,6 +1201,8 @@ export function App() {
   const focusActive = focusOn && activePdf !== null && !versionPending;
   /** Where to start once the steps are (re)built: the reader's eye, or the current step's place. */
   const focusAnchor = useRef<{ page: number; y: number } | null>(null);
+  /** The page a step was chosen on (from the eye line): it is shown by its part on that page, so the page stays. */
+  const chosenOnPage = useRef<number | null>(null);
   const focusSteps = useFocusSteps(
     activePdf,
     focusActive,
@@ -1214,6 +1218,15 @@ export function App() {
   /** When focus mode last scrolled: a step press during its scroll doesn't count as the reader scrolling away. */
   const focusScrolledAt = useRef(0);
   const step = steps && stepIndex !== null ? (steps[stepIndex] ?? null) : null;
+  /**
+   * Makes step `i` of `list` the current one, remembering its place at once:
+   * more pages' steps may come in before it is shown, and they must find
+   * this step again, not the document's first.
+   */
+  const chooseStep = (list: readonly Step[], i: number) => {
+    stepPlace.current = list[i] ? placeOf(list[i]) : null;
+    setStepIndex(i);
+  };
 
   // Nothing carries over between tabs.
   useEffect(() => {
@@ -1228,15 +1241,19 @@ export function App() {
     focusAnchor.current = null;
     const place = stepPlace.current;
     if (!steps.length) setStepIndex(null);
-    else if (anchor) setStepIndex(stepAt(steps, anchor.page, anchor.y));
-    else setStepIndex(place ? stepAtPlace(steps, place) : 0);
+    else if (anchor) {
+      chosenOnPage.current = anchor.page;
+      chooseStep(steps, stepAt(steps, anchor.page, anchor.y));
+    } else chooseStep(steps, place ? stepAtPlace(steps, place) : 0);
   }, [steps]);
 
   // The current step goes to the eye line when it moves (not when more pages come in).
   const scrolledTo = useRef("");
   useEffect(() => {
     if (!step) return;
-    const [page, ...rect] = step.rects[0];
+    const on = chosenOnPage.current;
+    chosenOnPage.current = null;
+    const [page, ...rect] = on === null ? step.rects[0] : firstRectOn(step, on);
     stepPlace.current = placeOf(step);
     const key = `${page}:${rect.join(",")}:${focusSettings.eye}`;
     if (key === scrolledTo.current) return;
@@ -1286,9 +1303,15 @@ export function App() {
       scrolledTo.current = "";
       return;
     }
-    // Start at the line under the eye line.
+    // Start on the current page (the one the toolbar shows), at the line
+    // under the eye line when the eye line is on it: else at its top, or its
+    // end when the eye line is already on the next page.
+    const page = latest.current.status?.page ?? 0;
     const point = await viewerRef.current?.pointAt(latest.current.focusSettings.eye);
-    focusAnchor.current = point ? { page: point.page, y: point.y } : { page: latest.current.status?.page ?? 0, y: Infinity };
+    const y = !point ? Infinity : point.page === page ? point.y : point.page < page ? Infinity : -Infinity;
+    focusAnchor.current = { page, y };
+    // Keys act on the steps now, not on an annotation selected before.
+    setSelectedId(null);
     setFocusOn(true);
   };
 
@@ -1301,10 +1324,68 @@ export function App() {
       const [page, ...rect] = current.rects[0];
       if (!(await viewerRef.current?.isInView(page, rect as PdfRect))) {
         const point = await viewerRef.current?.pointAt(settings.eye);
-        if (point) return setStepIndex(stepAt(list, point.page, point.y));
+        if (point) {
+          chosenOnPage.current = point.page;
+          setSelectedId(null);
+          return chooseStep(list, stepAt(list, point.page, point.y));
+        }
       }
     }
-    setStepIndex(at === null ? 0 : Math.min(Math.max(at + by, 0), list.length - 1));
+    // Keys act on the new step, not on an annotation selected before.
+    setSelectedId(null);
+    chooseStep(list, at === null ? 0 : Math.min(Math.max(at + by, 0), list.length - 1));
+  };
+
+  /** Whether the current step can be marked: text with a known place, or a figure. */
+  const stepMarkable = (s: Step | null): s is Step => !!s && (s.kind === "figure" || !!s.range);
+
+  /** The annotation already marking a step: a highlight of exactly its text, or an area of exactly its figure. */
+  const annotationOfStep = async (s: Step): Promise<Annotation | null> => {
+    const { notes: n, activeTab: tab } = latest.current;
+    const page = s.rects[0][0];
+    if (s.kind === "figure") {
+      const [, ...want] = s.rects[0];
+      return (
+        n.annotations.find((a) => {
+          const r = a.placement?.page === page ? a.placement.geometry.rects[0] : undefined;
+          return a.kind === "area" && !!r && r.slice(1).every((v, i) => Math.abs(v - want[i]) < 1);
+        }) ?? null
+      );
+    }
+    if (!s.range || !tab?.pdf) return null;
+    const { textStart, textEnd } = textAnchor((await getPageText(tab.pdf, page)).text, s.range.start, s.range.end);
+    return (
+      n.annotations.find(
+        (a) => a.kind === "highlight" && a.placement?.page === page && a.placement.textStart === textStart && a.placement.textEnd === textEnd,
+      ) ?? null
+    );
+  };
+
+  /**
+   * Focus mode, nothing selected: H, a category key or N marks the current
+   * step: a highlight of its text (an area capture of a figure). A step
+   * already marked is given the category instead (or its note opened).
+   */
+  const markStep = async (categoryId: string | null, opts: { explicitCategory?: boolean; withNote?: boolean } = {}) => {
+    const s = latest.current.step;
+    if (!latest.current.focusActive || !stepMarkable(s)) return;
+    if (categoryId) setLastCategory(categoryId);
+    const n = latest.current.notes;
+    const existing = await annotationOfStep(s);
+    let target = existing;
+    if (existing) {
+      if (opts.explicitCategory && existing.categoryId !== categoryId) await n.edit(existing, { categoryId });
+      else if (!opts.withNote) setNotice("This step is already highlighted");
+    } else if (s.kind === "figure") {
+      const [page, ...rect] = s.rects[0];
+      target = await n.captureArea(page, rect as PdfRect, categoryId);
+    } else {
+      target = await n.highlight({ rects: s.rects, quote: s.text, startPage: s.rects[0][0], start: s.range!.start, end: s.range!.end }, categoryId);
+    }
+    if (target && opts.withNote) {
+      setSelectedId(target.id);
+      setNoteFocusFor(target.id);
+    }
   };
 
   // ---- Split view ------------------------------------------------------------------
@@ -1424,6 +1505,7 @@ export function App() {
       hasCitekey: !!activeTab?.citekey,
       hasVault: vault !== null && vaultSettings !== null,
       focusMode: focusActive,
+      focusStepMarkable: focusActive && stepMarkable(step),
       canGoBack: !!activeHistory?.back.length,
       canGoForward: !!activeHistory?.forward.length,
       splitOpen: split !== null,
@@ -1438,6 +1520,7 @@ export function App() {
     split,
     historyTick,
     focusActive,
+    step,
     question,
     vault,
     vaultSettings,
@@ -1479,6 +1562,7 @@ export function App() {
     stepIndex,
     step,
     toggleFocus,
+    markStep,
     moveStep,
     saveFocusSettings,
     setColumnsFor,
@@ -1515,6 +1599,7 @@ export function App() {
     stepIndex,
     step,
     toggleFocus,
+    markStep,
     moveStep,
     saveFocusSettings,
     setColumnsFor,
@@ -1618,12 +1703,17 @@ export function App() {
         if (id) setSelectedId(id);
       },
       toggleAnnotations: () => setAnnotationsOpen((open) => !open),
-      highlight: () => void latest.current.highlightSelection(latest.current.currentCategory),
+      highlight: () => {
+        if (registry.context().hasTextSelection) void latest.current.highlightSelection(latest.current.currentCategory);
+        else void latest.current.markStep(latest.current.currentCategory);
+      },
       editNote: () => {
         if (registry.context().hasTextSelection) {
           void latest.current.highlightSelection(latest.current.currentCategory, true);
         } else if (latest.current.selected) {
           setNoteFocusFor(latest.current.selected.id);
+        } else {
+          void latest.current.markStep(latest.current.currentCategory, { withNote: true });
         }
       },
       // Every selected annotation (several in the sidebar), as one step to undo.
@@ -1905,12 +1995,13 @@ export function App() {
         keywords: ["category", "colour", "recolour", c.callout],
         shortcut: c.hotkey ? String(c.hotkey) : undefined,
         menu: { menu: "Annotate", group: 3, order: i },
-        when: (ctx) => ctx.hasDocument && (ctx.hasTextSelection || ctx.annotationSelected),
+        when: (ctx) => ctx.hasDocument && (ctx.hasTextSelection || ctx.annotationSelected || ctx.focusStepMarkable),
         run: (ctx) => {
           setLastCategory(c.id);
-          const { selected: a, notes: n, highlightSelection: highlight } = latest.current;
+          const { selected: a, notes: n, highlightSelection: highlight, markStep: mark } = latest.current;
           if (ctx.hasTextSelection) void highlight(c.id);
           else if (a) void n.edit(a, { categoryId: c.id });
+          else void mark(c.id, { explicitCategory: true });
         },
       }),
     );
@@ -2099,7 +2190,7 @@ export function App() {
                 onPageClick={(page, x, y) => {
                   if (!focusActive || !steps) return;
                   const i = stepUnder(steps, page, x, y);
-                  if (i !== -1) setStepIndex(i);
+                  if (i !== -1) chooseStep(steps, i);
                 }}
               />
             ) : activeTab ? (

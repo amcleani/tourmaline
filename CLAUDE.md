@@ -142,7 +142,16 @@ figures and tables are the empty band beside their caption; lone page
 numbers are skipped. `useFocusSteps` reads pages from where the reader is,
 then the rest, and the steps grow as they come in (lines cached per page and
 column setting); the current step is found again by place (`stepAtPlace`),
-not number. Keep `steps.ts` linear: a 667-page book builds in about 0.3 s. The viewer dims every page
+not number; a step chosen from the eye line (`stepAt`, which never leaves
+the page unless it has no steps) is shown by its part on that page
+(`firstRectOn`), and F starts on the toolbar's current page.
+A step is made current with `chooseStep`, which remembers its place at
+once: more pages' steps can arrive before it is shown, and must find it
+again. `useFocusSteps` shows only steps from the current run (or a finished one):
+turning focus mode off stops a run part-way, and its steps would start
+elsewhere. Each text step has a `range` (start/end text item and offset on
+its first page), so H/1–9/N with nothing selected turn it into a highlight
+(`markStep` in App; a figure step into an area capture). Keep `steps.ts` linear: a 667-page book builds in about 0.3 s. The viewer dims every page
 except the step (`focus` prop, an SVG mask that clicks pass through) and
 `scrollToEye` puts it at the eye line. Up/Down step only when the document
 has focus; a plain-key shortcut whose command can't run keeps its usual

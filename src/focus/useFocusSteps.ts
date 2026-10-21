@@ -28,12 +28,32 @@ export function useFocusSteps(
   startPage: number,
   onError: (what: string, err: unknown) => void,
 ): FocusSteps | null {
-  const [result, setResult] = useState<{ key: unknown[]; value: FocusSteps } | null>(null);
+  const [result, setResult] = useState<{ key: unknown[]; run: object; value: FocusSteps } | null>(null);
   const start = useRef(startPage);
   start.current = startPage;
+  /**
+   * The run whose steps may be shown. Turning focus mode off stops a run
+   * part-way (a long book is rarely finished), so its steps lack pages: a
+   * new run starts from where the reader is now, and until it has steps
+   * there, nothing is shown (the old ones would start somewhere else).
+   */
+  const run = useRef<object | null>(null);
+  const complete = (r: typeof result) => !!r && r.value.pagesDone === r.value.pageCount;
+  const sameKey = (r: typeof result) => !!r && r.key[0] === pdf && r.key[1] === unit && r.key[2] === detectColumns;
+  if (!active) run.current = null;
+  const latestResult = useRef(result);
+  latestResult.current = result;
   useEffect(() => {
     if (!pdf || !active) return;
+    // Every page is already done for these settings: those steps will do.
+    const done = latestResult.current;
+    if (done && sameKey(done) && complete(done)) {
+      run.current = done.run;
+      return;
+    }
     let cancelled = false;
+    const thisRun = {};
+    run.current = thisRun;
     const key = [pdf, unit, detectColumns];
     const total = pdf.numPages;
     const first = Math.min(Math.max(start.current, 0), total - 1);
@@ -42,7 +62,7 @@ export function useFocusSteps(
       const found: FocusPage[] = [];
       const publish = () => {
         const pages = found.slice().sort((a, b) => a.page - b.page);
-        setResult({ key, value: { steps: buildSteps(pages, unit), pagesDone: found.length, pageCount: total } });
+        setResult({ key, run: thisRun, value: { steps: buildSteps(pages, unit), pagesDone: found.length, pageCount: total } });
       };
       for (const index of order) {
         found.push(await getPageLines(pdf, index, detectColumns));
@@ -55,6 +75,6 @@ export function useFocusSteps(
       cancelled = true;
     };
   }, [pdf, active, unit, detectColumns, onError]);
-  const current = result && result.key[0] === pdf && result.key[1] === unit && result.key[2] === detectColumns;
-  return active && current ? result.value : null;
+  const shown = sameKey(result) && (result!.run === run.current || complete(result));
+  return active && shown ? result!.value : null;
 }

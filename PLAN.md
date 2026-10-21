@@ -109,6 +109,18 @@ top, upper third or middle); formulas and figures (the band beside a
 caption) count as one step; page numbers skipped. Up/Down step, a click
 picks a step, scrolling away and pressing Down carries on from the eye line;
 a floating bar has every control; the step is read out to screen readers.
+F always starts on the current page (the one the toolbar shows): at the
+line under the eye line when that is on the page, else its top (or its
+last step when the eye line is already past it).
+
+**Highlighting in focus mode (12)**, decided 2026-10-20: with nothing
+selected, H highlights the current step (its lines or sentence), a category
+key (1–9) highlights it in that category, and N highlights it and opens its
+note; a figure step becomes an area capture. Selected text, then a selected
+annotation, come first, as everywhere; moving the step (or entering focus
+mode) drops the annotation selection so the keys act on the step. A step
+already highlighted isn't highlighted twice: a category key recolours it, N
+opens its note. A sentence across two pages is one highlight on both.
 
 **Importing (4b)**: annotations other programs saved in a PDF become
 Tourmaline's on first open: text markup → highlights with their quote,
@@ -285,6 +297,7 @@ silently dropped).
 | 11a | **Export: what goes in**: filters, presets, grouping, a template per category | Exporting with a preset "Comments" (only annotations with a note, grouped by category) writes just those, under one subheading per category ✅ |
 | 11b | **Export: seeing and choosing**: status in the sidebar, preview of removals, export selected | The sidebar shows which highlights changed since the last export; exporting two selected highlights updates only those in the note ✅ |
 | 11c | **Export all papers with changes** | One command updates the literature notes of every paper whose annotations changed since its last export ✅ |
+| 12 | **Highlight in focus mode** | In focus mode, H (or 1–9, or N) highlights the current line(s) or sentence without selecting text; F never changes the page |
 
 Phases 7 (Ink) and 8 (Equation → LaTeX) were taken out of the plan for now
 (2026-10-07); the other phases keep their numbers. Set aside, in case they

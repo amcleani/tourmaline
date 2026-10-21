@@ -22,6 +22,8 @@ export interface CommandContext {
   selectionSize: number;
   /** Export all papers with changes is running. */
   exportingAll: boolean;
+  /** Focus mode's current step can be highlighted (H, a category key or N with nothing selected). */
+  focusStepMarkable: boolean;
   /** Dragging on a page draws an area to capture. */
   captureMode: boolean;
   canUndo: boolean;
@@ -54,6 +56,7 @@ export const IDLE_CONTEXT: CommandContext = {
   annotationHasLinks: false,
   selectionSize: 0,
   exportingAll: false,
+  focusStepMarkable: false,
   captureMode: false,
   canUndo: false,
   canRedo: false,
