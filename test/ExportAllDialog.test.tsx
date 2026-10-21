@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DEFAULT_PRESET, EVERYTHING } from "../src/vault/export";
 import type { PaperToExport } from "../src/vault/exportAll";
@@ -38,7 +38,8 @@ describe("ExportAllDialog", () => {
     expect(await screen.findByText("2 new, 1 changed")).toBeTruthy();
     expect(screen.getByText("Exported before Tourmaline kept track: changes unknown")).toBeTruthy();
     expect(status()).toBe("1 of 2 papers will be exported, one after another.");
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Export" }));
+    // Focus moves once the list is shown (an effect after the render).
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Export" })));
     await user.click(screen.getByRole("checkbox", { name: /Beta2021/ }));
     expect(status()).toBe("2 of 2 papers will be exported, one after another.");
     await user.click(screen.getByRole("checkbox", { name: /Alpha2020/ }));

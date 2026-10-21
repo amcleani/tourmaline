@@ -27,9 +27,11 @@ export function ExportAllDialog({ presets, startWith, categories, load, onExport
   const initial = presets.find((p) => p.id === startWith) ?? presets[0];
   const [presetId, setPresetId] = useState(initial.id);
   const [choices, setChoices] = useState<Choices>({ filter: initial.filter, groupBy: initial.groupBy });
-  const [papers, setPapers] = useState<PaperToExport[] | null>(null);
+  // The list and what is ticked arrive together, so Export is never shown disabled first.
+  const [loaded, setLoaded] = useState<{ papers: PaperToExport[]; ticked: ReadonlySet<string> } | null>(null);
+  const papers = loaded?.papers ?? null;
+  const ticked = loaded?.ticked ?? new Set<string>();
   const [failed, setFailed] = useState<string | null>(null);
-  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   const exportRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
@@ -40,8 +42,7 @@ export function ExportAllDialog({ presets, startWith, categories, load, onExport
     load()
       .then((list) => {
         if (stale) return;
-        setPapers(list);
-        setTicked(new Set(list.filter((p) => p.changes).map(paperId)));
+        setLoaded({ papers: list, ticked: new Set(list.filter((p) => p.changes).map(paperId)) });
       })
       .catch((e) => !stale && setFailed(String(e?.message ?? e)));
     return () => {
@@ -52,7 +53,7 @@ export function ExportAllDialog({ presets, startWith, categories, load, onExport
   }, []);
   // Once there is something to export, Enter exports it.
   useEffect(() => {
-    if (papers?.length) exportRef.current?.focus();
+    if (papers?.length && exportRef.current && !exportRef.current.disabled) exportRef.current.focus();
   }, [papers]);
 
   const preset = presets.find((p) => p.id === presetId) ?? initial;
@@ -60,11 +61,12 @@ export function ExportAllDialog({ presets, startWith, categories, load, onExport
   const chosen = (papers ?? []).filter((p) => ticked.has(paperId(p)));
   const field = (name: string) => `${id}-${name}`;
   const toggle = (p: PaperToExport) =>
-    setTicked((prev) => {
-      const next = new Set(prev);
+    setLoaded((prev) => {
+      if (!prev) return prev;
+      const next = new Set(prev.ticked);
       if (next.has(paperId(p))) next.delete(paperId(p));
       else next.add(paperId(p));
-      return next;
+      return { ...prev, ticked: next };
     });
 
   const status =
