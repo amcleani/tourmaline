@@ -381,6 +381,15 @@ export async function copyText(text: string): Promise<void> {
   return navigator.clipboard.writeText(text);
 }
 
+/** Opens the file's folder in Explorer with the file selected. */
+export async function showInFolder(path: string): Promise<void> {
+  if (!isTauri()) throw new Error("Only the desktop app can show a file in its folder");
+  // As for our own file commands: only PDFs (the permission itself has no scope).
+  if (!/\.pdf$/i.test(path)) throw new Error("Only PDF files can be shown in their folder");
+  const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+  return revealItemInDir(path);
+}
+
 /** Opens a web or mail link from a PDF in the default browser or mail program. */
 export async function openExternal(url: string): Promise<void> {
   if (!/^(https?:|mailto:)/i.test(url)) throw new Error(`Tourmaline doesn't open ${url.split(":")[0]} links`);

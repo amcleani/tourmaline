@@ -55,6 +55,7 @@ import {
   setState,
   setTextSample,
   setUiScale,
+  showInFolder,
   vaultFileExists,
   type DocumentInfo,
   type OpenedDocument,
@@ -62,7 +63,7 @@ import {
 import { useVaultMath } from "./math/useVaultMath";
 import { firstRectOn, placeOf, stepAt, stepAtPlace, stepUnder, type Step, type StepPlace, type StepUnit } from "./focus/steps";
 import { getPageText } from "./pdf/textCache";
-import { textAnchor } from "./annotations/selection";
+import { focusStart, stepAnnotation, stepMarkable } from "./focus/marking";
 import { useFocusSteps } from "./focus/useFocusSteps";
 import { useLinkPreview } from "./nav/useLinkPreview";
 import { useReferences, type Spot } from "./nav/useReferences";
@@ -189,6 +190,22 @@ function keyboardMenuPoint(viewer: HTMLElement): { x: number; y: number } {
 let tabCounter = 0;
 const newTabKey = () => `tab${++tabCounter}`;
 
+const CONTEXT_MENU_LABELS: Record<ContextMenuKind, string> = { selection: "Selected text", annotation: "Annotation", page: "Page", tab: "Tab" };
+
+/** The command context's fields about the tab that tab commands act on. */
+function tabContext(tabs: readonly Tab[], key: string | null): Pick<CommandContext, "tabsLeft" | "tabsRight" | "tabHasPath"> {
+  const i = tabs.findIndex((t) => t.key === key);
+  if (i === -1) return { tabsLeft: 0, tabsRight: 0, tabHasPath: false };
+  return { tabsLeft: i, tabsRight: tabs.length - 1 - i, tabHasPath: !!tabs[i].path };
+}
+
+/** A closed tab Reopen closed tab can bring back: its file and where it was. */
+interface ClosedTab {
+  path: string;
+  name: string;
+  index: number;
+}
+
 export function App() {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -212,7 +229,19 @@ export function App() {
   const activePdf = activeTab?.status === "ready" ? activeTab.pdf : null;
 
   const ctxRef = useRef<CommandContext>(IDLE_CONTEXT);
-  const registry = useMemo(() => new CommandRegistry(() => ctxRef.current), []);
+  /**
+   * The tab whose right-click menu is open (while its entries are chosen) or
+   * running a command: tab commands act on it, not on the active tab.
+   */
+  const tabMenuTarget = useRef<string | null>(null);
+  const registry = useMemo(
+    () =>
+      new CommandRegistry(() => {
+        const key = tabMenuTarget.current;
+        return key === null ? ctxRef.current : { ...ctxRef.current, ...tabContext(tabsRef.current, key) };
+      }),
+    [],
+  );
 
   const updateTab = useCallback((key: string, patch: Partial<Tab>) => {
     setTabs((prev) => prev.map((t) => (t.key === key ? { ...t, ...patch } : t)));
@@ -308,7 +337,8 @@ export function App() {
   );
 
   const showDocument = useCallback(
-    async (opened: OpenedDocument) => {
+    /** `at`: where a new tab goes (a reopened tab, back where it was); else last. */
+    async (opened: OpenedDocument, at?: number) => {
       const { fileId: id, path } = opened.info;
       const sameContents = tabsRef.current.find((t) => t.fileId === id);
       if (sameContents?.status === "ready") {
@@ -331,8 +361,12 @@ export function App() {
         }
         const key = newTabKey();
         const tab: Tab = { key, ...ready };
-        tabsRef.current = [...tabsRef.current, tab];
-        setTabs((prev) => [...prev, tab]);
+        const insert = (list: Tab[]) => {
+          const i = at === undefined ? list.length : Math.min(at, list.length);
+          return [...list.slice(0, i), tab, ...list.slice(i)];
+        };
+        tabsRef.current = insert(tabsRef.current);
+        setTabs(insert);
         setActiveKey(key);
       }
       setError(null);
@@ -507,25 +541,53 @@ export function App() {
     setState("session", json).catch((e) => console.error("Could not save the session", e));
   }, [tabs, activeKey, outlineOpen, annotationsOpen, sessionLoaded]);
 
-  const closeTab = useCallback(
-    (key: string) => {
+  /** Tabs closed this session, the last closed last (only those with a file on disk). */
+  const closedTabs = useRef<ClosedTab[]>([]);
+  const [closedTabCount, setClosedTabCount] = useState(0);
+  /** The focused tab was closed: focus the selected tab once the tab bar has changed. */
+  const refocusTab = useRef(false);
+  useEffect(() => {
+    if (!refocusTab.current) return;
+    refocusTab.current = false;
+    document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+  }, [tabs, activeKey]);
+
+  const closeTabs = useCallback(
+    (keys: readonly string[]) => {
       const list = tabsRef.current;
-      const index = list.findIndex((t) => t.key === key);
-      if (index === -1) return;
-      const tab = list[index];
-      clearTimeout(saveTimers.current.get(key));
-      saveTimers.current.delete(key);
-      void persistPosition(tab);
-      views.current.delete(key);
-      void tab.pdf?.loadingTask.destroy();
-      const remaining = list.filter((t) => t.key !== key);
+      const closing = new Set(keys);
+      const remaining = list.filter((t) => !closing.has(t.key));
+      if (remaining.length === list.length) return;
+      // Rightmost first, so reopening (last first) brings back the leftmost
+      // first and each index is right when its tab comes back.
+      const reopenable: ClosedTab[] = [];
+      list.forEach((tab, index) => {
+        if (!closing.has(tab.key)) return;
+        clearTimeout(saveTimers.current.get(tab.key));
+        saveTimers.current.delete(tab.key);
+        void persistPosition(tab);
+        views.current.delete(tab.key);
+        void tab.pdf?.loadingTask.destroy();
+        if (tab.path) reopenable.unshift({ path: tab.path, name: tab.name, index });
+      });
+      // A focused tab is going: focus goes to the tab that takes over, not nowhere.
+      const focusedKey = (document.activeElement?.closest<HTMLElement>("[data-tab-key]"))?.dataset.tabKey;
+      if (focusedKey && closing.has(focusedKey)) refocusTab.current = true;
+      closedTabs.current = [...closedTabs.current, ...reopenable].slice(-30);
+      setClosedTabCount(closedTabs.current.length);
+      // Another close in the same tick must see these gone.
+      tabsRef.current = remaining;
       setTabs(remaining);
-      setActiveKey((current) =>
-        current === key ? (remaining[Math.min(index, remaining.length - 1)]?.key ?? null) : current,
-      );
+      // The active tab closed: the first tab left after it, else the last.
+      setActiveKey((current) => {
+        if (current === null || !closing.has(current)) return current;
+        const at = list.findIndex((t) => t.key === current);
+        return (list.slice(at).find((t) => !closing.has(t.key)) ?? remaining[remaining.length - 1])?.key ?? null;
+      });
     },
     [persistPosition],
   );
+  const closeTab = useCallback((key: string) => closeTabs([key]), [closeTabs]);
 
   // ---- Bibliography entries ------------------------------------------------------
 
@@ -1306,10 +1368,8 @@ export function App() {
     // Start on the current page (the one the toolbar shows), at the line
     // under the eye line when the eye line is on it: else at its top, or its
     // end when the eye line is already on the next page.
-    const page = latest.current.status?.page ?? 0;
     const point = await viewerRef.current?.pointAt(latest.current.focusSettings.eye);
-    const y = !point ? Infinity : point.page === page ? point.y : point.page < page ? Infinity : -Infinity;
-    focusAnchor.current = { page, y };
+    focusAnchor.current = focusStart(latest.current.status?.page ?? 0, point);
     // Keys act on the steps now, not on an annotation selected before.
     setSelectedId(null);
     setFocusOn(true);
@@ -1324,10 +1384,12 @@ export function App() {
       const [page, ...rect] = current.rects[0];
       if (!(await viewerRef.current?.isInView(page, rect as PdfRect))) {
         const point = await viewerRef.current?.pointAt(settings.eye);
-        if (point) {
-          chosenOnPage.current = point.page;
+        const there = point ? stepAt(list, point.page, point.y) : null;
+        // (The same step: just move on from it.)
+        if (there !== null && there !== at) {
+          chosenOnPage.current = point!.page;
           setSelectedId(null);
-          return chooseStep(list, stepAt(list, point.page, point.y));
+          return chooseStep(list, there);
         }
       }
     }
@@ -1336,30 +1398,15 @@ export function App() {
     chooseStep(list, at === null ? 0 : Math.min(Math.max(at + by, 0), list.length - 1));
   };
 
-  /** Whether the current step can be marked: text with a known place, or a figure. */
-  const stepMarkable = (s: Step | null): s is Step => !!s && (s.kind === "figure" || !!s.range);
-
-  /** The annotation already marking a step: a highlight of exactly its text, or an area of exactly its figure. */
+  /** The annotation already marking a step (see stepAnnotation). */
   const annotationOfStep = async (s: Step): Promise<Annotation | null> => {
-    const { notes: n, activeTab: tab } = latest.current;
-    const page = s.rects[0][0];
-    if (s.kind === "figure") {
-      const [, ...want] = s.rects[0];
-      return (
-        n.annotations.find((a) => {
-          const r = a.placement?.page === page ? a.placement.geometry.rects[0] : undefined;
-          return a.kind === "area" && !!r && r.slice(1).every((v, i) => Math.abs(v - want[i]) < 1);
-        }) ?? null
-      );
-    }
-    if (!s.range || !tab?.pdf) return null;
-    const { textStart, textEnd } = textAnchor((await getPageText(tab.pdf, page)).text, s.range.start, s.range.end);
-    return (
-      n.annotations.find(
-        (a) => a.kind === "highlight" && a.placement?.page === page && a.placement.textStart === textStart && a.placement.textEnd === textEnd,
-      ) ?? null
-    );
+    const tab = latest.current.activeTab;
+    const text = s.range && tab?.pdf ? (await getPageText(tab.pdf, s.rects[0][0])).text : null;
+    // Read after the wait: the list may have changed meanwhile.
+    return stepAnnotation(s, latest.current.notes.annotations, text);
   };
+  /** A step is being marked: a repeat of the key (or a second press) waits for none and does nothing. */
+  const marking = useRef(false);
 
   /**
    * Focus mode, nothing selected: H, a category key or N marks the current
@@ -1368,7 +1415,15 @@ export function App() {
    */
   const markStep = async (categoryId: string | null, opts: { explicitCategory?: boolean; withNote?: boolean } = {}) => {
     const s = latest.current.step;
-    if (!latest.current.focusActive || !stepMarkable(s)) return;
+    if (!latest.current.focusActive || !stepMarkable(s) || marking.current) return;
+    marking.current = true;
+    try {
+      await markThisStep(s, categoryId, opts);
+    } finally {
+      marking.current = false;
+    }
+  };
+  const markThisStep = async (s: Step, categoryId: string | null, opts: { explicitCategory?: boolean; withNote?: boolean }) => {
     if (categoryId) setLastCategory(categoryId);
     const n = latest.current.notes;
     const existing = await annotationOfStep(s);
@@ -1487,10 +1542,18 @@ export function App() {
 
   // ---- Commands --------------------------------------------------------------
 
+  // Primitives, so the context (and the native menu) updates only when they change.
+  const { tabsLeft, tabsRight, tabHasPath } = tabContext(tabs, activeKey);
+  const focusStepIsMarkable = focusActive && stepMarkable(step);
+
   useEffect(() => {
     ctxRef.current = {
       hasDocument: activePdf !== null,
       tabCount: tabs.length,
+      tabsLeft,
+      tabsRight,
+      tabHasPath,
+      closedTabCount,
       findOpen: findOpen && activePdf !== null,
       modalOpen: dialog !== null || versionPending || question !== null,
       hasTextSelection: selectionEnd !== null,
@@ -1505,7 +1568,7 @@ export function App() {
       hasCitekey: !!activeTab?.citekey,
       hasVault: vault !== null && vaultSettings !== null,
       focusMode: focusActive,
-      focusStepMarkable: focusActive && stepMarkable(step),
+      focusStepMarkable: focusStepIsMarkable,
       canGoBack: !!activeHistory?.back.length,
       canGoForward: !!activeHistory?.forward.length,
       splitOpen: split !== null,
@@ -1515,12 +1578,16 @@ export function App() {
   }, [
     activePdf,
     tabs.length,
+    tabsLeft,
+    tabsRight,
+    tabHasPath,
+    closedTabCount,
     findOpen,
     dialog,
     split,
     historyTick,
     focusActive,
-    step,
+    focusStepIsMarkable,
     question,
     vault,
     vaultSettings,
@@ -1624,6 +1691,30 @@ export function App() {
       const { activeTab: tab, status: s } = latest.current;
       if (tab) updateTab(tab.key, { zoom: make(s?.zoom ?? tab.zoom.zoom) });
     };
+    /** The tab a tab command acts on: the one whose menu it was chosen from, else the active one. */
+    const commandTab = () => {
+      const key = tabMenuTarget.current ?? latest.current.activeTab?.key;
+      return tabsRef.current.find((t) => t.key === key) ?? null;
+    };
+    /** Closes the tabs other than that one, or those to its left or right. */
+    const closeAround = (which: "others" | "left" | "right") => {
+      const tab = commandTab();
+      if (!tab) return;
+      const list = tabsRef.current;
+      const i = list.indexOf(tab);
+      closeTabs(list.filter((_, j) => (which === "others" ? j !== i : which === "left" ? j < i : j > i)).map((t) => t.key));
+    };
+    const moveTab = (by: 1 | -1) => {
+      const tab = commandTab();
+      if (!tab) return;
+      const list = [...tabsRef.current];
+      const i = list.indexOf(tab);
+      const j = i + by;
+      if (j < 0 || j >= list.length) return;
+      [list[i], list[j]] = [list[j], list[i]];
+      tabsRef.current = list;
+      setTabs(list);
+    };
     const cycleTab = (direction: 1 | -1) => {
       const list = tabsRef.current;
       setActiveKey((current) => {
@@ -1656,9 +1747,45 @@ export function App() {
         setDialog("recent");
       },
       closeTab: () => {
-        const tab = latest.current.activeTab;
+        const tab = commandTab();
         if (tab) closeTab(tab.key);
       },
+      closeOtherTabs: () => closeAround("others"),
+      closeTabsToLeft: () => closeAround("left"),
+      closeTabsToRight: () => closeAround("right"),
+      closeAllTabs: () => closeTabs(tabsRef.current.map((t) => t.key)),
+      reopenClosedTab: () => {
+        // Tabs opened again meanwhile don't count.
+        const isOpen = (c: ClosedTab) => tabsRef.current.some((t) => t.path === c.path);
+        while (closedTabs.current.length && isOpen(closedTabs.current[closedTabs.current.length - 1])) closedTabs.current.pop();
+        const closed = closedTabs.current.pop();
+        setClosedTabCount(closedTabs.current.length);
+        if (!closed) return;
+        openPdfAtPath(closed.path)
+          .then((opened) => showDocument(opened, closed.index))
+          .catch((e) => reportError(`Could not open ${closed.name}`, e));
+      },
+      copyTabPath: async () => {
+        const path = commandTab()?.path;
+        if (!path) return;
+        try {
+          await copyText(path);
+          setNotice("Copied the file path");
+        } catch (e) {
+          reportError("Could not copy the file path", e);
+        }
+      },
+      showTabInFolder: async () => {
+        const path = commandTab()?.path;
+        if (!path) return;
+        try {
+          await showInFolder(path);
+        } catch (e) {
+          reportError("Could not show the file in its folder", e);
+        }
+      },
+      moveTabLeft: () => moveTab(-1),
+      moveTabRight: () => moveTab(1),
       quit: quitApp,
       zoomIn: () => setZoom((z) => ({ mode: "custom", zoom: nextZoom(z, 1) })),
       zoomOut: () => setZoom((z) => ({ mode: "custom", zoom: nextZoom(z, -1) })),
@@ -1875,7 +2002,7 @@ export function App() {
       uninstallMenu?.();
       unregister.forEach((u) => u());
     };
-  }, [registry, openFile, closeTab, updateTab, refreshRecent, reportError]);
+  }, [registry, openFile, closeTab, closeTabs, showDocument, updateTab, refreshRecent, reportError]);
 
   // The mouse's back and forward buttons.
   useEffect(() => {
@@ -1898,6 +2025,8 @@ export function App() {
     entries: ContextMenuEntry[];
     /** A menu made for one use (Open linked note): its name and what choosing an entry does. */
     label?: string;
+    /** A tab's menu: which tab. */
+    tabKey?: string;
     onRun?: (entry: Command) => void;
   } | null>(null);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
@@ -1905,13 +2034,38 @@ export function App() {
     const onContextMenu = (e: MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       if (isTypingTarget(target)) return;
+      const fromKeyboard = (e as PointerEvent).pointerType === "" || (e.clientX === 0 && e.clientY === 0);
+      const tabElement = target?.closest<HTMLElement>("[data-tab-key]");
+      if (tabElement) {
+        e.preventDefault();
+        const key = tabElement.dataset.tabKey!;
+        const box = tabElement.getBoundingClientRect();
+        // The menu is about this tab, which needn't be the active one.
+        tabMenuTarget.current = key;
+        const entries = contextMenuEntries(registry, "tab");
+        tabMenuTarget.current = null;
+        setContextMenu({
+          at: fromKeyboard ? { x: box.left, y: box.bottom + 2 } : { x: e.clientX, y: e.clientY },
+          kind: "tab",
+          tabKey: key,
+          entries,
+          onRun: (entry) => {
+            tabMenuTarget.current = key;
+            try {
+              registry.execute(entry.id, "menu");
+            } finally {
+              tabMenuTarget.current = null;
+            }
+          },
+        });
+        return;
+      }
       const viewer = target?.closest<HTMLElement>(".viewer-scroll");
       if (!viewer) {
         if (window.getSelection()?.isCollapsed ?? true) e.preventDefault();
         return;
       }
       e.preventDefault();
-      const fromKeyboard = (e as PointerEvent).pointerType === "" || (e.clientX === 0 && e.clientY === 0);
       // The pane right-clicked gets focus, so commands such as zoom act on it.
       if (!fromKeyboard) viewer.focus({ preventScroll: true });
       const at = fromKeyboard ? keyboardMenuPoint(viewer) : { x: e.clientX, y: e.clientY };
@@ -2114,6 +2268,7 @@ export function App() {
             activeKey={activeKey}
             onActivate={setActiveKey}
             onClose={closeTab}
+            menuOpenFor={contextMenu?.tabKey ?? null}
           />
         </header>
         {error && (
@@ -2141,7 +2296,7 @@ export function App() {
                 registry={registry}
                 entries={contextMenu.entries}
                 at={contextMenu.at}
-                label={contextMenu.label ?? (contextMenu.kind === "selection" ? "Selected text" : contextMenu.kind === "annotation" ? "Annotation" : "Page")}
+                label={contextMenu.label ?? CONTEXT_MENU_LABELS[contextMenu.kind]}
                 onClose={closeContextMenu}
                 onRun={contextMenu.onRun}
               />

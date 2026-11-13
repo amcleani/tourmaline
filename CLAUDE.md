@@ -151,7 +151,10 @@ again. `useFocusSteps` shows only steps from the current run (or a finished one)
 turning focus mode off stops a run part-way, and its steps would start
 elsewhere. Each text step has a `range` (start/end text item and offset on
 its first page), so H/1–9/N with nothing selected turn it into a highlight
-(`markStep` in App; a figure step into an area capture). Keep `steps.ts` linear: a 667-page book builds in about 0.3 s. The viewer dims every page
+(`markStep` in App, one at a time so a held key makes one highlight; a
+figure step into an area capture). `focus/marking.ts` (pure,
+`test/marking.test.ts`) finds the annotation already marking a step and
+where F starts (`focusStart`). Keep `steps.ts` linear: a 667-page book builds in about 0.3 s. The viewer dims every page
 except the step (`focus` prop, an SVG mask that clicks pass through) and
 `scrollToEye` puts it at the eye line. Up/Down step only when the document
 has focus; a plain-key shortcut whose command can't run keeps its usual
@@ -326,9 +329,15 @@ holding focus.
   command's current shortcut with `useShortcut`/`useShortcutHint`
   (`RegistryContext`), never hard-coded key names.
 - *Context menus*: `commands/contextMenus.ts` lists command ids per menu
-  (selection, annotation, page); `ContextMenu.tsx` is the ARIA menu. A
+  (selection, annotation, page, tab); `ContextMenu.tsx` is the ARIA menu. A
   right-click on a page first selects the highlight under it (PageView
-  `onContextMenu`). The webview's own menu is suppressed except in text
+  `onContextMenu`). A tab's menu is about that tab, not necessarily the
+  active one: App sets `tabMenuTarget` while it lists the entries and while
+  a chosen one runs, so the registry's context (`tabsLeft`, `tabsRight`,
+  `tabHasPath`) and the tab commands (`commandTab()`) see that tab.
+  `closeTabs` closes several at once; closed tabs with a path go on a
+  session-only stack for Reopen closed tab, which puts them back where
+  they were (`showDocument(opened, at)`). The webview's own menu is suppressed except in text
   fields and over selected text outside the document.
 - *Appearance*: `app/appearance.ts` sets `data-theme`/`data-pages` on
   `<html>` (themes are CSS token blocks in `app.css`); the interface size is

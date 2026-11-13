@@ -4,6 +4,15 @@ export interface AppActions {
   openFile: () => Promise<void>;
   openRecent: () => void;
   closeTab: () => void;
+  closeOtherTabs: () => void;
+  closeTabsToLeft: () => void;
+  closeTabsToRight: () => void;
+  closeAllTabs: () => void;
+  reopenClosedTab: () => void;
+  copyTabPath: () => Promise<void>;
+  showTabInFolder: () => Promise<void>;
+  moveTabLeft: () => void;
+  moveTabRight: () => void;
   saveIntoPdf: () => void;
   chooseVault: () => Promise<void>;
   linkEntry: () => void;
@@ -103,6 +112,60 @@ export function appCommands(a: AppActions): Command[] {
       // Any tab, including one whose file couldn't be opened.
       when: (ctx) => ctx.tabCount > 0,
       run: a.closeTab,
+    },
+    {
+      id: "file.closeOtherTabs",
+      title: "Close other tabs",
+      keywords: ["document", "all but"],
+      menu: { menu: "File", group: 1, order: 4 },
+      when: severalTabs,
+      run: a.closeOtherTabs,
+    },
+    {
+      id: "file.closeTabsToLeft",
+      title: "Close tabs to the left",
+      keywords: ["document", "before"],
+      when: (ctx) => ctx.tabsLeft > 0,
+      run: a.closeTabsToLeft,
+    },
+    {
+      id: "file.closeTabsToRight",
+      title: "Close tabs to the right",
+      keywords: ["document", "after"],
+      when: (ctx) => ctx.tabsRight > 0,
+      run: a.closeTabsToRight,
+    },
+    {
+      id: "file.closeAllTabs",
+      title: "Close all tabs",
+      keywords: ["document", "everything"],
+      shortcut: "Mod+Shift+W",
+      menu: { menu: "File", group: 1, order: 5 },
+      when: (ctx) => ctx.tabCount > 0,
+      run: a.closeAllTabs,
+    },
+    {
+      id: "file.reopenClosedTab",
+      title: "Reopen closed tab",
+      keywords: ["undo close", "restore", "document"],
+      shortcut: "Mod+Shift+T",
+      menu: { menu: "File", group: 1, order: 6 },
+      when: (ctx) => ctx.closedTabCount > 0,
+      run: a.reopenClosedTab,
+    },
+    {
+      id: "file.copyPath",
+      title: "Copy file path",
+      keywords: ["location", "folder", "clipboard"],
+      when: (ctx) => ctx.tabHasPath,
+      run: a.copyTabPath,
+    },
+    {
+      id: "file.showInFolder",
+      title: "Show in folder",
+      keywords: ["explorer", "reveal", "location", "file"],
+      when: (ctx) => ctx.tabHasPath,
+      run: a.showTabInFolder,
     },
     {
       id: "file.saveIntoPdf",
@@ -476,6 +539,24 @@ export function appCommands(a: AppActions): Command[] {
       menu: { menu: "Navigate", group: 3, order: 2 },
       when: severalTabs,
       run: a.previousTab,
+    },
+    {
+      id: "nav.moveTabLeft",
+      title: "Move tab left",
+      keywords: ["reorder"],
+      shortcut: "Mod+Shift+PageUp",
+      menu: { menu: "Navigate", group: 3, order: 3 },
+      when: (ctx) => ctx.tabsLeft > 0,
+      run: a.moveTabLeft,
+    },
+    {
+      id: "nav.moveTabRight",
+      title: "Move tab right",
+      keywords: ["reorder"],
+      shortcut: "Mod+Shift+PageDown",
+      menu: { menu: "Navigate", group: 3, order: 4 },
+      when: (ctx) => ctx.tabsRight > 0,
+      run: a.moveTabRight,
     },
     {
       id: "nav.back",

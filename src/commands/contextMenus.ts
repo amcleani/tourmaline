@@ -4,11 +4,26 @@ import type { Command, CommandContext, CommandRegistry } from "./registry";
 // registry commands like everything else: which commands, in what order.
 // "-" separates groups; "annot.category.*" stands for every category.
 
-export type ContextMenuKind = "selection" | "annotation" | "page";
+export type ContextMenuKind = "selection" | "annotation" | "page" | "tab";
 
 const MENUS: Record<ContextMenuKind, readonly string[]> = {
   selection: ["annot.highlight", "annot.category.*", "-", "annot.editNote", "edit.copyText"],
   annotation: ["annot.editNote", "annot.category.*", "-", "annot.copyMarkdown", "annot.copyLink", "annot.openLinkedNote", "export.selected", "-", "annot.delete"],
+  tab: [
+    "file.closeTab",
+    "file.closeOtherTabs",
+    "file.closeTabsToLeft",
+    "file.closeTabsToRight",
+    "file.closeAllTabs",
+    "-",
+    "file.reopenClosedTab",
+    "-",
+    "nav.moveTabLeft",
+    "nav.moveTabRight",
+    "-",
+    "file.copyPath",
+    "file.showInFolder",
+  ],
   page: [
     "nav.back",
     "nav.forward",
@@ -28,8 +43,8 @@ const MENUS: Record<ContextMenuKind, readonly string[]> = {
   ],
 };
 
-/** Which menu a right-click opens: about the selected text, else the selected annotation, else the page. */
-export function contextMenuKind(ctx: CommandContext): ContextMenuKind {
+/** Which menu a right-click on the document opens: about the selected text, else the selected annotation, else the page. */
+export function contextMenuKind(ctx: CommandContext): Exclude<ContextMenuKind, "tab"> {
   if (ctx.hasTextSelection) return "selection";
   if (ctx.annotationSelected) return "annotation";
   return "page";

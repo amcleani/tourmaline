@@ -14,11 +14,15 @@ interface Props {
   activeKey: string | null;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
+  /** The tab whose right-click menu is open: no tooltip over the menu. */
+  menuOpenFor?: string | null;
 }
 
 // ARIA tablist: Left/Right/Home/End move between tabs and activate them,
-// Delete closes the focused tab. Middle-click also closes.
-export function TabBar({ tabs, activeKey, onActivate, onClose }: Props) {
+// Delete closes the focused tab. Middle-click also closes. A right-click (or
+// Shift+F10 / the menu key on a tab) opens the tab's menu, which App builds
+// from the registry for the tab marked data-tab-key.
+export function TabBar({ tabs, activeKey, onActivate, onClose, menuOpenFor = null }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const closeHint = useShortcutHint("file.closeTab");
   if (tabs.length === 0) return null;
@@ -47,7 +51,7 @@ export function TabBar({ tabs, activeKey, onActivate, onClose }: Props) {
       {tabs.map((tab, i) => {
         const selected = tab.key === activeKey;
         return (
-          <div key={tab.key} className={selected ? "tab selected" : "tab"}>
+          <div key={tab.key} className={selected ? "tab selected" : "tab"} data-tab-key={tab.key}>
             <button
               type="button"
               role="tab"
@@ -56,7 +60,7 @@ export function TabBar({ tabs, activeKey, onActivate, onClose }: Props) {
               tabIndex={selected ? 0 : -1}
               className="tab-label"
               aria-keyshortcuts="Delete"
-              title={tab.detail ?? tab.title}
+              title={tab.key === menuOpenFor ? undefined : (tab.detail ?? tab.title)}
               onClick={() => onActivate(tab.key)}
               onAuxClick={(e) => e.button === 1 && onClose(tab.key)}
               onKeyDown={(e) => onKeyDown(e, i)}

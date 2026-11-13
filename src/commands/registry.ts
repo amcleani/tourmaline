@@ -10,6 +10,16 @@ export const MENU_ORDER: MenuId[] = ["File", "Edit", "View", "Navigate", "Annota
 export interface CommandContext {
   hasDocument: boolean;
   tabCount: number;
+  /**
+   * Tabs before and after the tab that tab commands act on: the active one,
+   * or the one whose right-click menu is open.
+   */
+  tabsLeft: number;
+  tabsRight: number;
+  /** That tab's file is on disk (it has a path to copy or show). */
+  tabHasPath: boolean;
+  /** Tabs closed this session that Reopen closed tab can bring back. */
+  closedTabCount: number;
   findOpen: boolean;
   /** A modal dialog is open: keyboard shortcuts and the menu don't act behind it. */
   modalOpen: boolean;
@@ -49,6 +59,10 @@ export interface CommandContext {
 export const IDLE_CONTEXT: CommandContext = {
   hasDocument: false,
   tabCount: 0,
+  tabsLeft: 0,
+  tabsRight: 0,
+  tabHasPath: false,
+  closedTabCount: 0,
   findOpen: false,
   modalOpen: false,
   hasTextSelection: false,
