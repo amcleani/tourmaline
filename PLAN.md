@@ -83,7 +83,9 @@ copy BibTeX. Watch the `.bib` for changes.
 
 ## Features
 
-**Reading**: tabs, reading-position memory, split view, outline sidebar (from
+**Reading**: tabs (a right-click menu: close, close others / to the left /
+to the right / all, reopen closed tab, move, copy path, show in folder),
+reading-position memory, split view, outline sidebar (from
 the PDF or inferred from headings), citation popups and figure/equation previews
 (PDF links first, text-pattern fallback), back/forward.
 
@@ -297,7 +299,7 @@ silently dropped).
 | 11a | **Export: what goes in**: filters, presets, grouping, a template per category | Exporting with a preset "Comments" (only annotations with a note, grouped by category) writes just those, under one subheading per category ✅ |
 | 11b | **Export: seeing and choosing**: status in the sidebar, preview of removals, export selected | The sidebar shows which highlights changed since the last export; exporting two selected highlights updates only those in the note ✅ |
 | 11c | **Export all papers with changes** | One command updates the literature notes of every paper whose annotations changed since its last export ✅ |
-| 12 | **Highlight in focus mode** | In focus mode, H (or 1–9, or N) highlights the current line(s) or sentence without selecting text; F never changes the page |
+| 12 | **Highlight in focus mode** | In focus mode, H (or 1–9, or N) highlights the current line(s) or sentence without selecting text; F never changes the page ✅ |
 
 Phases 7 (Ink) and 8 (Equation → LaTeX) were taken out of the plan for now
 (2026-10-07); the other phases keep their numbers. Set aside, in case they
